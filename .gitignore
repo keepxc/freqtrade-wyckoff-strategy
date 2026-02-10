@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Freqtrade
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/plot/
+user_data/data/
+*.sqlite
+*.sqlite-journal
+
+# Docker
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*_backup_*
+temp_*.py
+
+# 保留重要的配置和策略文件
+!user_data/strategies/
+!user_data/config*.json
+!wyckoff/
+!.kiro/
+
+# 但排除备份文件
+*_backup_*/
+wyckoff_backup_*/
