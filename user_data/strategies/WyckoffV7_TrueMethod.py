@@ -318,12 +318,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         # Phase 2.2b: 初始化 SOS Bar 检测器
         try:
             from wyckoff.sos_bar_detector import SOSBarDetector
-            self.sos_bar_detector = SOSBarDetector(
-                atr_multiplier=1.5,
-                volume_multiplier=1.5,
-                close_position_threshold=0.7,
-                resistance_buffer=1.001
-            )
+            self.sos_bar_detector = SOSBarDetector(self)
             logger.info("✅ SOSBarDetector initialized")
         except ImportError as e:
             self.sos_bar_detector = None

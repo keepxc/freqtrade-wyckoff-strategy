@@ -66,6 +66,20 @@ try:
             def classify_test(self, dataframe, test_idx, axis):
                 return None
     
+    # 导入SOS Bar Detector模块
+    try:
+        from .sos_bar_detector import SOSBarDetector
+        SOS_BAR_DETECTOR_AVAILABLE = True
+    except ImportError as e:
+        print(f"SOS Bar Detector导入失败: {e}")
+        SOS_BAR_DETECTOR_AVAILABLE = False
+        # 提供回退定义
+        class SOSBarDetector:
+            def __init__(self, strategy):
+                pass
+            def detect_sos_bars(self, dataframe):
+                return dataframe
+    
     # 版本信息
     __version__ = "1.0.0"
     __author__ = "Wyckoff Trading System"
@@ -142,5 +156,6 @@ __all__ = [
     'WeisWaveQualityFilter',  # Weis Wave过滤器
     'QualityFilterResult',  # 过滤结果
     'DivergenceLevel',  # 背离等级
-    'AxisTestClassifier'  # 轴线测试分类器
+    'AxisTestClassifier',  # 轴线测试分类器
+    'SOSBarDetector'  # SOS Bar 检测器
 ]
