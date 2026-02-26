@@ -315,6 +315,20 @@ class WyckoffV7_TrueMethod(IStrategy):
             self.spring_classifier = None
             logger.warning("⚠️ SpringClassifier not available")
         
+        # Phase 2.2b: 初始化 SOS Bar 检测器
+        try:
+            from wyckoff.sos_bar_detector import SOSBarDetector
+            self.sos_bar_detector = SOSBarDetector(
+                atr_multiplier=1.5,
+                volume_multiplier=1.5,
+                close_position_threshold=0.7,
+                resistance_buffer=1.001
+            )
+            logger.info("✅ SOSBarDetector initialized")
+        except ImportError as e:
+            self.sos_bar_detector = None
+            logger.warning(f"⚠️ SOSBarDetector not available: {e}")
+        
         # Phase 1: Weis Wave Foundation 状态管理
         self.waves_cache: List[WyckoffWave] = []
         self.wave_analysis_cache: Dict = {}
@@ -463,6 +477,24 @@ class WyckoffV7_TrueMethod(IStrategy):
             dataframe['spring_breakout_depth'] = 0.0
             dataframe['spring_volume_ratio'] = 0.0
             dataframe['spring_recovery_speed'] = 0
+        
+        # === Phase 2.2b: SOS Bar 检测重构 ===
+        
+        # 调用新的 SOS Bar 检测器（基于威科夫四大硬指标）
+        if self.sos_bar_detector:
+            try:
+                dataframe = self.sos_bar_detector.detect_sos_bars(dataframe)
+                logger.debug("✅ SOS Bar 检测完成（四大硬指标）")
+            except Exception as e:
+                logger.error(f"❌ SOS Bar 检测失败: {e}", exc_info=True)
+                # 回退到简化版本
+                dataframe = self._identify_sos_bars_simple(dataframe)
+                dataframe['sos_quality_score'] = 0.0
+        else:
+            logger.debug("⚠️ SOSBarDetector not available, using simplified version")
+            # 使用简化版本
+            dataframe = self._identify_sos_bars_simple(dataframe)
+            dataframe['sos_quality_score'] = 0.0
         
         # === 临时兼容层（保持现有功能工作）===
         dataframe = self._compatibility_layer(dataframe)
@@ -1400,8 +1432,10 @@ class WyckoffV7_TrueMethod(IStrategy):
         lps_pullback_entry = self._detect_lps_pullback_entry(dataframe, sos_breakout_detected)
         
         # 3. 优化的SOS入场（提高阈值，减少追高）
+        # Phase 2.2b: 添加 SOS 质量评分过滤
         sos_entry = (
-            dataframe['is_SOS_bar'] &              # SOS Bar确认
+            dataframe['is_SOS_bar'] &              # SOS Bar确认（四大硬指标）
+            (dataframe['sos_quality_score'] > 50) &  # 质量评分 > 50（新增）
             (dataframe['wave_efficiency'] > 0.003) &  # 提高效率阈值（原0.001→0.003）
             bull_market &                          # 牛市背景
             wyckoff_context_ok &                   # 威科夫Context
