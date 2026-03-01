@@ -200,34 +200,48 @@ class SpringClassifier:
     
     def _detect_quick_recovery(self, dataframe: DataFrame, breakout_mask: pd.Series) -> DataFrame:
         """
-        检测快速收回特征（5根K线内）
+        检测快速收回特征（5根K线内）— 无前瞻偏差修复版
         
-        定义：价格在5根K线内收回到支撑位之上
+        修复说明（2026-02-27）:
+        - 原代码: recovery_mask.shift(-i) —— 在"跌破K线"打标，使用了未来 i 根K线的
+          收盘价判断是否会收回，属于前瞻偏差（lookahead bias），实盘中不可能知道
+        - 修复后: breakout_mask.shift(i)  —— 在"收回K线"向后查找过去 i 根内是否有跌破，
+          完全基于历史数据，无前瞻
+        - spring_recovery_speed / spring_breakout_depth / spring_volume_ratio
+          均改为标注在【收回K线】而非跌破K线
+          物理含义：看到价格收回支撑位，才能确认这是一个 Spring（实盘一致）
         
         Args:
             dataframe: DataFrame
             breakout_mask: 跌破事件掩码
             
         Returns:
-            DataFrame: 添加了 spring_recovery_speed 字段
+            DataFrame: 添加了 spring_recovery_speed 字段（标注在收回K线上）
         """
         # 创建收回标记：价格收回到支撑位的99.5%以上
         recovery_mask = (
             dataframe['close'] >= dataframe['nearest_support'] * 0.995
         )
         
-        # 对于每个跌破点，检查未来5根K线
+        # 对于每根当前K线，检查过去 recovery_window 根内是否有跌破
         for i in range(1, self.recovery_window + 1):
-            # 向前查看 i 根K线
-            future_recovery = recovery_mask.shift(-i)
+            # 过去 i 根K线是否有跌破（纯历史信息，无前瞻）
+            past_breakout = breakout_mask.shift(i).fillna(False)
             
-            # 如果在 i 根K线内收回，且尚未记录速度，则记录
+            # 当前K线收回 + i根前有跌破 + 尚未记录收回速度（取最早/最近一次跌破）
             quick_recovery = (
-                breakout_mask & 
-                future_recovery & 
+                past_breakout &
+                recovery_mask &
                 (dataframe['spring_recovery_speed'] == 0)
             )
             dataframe.loc[quick_recovery, 'spring_recovery_speed'] = i
+            
+            # 将跌破K线的深度/量能数据传播到当前收回K线
+            # shift(i) 是向后查看 i 根历史数据，不涉及未来
+            depth_to_copy  = dataframe['spring_breakout_depth'].shift(i)
+            volume_to_copy = dataframe['spring_volume_ratio'].shift(i)
+            dataframe.loc[quick_recovery, 'spring_breakout_depth'] = depth_to_copy.loc[quick_recovery]
+            dataframe.loc[quick_recovery, 'spring_volume_ratio']   = volume_to_copy.loc[quick_recovery]
         
         return dataframe
     

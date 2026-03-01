@@ -44,15 +44,19 @@ class SOSBarDetector:
         self.volume_multiplier = 1.5         # 高成交量：1.5x SMA
         self.close_position_threshold = 0.7  # 高收盘：收在上30%
         
-        # 质量评分权重
-        self.weight_spread = 0.25
-        self.weight_volume = 0.25
-        self.weight_close_position = 0.25
-        self.weight_price_commitment = 0.25
+        # 质量评分权重（优化后）
+        # 价格承诺和价差是最关键的指标，提高权重
+        # 收盘位置虽然重要，但相对次要，降低权重
+        self.weight_spread = 0.30               # 价差得分权重（+5%）
+        self.weight_volume = 0.25               # 成交量得分权重（不变）
+        self.weight_close_position = 0.15       # 收盘位置得分权重（-10%）
+        self.weight_price_commitment = 0.30     # 价格承诺得分权重（+5%）
         
         logger.info(f"SOSBarDetector 初始化完成 (四大硬指标: spread={self.bar_range_multiplier}x, "
                    f"volume={self.volume_multiplier}x, close_pos={self.close_position_threshold}, "
                    f"price_commitment=突破阻力)")
+        logger.info(f"质量评分权重: spread={self.weight_spread:.0%}, volume={self.weight_volume:.0%}, "
+                   f"close_pos={self.weight_close_position:.0%}, commitment={self.weight_price_commitment:.0%}")
     
     def detect_sos_bars(self, dataframe: DataFrame) -> DataFrame:
         """
