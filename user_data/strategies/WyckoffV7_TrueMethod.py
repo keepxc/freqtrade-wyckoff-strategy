@@ -2085,11 +2085,17 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 路径2：Phase E EMA 放宽路径（Task 2.5）
         # 路径3：强/中轴线 + 意图干净 + 无物理重置 → 完全旁路 EMA（Task 2.14）
         # 路径4：Daily markup + 无 ChoCh → 旁路 1H EMA 约束（Task 4.1c）
+        # 路径5：Spring 区间（spring_detected 或 spring_quality != 'none'）→ 旁路所有 EMA/意图限制
+        _spring_zone_ok = (
+            dataframe.get('spring_detected', pd.Series(False, index=dataframe.index)) |
+            (dataframe.get('spring_quality', pd.Series('none', index=dataframe.index)) != 'none')
+        )
         dataframe['axis_trading_allowed'] = (
             (not_distribution & trend_support) |
             (in_phase_e & not_distribution & phase_e_trend_ok & no_physical_reset) |
             (axis_strong_or_medium & composite_intent_ok_axis & not_distribution & no_physical_reset) |
-            (macro_markup_ok & not_distribution & no_physical_reset)                   # 路径4
+            (macro_markup_ok & not_distribution & no_physical_reset) |                  # 路径4
+            (_spring_zone_ok & not_distribution)                                        # 路径5
         )
         # Spring #3 专用交易许可（最宽松）
         # 理论：Spring #3 代表供应完全枯竭，是最高质量信号
@@ -2277,7 +2283,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 成交量萎缩确认（No Supply）
         # 威科夫基础条件
         # 从 0.95 放宽到 0.90
-        spring_2_entry = (dataframe['spring_quality'] == 'spring_2') & (dataframe['spring_recovery_speed'] <= 5) & (dataframe['axis_test_type'] == 'normal') & (dataframe['test_confidence'] > 0.4) & (dataframe['volume'] < dataframe['volume_sma_20'] * 0.9) & (dataframe['wyckoff_context'] != 'distribution') & (dataframe['close'] > dataframe['ema_200'] * 0.9)
+        spring_2_entry = (dataframe['spring_quality'] == 'spring_2') & (dataframe['spring_recovery_speed'] <= 5) & (dataframe['axis_test_type'] == 'normal') & (dataframe['test_confidence'] > 0.4) & (dataframe['volume'] < dataframe['volume_sma_20'] * 0.9) & (dataframe['wyckoff_context'] != 'distribution') & (dataframe['close'] > dataframe['ema_200'] * 0.85)
         # Spring #1 - 低质量（深度跌破 + 极高量）
         # 理论：Spring #1 风险最高，需要放量回升 + 二次测试双重确认
         # Spring #1 核心条件
@@ -2289,7 +2295,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 更高置信度
         # 威科夫基础条件（最严格）
         # 必须在EMA200之上
-        spring_1_entry = (dataframe['spring_quality'] == 'spring_1') & (dataframe['spring_recovery_speed'] <= 5) & (dataframe['volume'] > dataframe['volume_sma_20'] * 1.2) & (dataframe['close'] > dataframe['open']) & (dataframe['axis_test_type'] == 'normal') & (dataframe['test_confidence'] > 0.5) & (dataframe['wyckoff_context'] != 'distribution') & (dataframe['close'] > dataframe['ema_200'])
+        spring_1_entry = (dataframe['spring_quality'] == 'spring_1') & (dataframe['spring_recovery_speed'] <= 5) & (dataframe['volume'] > dataframe['volume_sma_20'] * 1.2) & (dataframe['close'] > dataframe['open']) & (dataframe['axis_test_type'] == 'normal') & (dataframe['test_confidence'] > 0.5) & (dataframe['wyckoff_context'] != 'distribution') & (dataframe['close'] > dataframe['ema_200'] * 0.85)
         # === Task 3.1: Spring Test + 显著K线确认入场信号 ===
         # 物理依据：Spring（Phase C 终端震仓）→ 缩量回踩（Test）→ 显著K线（Phase D 开始）
         # 显著多头K线在 Spring 后 10 根内出现 → 机构开始主动推升，积累完成标志
@@ -2350,6 +2356,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         composite_intent_vals = dataframe.get('composite_intent',
                                               pd.Series('unclear', index=dataframe.index))
         composite_intent_ok = ~composite_intent_vals.isin(['distributing', 'trending_down'])
+        # Spring 信号豁免：Spring 区间内不受 composite_intent 分发/下跌屏蔽
+        _spring_intent_exempt = (
+            dataframe.get('spring_detected', pd.Series(False, index=dataframe.index)) |
+            (dataframe.get('spring_quality', pd.Series('none', index=dataframe.index)) != 'none')
+        )
+        composite_intent_ok = composite_intent_ok | _spring_intent_exempt
         min_rr = float(self.pnf_min_rr.value)
         rr_long_ok = dataframe.get('rr_long_standard', pd.Series(0.0, index=dataframe.index)) >= min_rr
 

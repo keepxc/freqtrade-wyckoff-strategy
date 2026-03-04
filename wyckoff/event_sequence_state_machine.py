@@ -707,12 +707,14 @@ class EventSequenceStateMachine:
 
         seq_sow     = np.zeros(n, dtype=bool)
         last_bc_idx = -_MAX_BARS
+        bc_ever_seen = False
 
         for i in range(n):
             if bc_mask[i]:
                 last_bc_idx = i
+                bc_ever_seen = True
             bars_since_bc_i = i - last_bc_idx
-            if sow_raw[i] and bars_since_bc_i >= _SOW_AFTER_BC_MIN:
+            if sow_raw[i] and bc_ever_seen and bars_since_bc_i >= _SOW_AFTER_BC_MIN:
                 seq_sow[i] = True
 
         dataframe['seq_sow_confirmed'] = seq_sow.astype(bool)
@@ -780,7 +782,7 @@ class EventSequenceStateMachine:
             if sow_mask[i]:
                 sow_seen = True
 
-            if sow_seen:
+            if sow_seen and dist_a_done:
                 dist_in_d[i] = True
 
         dataframe['dist_phase_a_complete'] = dist_phase_a.astype(bool)
