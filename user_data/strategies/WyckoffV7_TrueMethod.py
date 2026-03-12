@@ -398,6 +398,20 @@ class WyckoffV7_TrueMethod(IStrategy):
     daily_tr_core_band_offset = float(os.getenv('WY_P1_DAILY_TR_CORE_BAND_OFFSET', '0.25'))
     daily_tr_fakeout_window = int(os.getenv('WY_P1_DAILY_TR_FAKEOUT_WINDOW', '3'))
     daily_tr_break_buffer = float(os.getenv('WY_P1_DAILY_TR_BREAK_BUFFER', '1.02'))
+    # P2: Composite Man RS 对照基准（默认 BTC 永续）
+    # P2 baseline（2026-03-13 固化）: ETH/USDT:USDT 基准，soft_defense=1，RR_extra=0.40
+    rs_benchmark_pair = os.getenv('WY_RS_BENCHMARK_PAIR', 'ETH/USDT:USDT')
+    cm_rs_weight = float(os.getenv('WY_CM_RS_WEIGHT', '0.176'))
+    # P2-followup: 熊市软防守（仅降权，不做全局硬阻断）
+    # 触发条件：bear_market_mode=True 且 RS_available=True 且 rs_signal='falling'
+    # 动作：动态提高多头 RR 门槛，优先过滤低赔率抄底单
+    use_rs_bear_soft_defense = os.getenv('WY_RS_BEAR_SOFT_DEFENSE', '1').lower() not in ('0', 'false', 'off')
+    rs_bear_rr_extra = float(os.getenv('WY_RS_BEAR_RR_EXTRA', '0.40'))
+    rs_bear_soft_block_weak = os.getenv('WY_RS_BEAR_SOFT_BLOCK_WEAK', '1').lower() not in ('0', 'false', 'off')
+    # P2-fix-A: sos_reverse_short 质量闸门（熊市+RS走弱时，SOS Bar 需达到质量门槛才平空）
+    rs_bear_sos_quality_gate: float = float(os.getenv('WY_RS_BEAR_SOS_QUALITY_GATE', '70'))
+    # P2-fix-B: daily_choch+bear_mode 无条件收紧多头止损至 -6% 入场源（无 RS 依赖，2026-03-13）
+    use_rs_bear_choch_tight_sl = os.getenv('WY_RS_BEAR_CHOCH_TIGHT_SL', '1').lower() not in ('0', 'false', 'off')
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
@@ -628,6 +642,10 @@ class WyckoffV7_TrueMethod(IStrategy):
         informative_pairs = [(pair, '4h') for pair in pairs]
         # Task 4.1a: 新增 Daily OHLCV（macro_phase / daily_choch_confirmed 计算用）
         informative_pairs += [(pair, '1d') for pair in pairs]
+        # P2: RS 对照基准（1H）
+        # 若基准不在白名单，仍强制拉取用于 relative strength 计算。
+        if self.rs_benchmark_pair:
+            informative_pairs.append((self.rs_benchmark_pair, self.timeframe))
         return informative_pairs
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -798,23 +816,53 @@ class WyckoffV7_TrueMethod(IStrategy):
             dataframe['post_climax_bars'] = 999
             dataframe['in_post_climax_window'] = False
 
+        # === P2: Composite Man RS 基准数据对齐（1H）===
+        # 输出字段：rs_benchmark_close（供 CompositeManIntentDetector 计算 RS）
+        # 规则：对照数据缺失时不抛错，探测器自动降级为 4 维权重。
+        try:
+            if self.dp and self.rs_benchmark_pair:
+                _bench_pair = self.rs_benchmark_pair
+                # 若当前交易对与基准相同（如 BTC 对 BTC），RS 会退化为自比较。
+                # 自动降级到 ETH 作为次级基准，保持单币回测下 RS 有意义。
+                if metadata.get('pair', '') == _bench_pair:
+                    _bench_pair = 'ETH/USDT:USDT'
+                _bench_df = self.dp.get_pair_dataframe(pair=_bench_pair, timeframe=self.timeframe)
+                if _bench_df is not None and len(_bench_df) > 0:
+                    _bench = _bench_df[['date', 'close']].copy().rename(columns={'close': 'rs_benchmark_close'})
+                    _left = dataframe.sort_values('date').copy()
+                    _right = _bench.sort_values('date').copy()
+                    _merged = pd.merge_asof(_left, _right, on='date', direction='backward')
+                    _merged.index = _left.index
+                    dataframe = _merged.sort_index()
+                else:
+                    dataframe['rs_benchmark_close'] = np.nan
+            else:
+                dataframe['rs_benchmark_close'] = np.nan
+        except Exception as e:
+            logger.error(f'❌ P2 RS 基准数据对齐失败: {e}', exc_info=True)
+            dataframe['rs_benchmark_close'] = np.nan
+
         # === Task 2.8: Composite Man 意图识别 ===
         # 五维度加权融合（成交量结构 + 价格行为 + 波段结构 + 事件序列 + RS）
-        # 输出：composite_intent / intent_confidence / rs_signal
+        # 输出：composite_intent / intent_confidence / rs_signal / RS_available
         if self.composite_man_detector:
             try:
-                dataframe = self.composite_man_detector.detect(dataframe)
+                dataframe = self.composite_man_detector.detect(dataframe, metadata)
                 logger.debug('✅ CompositeMan 意图检测完成')
             except Exception as e:
                 logger.error(f'❌ CompositeMan 检测失败: {e}', exc_info=True)
                 dataframe['composite_intent']    = 'unclear'
                 dataframe['intent_confidence']   = 0.5
                 dataframe['rs_signal']           = 'neutral'
+                dataframe['RS_available']        = False
+                dataframe['rs_score']            = 0.0
                 dataframe['composite_score_raw'] = 0.0
         else:
             dataframe['composite_intent']    = 'unclear'
             dataframe['intent_confidence']   = 0.5
             dataframe['rs_signal']           = 'neutral'
+            dataframe['RS_available']        = False
+            dataframe['rs_score']            = 0.0
             dataframe['composite_score_raw'] = 0.0
 
         # === Task 2.9: No Supply / No Demand 微结构检测 ===
@@ -2533,7 +2581,26 @@ class WyckoffV7_TrueMethod(IStrategy):
         )
         composite_intent_ok = composite_intent_ok | _spring_intent_exempt
         min_rr = float(self.pnf_min_rr.value)
-        rr_long_ok = dataframe.get('rr_long_standard', pd.Series(0.0, index=dataframe.index)) >= min_rr
+
+        # P2-followup: RS 熊市软防守（A/B 实验版）
+        # 不是全局硬阻断：仅在熊市+RS走弱时，提升 RR 门槛筛掉低赔率多头信号。
+        _rs_available = dataframe.get('RS_available', pd.Series(False, index=dataframe.index)).astype(bool)
+        _rs_signal = dataframe.get('rs_signal', pd.Series('neutral', index=dataframe.index))
+        _bear_mode_tmp = dataframe.get('bear_market_mode', pd.Series(False, index=dataframe.index)).astype(bool)
+        _rs_bear_risk = _bear_mode_tmp & _rs_available & (_rs_signal == 'falling')
+
+        if self.use_rs_bear_soft_defense:
+            _rr_extra = max(0.0, float(self.rs_bear_rr_extra))
+            _rr_dynamic_threshold = pd.Series(min_rr, index=dataframe.index)
+            _rr_dynamic_threshold.loc[_rs_bear_risk] = min_rr + _rr_extra
+            rr_long_ok = dataframe.get('rr_long_standard', pd.Series(0.0, index=dataframe.index)) >= _rr_dynamic_threshold
+            if _rs_bear_risk.any():
+                logger.info(
+                    f'P2 RS软防守: 风险K线={int(_rs_bear_risk.sum())}, '
+                    f'RR阈值 {min_rr:.2f}->{min_rr + _rr_extra:.2f}'
+                )
+        else:
+            rr_long_ok = dataframe.get('rr_long_standard', pd.Series(0.0, index=dataframe.index)) >= min_rr
 
         # Task 3.5: bear_market_mode — 4H htf_market_env 持续 5 天 markdown 时禁止开多
         # 使用 populate_indicators 中计算的 bear_market_mode 字段（含持续性过滤）
@@ -2580,6 +2647,20 @@ class WyckoffV7_TrueMethod(IStrategy):
             & ~bear_market_block_long        # Task 3.5: 熊市 markdown 禁止开多
             & ~daily_gate_hard_block         # P1: daily gate hard 模式阻断
         )
+
+        # P2-followup: RS 熊市软门控（非全局硬阻断）
+        # 仅在 bear+RS走弱 时抑制低质量多头桶，保留高质量信号（SOS/wave_start/phase_d_hq/spring_3）
+        if self.use_rs_bear_soft_defense and self.rs_bear_soft_block_weak:
+            _weak_long_bucket = axis_support_entry | spring_recovery_entry | spring_2_entry | spring_1_entry
+            _soft_block_mask = _rs_bear_risk & _weak_long_bucket
+            if _soft_block_mask.any():
+                before_cnt = int(final_entry.sum())
+                final_entry = final_entry & (~_soft_block_mask)
+                after_cnt = int(final_entry.sum())
+                logger.info(
+                    f'P2 RS软门控: 风险区低质量多头抑制 {before_cnt - after_cnt} 笔 '
+                    f'(风险K线={int(_rs_bear_risk.sum())})'
+                )
         dataframe.loc[final_entry, 'enter_long'] = 1
         # 入场标签（优先级从低到高）
         dataframe.loc[sos_entry & final_entry, 'enter_tag'] = 'wyckoff_sos'
@@ -2877,11 +2958,15 @@ class WyckoffV7_TrueMethod(IStrategy):
         # ── Composite Man 意图过滤（做空背景一致性）────────────────────────────
         # 允许：distributing / trending_down（机构明确派发）
         # 阻止：accumulating / trending_up（做多背景，不应做空）
-        # unclear / testing：宽松允许（不阻止做空）
+        # Fix A（无条件质量闸门）: 同时阻止 'testing'（微正、轻吸筹），避免 RS 5D 评分
+        #   在牛市中将 'accumulating' 拉降为 'testing' 后意外触发做空。
+        #   'testing' 代表"轻微需求测试"，做空背景不明确，过滤掉不确定信号。
+        #   unclear / distributing / trending_down 仍允许做空。
+        #   此改动不依赖 RS 数据，是纯结构性防护。
         composite_intent_vals = dataframe.get(
             'composite_intent', pd.Series('unclear', index=dataframe.index)
         )
-        short_intent_ok = ~composite_intent_vals.isin(['accumulating', 'trending_up'])
+        short_intent_ok = ~composite_intent_vals.isin(['accumulating', 'trending_up', 'testing'])
         rr_short_ok = dataframe.get('rr_short_standard', pd.Series(0.0, index=dataframe.index)) >= min_rr
 
         # ── 最终做空入场 ─────────────────────────────────────────────────────────
@@ -3097,8 +3182,28 @@ class WyckoffV7_TrueMethod(IStrategy):
 
         # 空头止盈：SOS Bar 出现时平空（在 populate_exit_trend，custom_exit 无法可靠读取）
         # Task 2.10: sos_reverse_short — SOS 是强力多头信号，空头必须平仓
-        # 注：此处只设置 exit_short，不影响多头；移至 custom_exit 会导致执行时序延迟，止损变大
-        sos_flat_short = dataframe.get('sos_bar_detected', pd.Series(False, index=dataframe.index))
+        # P2-fix-A: 熊市+RS走弱时，SOS Bar 可能只是临时反弹（可靠性下降）
+        #   - 条件：daily_choch_confirmed=True AND rs_signal='falling'
+        #   - 此时要求 sos_quality_score >= rs_bear_sos_quality_gate（默认70）才允许平空
+        #   - 非熊市/RS非走弱：维持原逻辑（任意 SOS Bar 都平空）
+        _sos_choch = dataframe.get('daily_choch_confirmed', pd.Series(False, index=dataframe.index))
+        _sos_rs_sig = dataframe.get('rs_signal', pd.Series('neutral', index=dataframe.index))
+        _sos_quality = dataframe.get('sos_quality_score', pd.Series(0.0, index=dataframe.index))
+        _sos_weak_bear = _sos_choch & (_sos_rs_sig == 'falling')
+        _sos_quality_pass = _sos_quality >= float(self.rs_bear_sos_quality_gate)
+        sos_flat_short = (
+            dataframe.get('sos_bar_detected', pd.Series(False, index=dataframe.index)) &
+            (~_sos_weak_bear | _sos_quality_pass)  # 非熊走弱 OR 高质量SOS，才平空
+        )
+        _sos_suppressed = (
+            dataframe.get('sos_bar_detected', pd.Series(False, index=dataframe.index)) &
+            _sos_weak_bear & ~_sos_quality_pass
+        ).sum()
+        if _sos_suppressed > 0:
+            logger.info(
+                f'P2-fix-A sos_reverse_short 质量闸门: 抑制低质量SOS平空 {_sos_suppressed} 根 '
+                f'(质量阈值={self.rs_bear_sos_quality_gate:.0f})'
+            )
         dataframe.loc[sos_flat_short, 'exit_short'] = 1
         dataframe.loc[sos_flat_short & (dataframe['exit_tag'] == ''), 'exit_tag'] = 'sos_reverse_short'
 
@@ -4298,6 +4403,19 @@ class WyckoffV7_TrueMethod(IStrategy):
                         is_short=False, leverage=trade.leverage
                     )
                     return max(sl, -0.99)
+                # P2-fix-B: choch+bear_mode 无条件收紧多头止损至 -6% 入场源
+                # 触发条件：daily_choch_confirmed + bear_market_mode（无 RS 依赖）
+                # 原因：2021-04-07 月崩跌时 BTC 跌幅 < ETH → rs_signal='rising' →
+                # 依赖 RS='falling' 的老版本在整个 2021-2022 段从不触发
+                # 效果：Spring 失败入场从 -12% 止损收紧至 -6%，绝对亏损减半
+                if self.use_rs_bear_choch_tight_sl:
+                    daily_choch = bool(last_row.get('daily_choch_confirmed', False))
+                    if daily_choch and bear_mode:
+                        sl = stoploss_from_open(
+                            self.bear_market_stoploss, current_profit,
+                            is_short=False, leverage=trade.leverage
+                        )
+                        return max(sl, -0.99)
         # 默认：维持固定入场源止损（等同于原始 stoploss=-0.12 行为，防止 custom_stoploss 产生追踪效应）
         # 重要：直接返回 self.stoploss 会导致每根 K 线追踪—需用 stoploss_from_open 锁定固定止损水位
         return stoploss_from_open(

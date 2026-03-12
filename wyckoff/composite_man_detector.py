@@ -84,21 +84,29 @@ class CompositeManIntentDetector:
         self.trend_down_threshold = -0.42   # trending_down 阈值
 
         # === 维度权重 ===
-        # RS 维度权重为 0（待 informative_pairs 后启用）
-        # 其余四维度重新归一化（原权重 25/20/25/15 → 合计 85%，归一化后如下）
-        self.weights = {
-            'volume':  0.294,   # 原 25% / 0.85
-            'price':   0.235,   # 原 20% / 0.85
-            'wave':    0.294,   # 原 25% / 0.85
-            'event':   0.177,   # 原 15% / 0.85
-            'rs':      0.000,   # 原 15%，暂时禁用（合计 = 1.0）
+        # 五维基础权重（RS 可用时直接使用）
+        # 默认 RS=17.6%，其余四维按当前线上版本相对比例（29.4/23.5/29.4/17.7）缩放到 82.4%。
+        self.rs_weight = float(getattr(strategy, 'cm_rs_weight', 0.176)) if strategy else 0.176
+        self.rs_weight = float(np.clip(self.rs_weight, 0.0, 0.40))
+        non_rs_scale = 1.0 - self.rs_weight
+        self.base_weights = {
+            'volume': 0.294 * non_rs_scale,
+            'price': 0.235 * non_rs_scale,
+            'wave': 0.294 * non_rs_scale,
+            'event': 0.177 * non_rs_scale,
+            'rs': self.rs_weight,
         }
+
+        # RS 参数
+        self.rs_return_window = 20
+        self.rs_corr_window = 48
+        self.rs_slope_window = 8
 
     # =========================================================================
     # 公开接口
     # =========================================================================
 
-    def detect(self, dataframe: DataFrame) -> DataFrame:
+    def detect(self, dataframe: DataFrame, metadata: dict = None) -> DataFrame:
         """
         主检测入口：计算所有意图相关输出字段。
 
@@ -115,16 +123,28 @@ class CompositeManIntentDetector:
             wave_score   = self._analyze_wave_structure(dataframe)
             event_score  = self._analyze_event_sequence(dataframe)
 
-            # RS 维度：当前固定为 neutral（权重 = 0）
-            rs_signal = pd.Series('neutral', index=dataframe.index, dtype=str)
+            # RS 维度：有基准数据时启用，否则自动降级
+            rs_score, rs_signal, rs_available = self._analyze_relative_strength(dataframe)
+
+            # 根据 RS 可用性选择权重
+            weights = self._get_active_weights(rs_available)
 
             # 加权合并
-            composite_score = self._combine_scores(volume_score, price_score, wave_score, event_score)
+            composite_score = self._combine_scores(
+                volume_score,
+                price_score,
+                wave_score,
+                event_score,
+                rs_score,
+                weights,
+            )
 
             # 映射为意图标签
             dataframe['composite_intent']    = self._score_to_intent(composite_score, dataframe)
             dataframe['intent_confidence']   = self._calc_confidence(composite_score)
             dataframe['rs_signal']           = rs_signal
+            dataframe['RS_available']        = rs_available
+            dataframe['rs_score']            = rs_score.round(4)
             dataframe['composite_score_raw'] = composite_score.round(4)
 
             # 调试统计
@@ -136,6 +156,8 @@ class CompositeManIntentDetector:
             dataframe['composite_intent']    = 'unclear'
             dataframe['intent_confidence']   = 0.5
             dataframe['rs_signal']           = 'neutral'
+            dataframe['RS_available']        = False
+            dataframe['rs_score']            = 0.0
             dataframe['composite_score_raw'] = 0.0
 
         return dataframe
@@ -331,6 +353,68 @@ class CompositeManIntentDetector:
         return score
 
     # =========================================================================
+    # 维度 5：相对强度（RS）分析
+    # =========================================================================
+
+    def _analyze_relative_strength(self, dataframe: DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
+        """
+        RS 分析（权重 15%，可降级）
+
+        需要字段：
+            - close（本交易对）
+            - rs_benchmark_close（基准，默认 BTC/USDT:USDT）
+
+        输出：
+            rs_score:      [-1, +1]
+            rs_signal:     'rising' / 'falling' / 'neutral'
+            rs_available:  bool，当前K线是否具备有效RS数据
+        """
+        idx = dataframe.index
+        rs_score = pd.Series(0.0, index=idx)
+        rs_signal = pd.Series('neutral', index=idx, dtype=str)
+        rs_available = pd.Series(False, index=idx)
+
+        if 'rs_benchmark_close' not in dataframe.columns:
+            return rs_score, rs_signal, rs_available
+
+        close = dataframe['close'].astype(float)
+        bench = dataframe['rs_benchmark_close'].astype(float)
+
+        # 基准缺失或异常时自动降级
+        valid = bench.notna() & bench.gt(0) & close.notna() & close.gt(0)
+        if not valid.any():
+            return rs_score, rs_signal, rs_available
+
+        asset_ret = close.pct_change(self.rs_return_window)
+        bench_ret = bench.pct_change(self.rs_return_window)
+
+        # 相对收益：本标的收益 - 基准收益
+        rel_ret = asset_ret - bench_ret
+
+        # 与基准收益相关性：负相关或弱相关在某些阶段代表相对独立强度
+        corr = asset_ret.rolling(self.rs_corr_window, min_periods=12).corr(bench_ret)
+        corr = corr.fillna(0.0).clip(-1.0, 1.0)
+
+        # RS 斜率：衡量相对强度变化方向
+        rs_slope = rel_ret - rel_ret.shift(self.rs_slope_window)
+
+        # 主分 = 相对收益 + 斜率，相关性作为温和修正项
+        rel_score = np.tanh(rel_ret.fillna(0.0) * 6.0)
+        slope_score = np.tanh(rs_slope.fillna(0.0) * 8.0)
+        corr_penalty = (corr.abs() - 0.6).clip(lower=0.0) * 0.2
+
+        rs_score = (0.60 * rel_score + 0.40 * slope_score - corr_penalty).clip(-1.0, 1.0)
+
+        rs_signal = rs_signal.where(~(rs_score > 0.12), 'rising')
+        rs_signal = rs_signal.where(~(rs_score < -0.12), 'falling')
+
+        rs_available = valid & rel_ret.notna()
+        rs_score = rs_score.where(rs_available, 0.0)
+        rs_signal = rs_signal.where(rs_available, 'neutral')
+
+        return rs_score.fillna(0.0), rs_signal, rs_available.fillna(False)
+
+    # =========================================================================
     # 融合与输出
     # =========================================================================
 
@@ -338,20 +422,48 @@ class CompositeManIntentDetector:
                         volume: pd.Series,
                         price:  pd.Series,
                         wave:   pd.Series,
-                        event:  pd.Series) -> pd.Series:
+                        event:  pd.Series,
+                        rs:     pd.Series,
+                        weights: dict) -> pd.Series:
         """
         加权合并四个维度的分数（RS 权重为 0）。
 
         返回 pd.Series，值域 [-1.0, +1.0]
         """
-        w = self.weights
+        w = weights
         composite = (
             volume * w['volume'] +
             price  * w['price']  +
             wave   * w['wave']   +
-            event  * w['event']
+            event  * w['event']  +
+            rs     * w['rs']
         )
         return composite.clip(-1.0, 1.0)
+
+    def _get_active_weights(self, rs_available: pd.Series) -> dict:
+        """
+        根据 RS 可用性生成动态权重。
+
+        规则：
+            - 若全段 RS 都不可用：rs=0，其余四维按比例重归一
+            - 若存在可用 RS：使用五维基础权重
+        """
+        if rs_available.any():
+            return dict(self.base_weights)
+
+        non_rs_sum = (
+            self.base_weights['volume'] +
+            self.base_weights['price'] +
+            self.base_weights['wave'] +
+            self.base_weights['event']
+        )
+        return {
+            'volume': self.base_weights['volume'] / non_rs_sum,
+            'price': self.base_weights['price'] / non_rs_sum,
+            'wave': self.base_weights['wave'] / non_rs_sum,
+            'event': self.base_weights['event'] / non_rs_sum,
+            'rs': 0.0,
+        }
 
     def _score_to_intent(self, score: pd.Series, dataframe: DataFrame) -> pd.Series:
         """
