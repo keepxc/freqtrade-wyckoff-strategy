@@ -248,6 +248,15 @@ except ImportError as e:
     DAILY_EVENT_DETECTOR_AVAILABLE = False
     logger.warning(f'⚠️ DailyEventDetector module not available: {e}')
 
+# P1: 导入日线 TR 识别器（daily_gate 门控）
+try:
+    from wyckoff.daily_tr_detector import DailyTRDetector
+    DAILY_TR_DETECTOR_AVAILABLE = True
+    logger.info('✅ DailyTRDetector module loaded successfully')
+except ImportError as e:
+    DAILY_TR_DETECTOR_AVAILABLE = False
+    logger.warning(f'⚠️ DailyTRDetector module not available: {e}')
+
 # ============================================================================
 # Phase 2: Axis/Ice Line System - 核心数据结构
 # ============================================================================
@@ -367,6 +376,28 @@ class WyckoffV7_TrueMethod(IStrategy):
     sos_min_wave_efficiency_threshold = DecimalParameter(0.0003, 0.003, default=0.0015, decimals=4, space='sell', optimize=True, load=True)
     sos_require_consecutive_down_waves = IntParameter(1, 3, default=2, space='sell', optimize=True, load=True)
     pnf_min_rr = DecimalParameter(0.0, 3.5, default=1.0, decimals=1, space='buy', optimize=False, load=True)
+
+    # P1: daily gate 参数
+    # daily_gate_mode: 'hard'=严格拦截（TR行情专用）/ 'soft'=仅调分（TR行情增益）/ 'off'=关闭（默认）
+    # 结论（2026-03-12）：BTC 2023-2026 以趋势行情为主，TR 条件极少触发：
+    #   hard → TR 从不满足 → 全量阻断所有多头（折损90%收益）
+    #   soft → signal_quality ±25%，对 P&L 无净增益（回测 stake 固定，soft≡off）
+    #   bear_market_mode hard gate → 与 Task 3.5 100% 重叠，冗余死代码
+    # 默认 off，保留 soft/hard 能力供 TR 行情（震荡盘整期）手动启用
+    use_daily_gate   = os.getenv('WY_P1_USE_DAILY_GATE', '1').lower() not in ('0', 'false', 'off')
+    daily_gate_mode  = os.getenv('WY_P1_DAILY_GATE_MODE', 'off').lower()  # 默认 off；TR行情可切换 soft/hard
+    daily_gate_k     = float(os.getenv('WY_P1_DAILY_GATE_K', '0.25'))
+    daily_tr_window_main = int(os.getenv('WY_P1_DAILY_TR_WINDOW_MAIN', '60'))
+    daily_tr_window_fast = int(os.getenv('WY_P1_DAILY_TR_WINDOW_FAST', '20'))
+    daily_tr_window_slow = int(os.getenv('WY_P1_DAILY_TR_WINDOW_SLOW', '120'))
+    daily_tr_use_slow_check = os.getenv('WY_P1_DAILY_TR_USE_SLOW_CHECK', '1').lower() not in ('0', 'false', 'off')
+    daily_tr_min_overlap = float(os.getenv('WY_P1_DAILY_TR_MIN_OVERLAP', '0.65'))
+    daily_tr_slow_min_overlap = float(os.getenv('WY_P1_DAILY_TR_SLOW_MIN_OVERLAP', '0.55'))
+    daily_tr_width_min_atr = float(os.getenv('WY_P1_DAILY_TR_WIDTH_MIN_ATR', '2.0'))
+    daily_tr_width_max_atr = float(os.getenv('WY_P1_DAILY_TR_WIDTH_MAX_ATR', '12.0'))
+    daily_tr_core_band_offset = float(os.getenv('WY_P1_DAILY_TR_CORE_BAND_OFFSET', '0.25'))
+    daily_tr_fakeout_window = int(os.getenv('WY_P1_DAILY_TR_FAKEOUT_WINDOW', '3'))
+    daily_tr_break_buffer = float(os.getenv('WY_P1_DAILY_TR_BREAK_BUFFER', '1.02'))
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
@@ -518,6 +549,33 @@ class WyckoffV7_TrueMethod(IStrategy):
         else:
             self.daily_event_detector = None
             logger.warning('⚠️ DailyEventDetector not available')
+
+        # P1: 初始化日线 TR 识别器
+        if DAILY_TR_DETECTOR_AVAILABLE:
+            self.daily_tr_detector = DailyTRDetector(
+                tr_window_main=self.daily_tr_window_main,
+                tr_window_fast=self.daily_tr_window_fast,
+                tr_window_slow=self.daily_tr_window_slow,
+                tr_min_overlap=self.daily_tr_min_overlap,
+                tr_slow_min_overlap=self.daily_tr_slow_min_overlap,
+                tr_width_min_atr=self.daily_tr_width_min_atr,
+                tr_width_max_atr=self.daily_tr_width_max_atr,
+                core_band_offset=self.daily_tr_core_band_offset,
+                fakeout_window=self.daily_tr_fakeout_window,
+                break_buffer=self.daily_tr_break_buffer,
+                use_slow_check=self.daily_tr_use_slow_check,
+            )
+            logger.info(
+                '✅ DailyTRDetector initialized '
+                f'(win={self.daily_tr_window_main}/{self.daily_tr_window_fast}/{self.daily_tr_window_slow}, '
+                f'overlap={self.daily_tr_min_overlap:.2f}/{self.daily_tr_slow_min_overlap:.2f}, '
+                f'width_atr={self.daily_tr_width_min_atr:.2f}-{self.daily_tr_width_max_atr:.2f}, '
+                f'core={self.daily_tr_core_band_offset:.2f}, fakeout={self.daily_tr_fakeout_window}, '
+                f'buffer={self.daily_tr_break_buffer:.3f})'
+            )
+        else:
+            self.daily_tr_detector = None
+            logger.warning('⚠️ DailyTRDetector not available')
 
         self.waves_cache: List[WyckoffWave] = []
         self.wave_analysis_cache: Dict = {}
@@ -975,6 +1033,36 @@ class WyckoffV7_TrueMethod(IStrategy):
                         df_1d['daily_dist_sow_detected'] = False
                         df_1d['buying_exhaustion']      = False
                         df_1d['dist_cause_sufficient']  = False
+                    # === P1: Daily TR 识别器（积累侧 TR 识别，为 H1 入场提供结构背景门控）===
+                    if self.daily_tr_detector is not None:
+                        try:
+                            df_1d = self.daily_tr_detector.detect(df_1d)
+                            logger.debug('P1 DailyTRDetector 运行完成')
+                        except Exception as _dtr_err:
+                            logger.error(f'❌ P1 DailyTRDetector 失败: {_dtr_err}', exc_info=True)
+                            df_1d['daily_tr_exists']         = False
+                            df_1d['daily_tr60_confirmed']    = False
+                            df_1d['daily_tr20_not_breaking'] = True
+                            df_1d['daily_tr120_consistent']  = False
+                            df_1d['daily_phase_cd']          = False
+                            df_1d['daily_phase_label']       = 'unknown'
+                            df_1d['daily_tr_high']           = float('nan')
+                            df_1d['daily_tr_low']            = float('nan')
+                            df_1d['daily_tr_width_atr']      = float('nan')
+                            df_1d['daily_tr_overlap']        = float('nan')
+                            df_1d['daily_gate_score']        = 0.0
+                    else:
+                        df_1d['daily_tr_exists']         = False
+                        df_1d['daily_tr60_confirmed']    = False
+                        df_1d['daily_tr20_not_breaking'] = True
+                        df_1d['daily_tr120_consistent']  = False
+                        df_1d['daily_phase_cd']          = False
+                        df_1d['daily_phase_label']       = 'unknown'
+                        df_1d['daily_tr_high']           = float('nan')
+                        df_1d['daily_tr_low']            = float('nan')
+                        df_1d['daily_tr_width_atr']      = float('nan')
+                        df_1d['daily_tr_overlap']        = float('nan')
+                        df_1d['daily_gate_score']        = 0.0
                     # merge_informative_pair：Daily → 1H（ffill=True，无前瞻偏差）
                     # 当日 1H 只能看到昨日已收盘的 Daily K线，ffill 正确处理 24H 内的填充
                     _daily_cols = [
@@ -986,6 +1074,13 @@ class WyckoffV7_TrueMethod(IStrategy):
                         'dist_sequence_progress',
                         'daily_utad_detected', 'daily_dist_sow_detected',
                         'buying_exhaustion', 'dist_cause_sufficient',
+                        # P1 TR 检测器新字段
+                        'daily_tr_exists', 'daily_tr60_confirmed',
+                        'daily_tr20_not_breaking', 'daily_tr120_consistent',
+                        'daily_phase_cd', 'daily_phase_label',
+                        'daily_tr_high', 'daily_tr_low',
+                        'daily_tr_width_atr', 'daily_tr_overlap',
+                        'daily_gate_score',
                     ]
                     df_1d_slim = df_1d[_daily_cols].copy()
                     dataframe = merge_informative_pair(
@@ -1037,6 +1132,40 @@ class WyckoffV7_TrueMethod(IStrategy):
                     dataframe['dist_cause_sufficient'] = dataframe.get(
                         'dist_cause_sufficient_1d', pd.Series(False, index=dataframe.index)
                     )
+                    # P1: TR 检测器字段重命名
+                    dataframe['daily_tr_exists'] = dataframe.get(
+                        'daily_tr_exists_1d', pd.Series(False, index=dataframe.index)
+                    )
+                    dataframe['daily_tr60_confirmed'] = dataframe.get(
+                        'daily_tr60_confirmed_1d', pd.Series(False, index=dataframe.index)
+                    )
+                    dataframe['daily_tr20_not_breaking'] = dataframe.get(
+                        'daily_tr20_not_breaking_1d', pd.Series(True, index=dataframe.index)
+                    )
+                    dataframe['daily_tr120_consistent'] = dataframe.get(
+                        'daily_tr120_consistent_1d', pd.Series(False, index=dataframe.index)
+                    )
+                    dataframe['daily_phase_cd'] = dataframe.get(
+                        'daily_phase_cd_1d', pd.Series(False, index=dataframe.index)
+                    )
+                    dataframe['daily_phase_label'] = dataframe.get(
+                        'daily_phase_label_1d', pd.Series('unknown', index=dataframe.index)
+                    )
+                    dataframe['daily_tr_high'] = dataframe.get(
+                        'daily_tr_high_1d', pd.Series(float('nan'), index=dataframe.index)
+                    )
+                    dataframe['daily_tr_low'] = dataframe.get(
+                        'daily_tr_low_1d', pd.Series(float('nan'), index=dataframe.index)
+                    )
+                    dataframe['daily_tr_width_atr'] = dataframe.get(
+                        'daily_tr_width_atr_1d', pd.Series(float('nan'), index=dataframe.index)
+                    )
+                    dataframe['daily_tr_overlap'] = dataframe.get(
+                        'daily_tr_overlap_1d', pd.Series(float('nan'), index=dataframe.index)
+                    )
+                    dataframe['daily_gate_score'] = dataframe.get(
+                        'daily_gate_score_1d', pd.Series(0.0, index=dataframe.index)
+                    )
                     # 统计日志
                     _total = len(dataframe)
                     if _total > 0:
@@ -1047,6 +1176,9 @@ class WyckoffV7_TrueMethod(IStrategy):
                         _sow      = int(dataframe['daily_sow_bar'].sum())
                         _bc       = int(dataframe['daily_bc_detected'].sum())
                         _dcs      = int(dataframe['dist_cause_sufficient'].sum())
+                        _tr_ex    = int(dataframe['daily_tr_exists'].sum())
+                        _tr60     = int(dataframe['daily_tr60_confirmed'].sum())
+                        _phcd     = int(dataframe['daily_phase_cd'].sum())
                         logger.info(
                             f'Task 4.1a macro_phase ({pair}): '
                             f'markup={_markup}({_markup/_total*100:.1f}%) | '
@@ -1054,6 +1186,11 @@ class WyckoffV7_TrueMethod(IStrategy):
                             f'transition={_trans}({_trans/_total*100:.1f}%) | '
                             f'daily_choch={_choch} | daily_sow_bar={_sow} | '
                             f'daily_bc={_bc} | dist_cause_sufficient={_dcs}'
+                        )
+                        logger.info(
+                            f'P1 DailyTRDetector ({pair}): '
+                            f'tr_exists={_tr_ex}({_tr_ex/_total*100:.1f}%) | '
+                            f'tr60={_tr60} | phase_cd={_phcd}'
                         )
                 else:
                     # Daily 数据不足时退化为 markup（牛市倾向保守默认）
@@ -1072,6 +1209,17 @@ class WyckoffV7_TrueMethod(IStrategy):
                     dataframe['daily_dist_sow_detected'] = False
                     dataframe['buying_exhaustion']      = False
                     dataframe['dist_cause_sufficient']  = False
+                    dataframe['daily_tr_exists']         = False
+                    dataframe['daily_tr60_confirmed']    = False
+                    dataframe['daily_tr20_not_breaking'] = True
+                    dataframe['daily_tr120_consistent']  = False
+                    dataframe['daily_phase_cd']          = False
+                    dataframe['daily_phase_label']       = 'unknown'
+                    dataframe['daily_tr_high']           = float('nan')
+                    dataframe['daily_tr_low']            = float('nan')
+                    dataframe['daily_tr_width_atr']      = float('nan')
+                    dataframe['daily_tr_overlap']        = float('nan')
+                    dataframe['daily_gate_score']        = 0.0
                     logger.debug(f'Task 4.1a 数据不足（Daily {_n} 根），退化为 markup')
             else:
                 dataframe['daily_ema200']          = float('nan')
@@ -1088,6 +1236,17 @@ class WyckoffV7_TrueMethod(IStrategy):
                 dataframe['daily_dist_sow_detected'] = False
                 dataframe['buying_exhaustion']      = False
                 dataframe['dist_cause_sufficient']  = False
+                dataframe['daily_tr_exists']         = False
+                dataframe['daily_tr60_confirmed']    = False
+                dataframe['daily_tr20_not_breaking'] = True
+                dataframe['daily_tr120_consistent']  = False
+                dataframe['daily_phase_cd']          = False
+                dataframe['daily_phase_label']       = 'unknown'
+                dataframe['daily_tr_high']           = float('nan')
+                dataframe['daily_tr_low']            = float('nan')
+                dataframe['daily_tr_width_atr']      = float('nan')
+                dataframe['daily_tr_overlap']        = float('nan')
+                dataframe['daily_gate_score']        = 0.0
         except Exception as e:
             logger.error(f'❌ Task 4.1a Daily 宏观结构判断失败: {e}', exc_info=True)
             dataframe['daily_ema200']          = float('nan')
@@ -1104,6 +1263,17 @@ class WyckoffV7_TrueMethod(IStrategy):
             dataframe['daily_dist_sow_detected'] = False
             dataframe['buying_exhaustion']      = False
             dataframe['dist_cause_sufficient']  = False
+            dataframe['daily_tr_exists']         = False
+            dataframe['daily_tr60_confirmed']    = False
+            dataframe['daily_tr20_not_breaking'] = True
+            dataframe['daily_tr120_consistent']  = False
+            dataframe['daily_phase_cd']          = False
+            dataframe['daily_phase_label']       = 'unknown'
+            dataframe['daily_tr_high']           = float('nan')
+            dataframe['daily_tr_low']            = float('nan')
+            dataframe['daily_tr_width_atr']      = float('nan')
+            dataframe['daily_tr_overlap']        = float('nan')
+            dataframe['daily_gate_score']        = 0.0
 
         # === Task 4.1c: bear_market_mode 双层因果门控 ===
         # 第一道防线（Task 4.1a）：daily_choch_confirmed — 物理熔断器（Daily EMA200 结构破位）
@@ -2372,6 +2542,30 @@ class WyckoffV7_TrueMethod(IStrategy):
         if bear_blocked_cnt > 0:
             logger.info(f'Task 3.5 bear_market_mode: {bear_blocked_cnt} 根K线处于熊市防御区（含持续5天过滤），屏蔽多头入场')
 
+        # === P1: daily gate 门控 ===
+        # 结论（2026-03-12）：BTC 2023-2026 趋势行情，TR条件极少满足。
+        #   hard 模式：要求 TR_exists AND Phase_CD 同时成立，BTC趋势期永不触发 → 全量阻断
+        #   soft 模式：仅调整 signal_quality，对回测P&L无影响（stake固定）
+        #   当前默认 off，保留 soft/hard 供 TR行情（BTC震荡积累期）人工开启。
+        # 使用方式：docker run -e WY_P1_DAILY_GATE_MODE=soft  （或 hard）
+        _gate_score  = dataframe.get('daily_gate_score', pd.Series(0.0, index=dataframe.index))
+        _gate_mode   = getattr(self, 'daily_gate_mode', 'off')
+        _use_gate    = getattr(self, 'use_daily_gate', True)
+        _daily_tr_exists = dataframe.get('daily_tr_exists', pd.Series(False, index=dataframe.index)).astype(bool)
+        _daily_phase_cd = dataframe.get('daily_phase_cd', pd.Series(False, index=dataframe.index)).astype(bool)
+        if _use_gate and _gate_mode == 'hard':
+            # TR行情专用：仅当日线确认处于 Trading Range 且处于 C/D 阶段时放行
+            # 趋势行情（BTC 2023-2026主要状态）下此条件几乎不满足，会阻断所有多头
+            daily_gate_hard_pass = _daily_tr_exists & _daily_phase_cd
+            daily_gate_hard_block = ~daily_gate_hard_pass
+            logger.info(
+                f'P1 daily_gate hard(TR专用): pass={int(daily_gate_hard_pass.sum())}根 | '
+                f'block={int(daily_gate_hard_block.sum())}根 | '
+                f'tr_exists={int(_daily_tr_exists.sum())}根 | phase_cd={int(_daily_phase_cd.sum())}根'
+            )
+        else:
+            daily_gate_hard_block = pd.Series(False, index=dataframe.index)
+
         final_entry = (
             composite_intent_ok & (
                 dataframe['trading_allowed'] & (lps_pullback_entry | sos_entry | wave_start_entry | efficiency_entry) |
@@ -2383,7 +2577,8 @@ class WyckoffV7_TrueMethod(IStrategy):
                 dataframe['trading_allowed'] & phase_d_high_quality |
                 dataframe['axis_trading_allowed'] & phase_d_entry & ~phase_d_high_quality
             ) & rr_long_ok
-            & ~bear_market_block_long  # Task 3.5: 熊市 markdown 禁止开多
+            & ~bear_market_block_long        # Task 3.5: 熊市 markdown 禁止开多
+            & ~daily_gate_hard_block         # P1: daily gate hard 模式阻断
         )
         dataframe.loc[final_entry, 'enter_long'] = 1
         # 入场标签（优先级从低到高）
@@ -2470,6 +2665,27 @@ class WyckoffV7_TrueMethod(IStrategy):
                 f'Task 3.3 Phase Context 质量倍增: {int(phase_boost_mask.sum())} 个信号提升 '
                 f'(SpringZone×1.30={n_spring_boost} / SOSZone×1.20={n_sos_boost} / PhaseE×1.10={n_e_boost})'
             )
+
+        # === P1: TR gate_score 软加分（仅 soft 模式生效，不阻断入场）===
+        if _use_gate and _gate_mode == 'soft':
+            _k = getattr(self, 'daily_gate_k', 0.25)
+            _clipped_score = _gate_score.clip(-1.0, 1.0)
+            soft_adj_mask = final_entry  # 只调整实际入场点
+            if soft_adj_mask.any():
+                sq_orig = dataframe.loc[soft_adj_mask, 'signal_quality'].copy()
+                sq_adj  = sq_orig * (1.0 + _clipped_score[soft_adj_mask] * _k)
+                # 保护阀：弱信号 + 日线不支持时额外惩罚
+                penalty_mask = soft_adj_mask & (_gate_score < 0) & (dataframe['signal_quality'] < 1.6)
+                sq_adj[penalty_mask[soft_adj_mask]] = sq_adj[penalty_mask[soft_adj_mask]] * 0.9
+                # 防越界
+                sq_adj = sq_adj.clip(0.5, 3.0)
+                dataframe.loc[soft_adj_mask, 'signal_quality'] = sq_adj
+                _boosted  = int((sq_adj > sq_orig).sum())
+                _penalized = int((sq_adj < sq_orig).sum())
+                logger.info(
+                    f'P1 daily_gate soft模式: k={_k}, '
+                    f'加分={_boosted}笔 / 降分={_penalized}笔'
+                )
 
         # === SOS 退出逻辑优化：准备元数据（移至 signal_quality 计算之后，含 JAC 共振因子）===
         # 注意：此块必须在 signal_quality 赋值完成后执行，确保 sos_metadata 携带正确的共振分值

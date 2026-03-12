@@ -1129,3 +1129,197 @@ Freqtrade 原生不支持资金费率模拟。合约多头每8小时向空头支
 | 历史事件白盒验证 | ❌ 未做 | **P1**，Task 4.2 前创建 `verify_daily_detector_events.py` |
 | 单元测试覆盖 | ❌ 未做 | P1，当前 0 个测试文件，状态机边界条件无白盒保障 |
 | Dry Run 字段健康监控 | ❌ 未做 | P2，创建 `check_dryrun_fields.py` |
+
+---
+
+## 🔭 下一阶段完善方向（2026-03-12 评估）
+
+> **总目标**：从"可用"升级到"专业级可持续迭代系统"，威科夫实现度从 65-70% 提升至 90%。  
+> **背景**：骨架完整、方向正确、能赚钱；但威科夫核心竞争力中最有价值的两项尚未充分释放。  
+> **防翻车约束**：① P1门控双轨（hard_block + soft_score）② P2 RS降级保护（RS_available标志）③ 每个P都做三段A/B回测闸门
+
+### 短板定位
+
+| 短板 | 当前状态 | 影响 |
+|------|---------|------|
+| Composite Man RS 维度 | 权重=0（暂缺跨币种数据）| CM 意图识别缺第5维，4维评分 |
+| 日线背景 → H1 执行硬耦合 | 有 htf_market_env 字段但门控不完整 | 假信号过滤不足 |
+| Effort/Result 波段级分析 | 仅 bar 级（单根K线），波段级标注"后续版本" | 持仓管理质量偏低 |
+| 自适应参数（牛/熊/震荡） | MarketEnvironmentDetector 已实现检测，策略阈值未动态切换 | 不同行情环境下稳健性不足 |
+
+---
+
+### ⚙️ 回测闸门规范（每个P都必须过）
+
+**数据分段（固定三段）**
+
+| 段 | 时间范围 | 市场特征 |
+|----|---------|---------|
+| 牛市段 | 2023-01 ~ 2024-06 | 持续上涨 |
+| 震荡段 | 2024-07 ~ 2025-06 | 横盘震荡 |
+| 下跌段 | 2021-01 ~ 2022-12 | 持续熊市 |
+
+**必看指标**：收益率、最大回撤、利润因子、胜率、交易数、平均持仓时长
+
+**通过条件**：至少 2 段指标优于基线，且无任何一段灾难性恶化（回撤失控 > 15% 或利润因子 < 1.0）
+
+---
+
+### P1 — 日线背景→H1硬门控（预计 2~3 天）
+
+> 解决"假信号多"的根本问题，对减少亏损笔数效果最显著。双轨设计避免"过滤变强但错过主升段"。
+
+**任务**
+1. 日线 TR 边界重算（主判定）— 双尺度判定：
+   - **三窗口设计**（可配置参数）：
+     - `daily_tr_window_main = 60`：结构识别主依据（锚）
+     - `daily_tr_window_fast = 20`：早期感知，不直接确认（雷达）
+     - `daily_tr_window_slow = 120`：稳定性校验，边界模糊时提供背书（保险丝）
+     - `daily_tr_use_slow_check = True`
+     - `daily_tr_min_overlap = 0.65`（区间高低点重叠度阈值）
+   - **TR_exists 触发逻辑**：
+     ```
+     TR_exists = TR60_confirmed AND (TR20_not_breaking OR TR120_consistent)
+     ```
+     - `TR60_confirmed`：60日窗口内高低点重叠度 ≥ 0.65 AND 区间宽度/ATR 在阈值内 AND 假突破回收次数 ≥ 1
+     - `TR20_not_breaking`：20日窗口未出现方向性突破（短期结构未破坏）
+     - `TR120_consistent`：120日窗口同样确认横盘状态（稳定性背书，边界模糊时使用）
+   - **与门控的配合**：
+     - `hard` 模式只认 `TR60_confirmed`（加双通道一致性检查）
+     - `soft` 模式可接受 `TR20_not_breaking` 单独提前加分（不放行硬开仓）
+   - `Phase_C_or_D` = 日线事件序列打标签（Spring / SOS / LPS 出现即标记）
+   - 输出字段：`daily_tr_exists`、`daily_tr60_confirmed`、`daily_tr20_not_breaking`、`daily_tr120_consistent`、`daily_phase_cd`、`daily_tr_high`、`daily_tr_low`
+
+2. EventSeqSM 作为辅判定（副）：
+   - 读取日线 `wyckoff_phase` 作为辅证（`phase_daily_from_sm`）
+   - 不直接映射 H1 的 wyckoff_phase，避免低周期噪声混入
+
+3. 双通道一致性仲裁：
+   - **一致**（主副均确认）→ 强确认，`daily_gate_score = +1.0`
+   - **冲突**（主副不一致）→ 降级到 soft_score，`daily_gate_score = +0.3`，不触发 hard_block
+   - **主判定否定**（TR 不存在）→ `daily_gate_score = -1.0`，hard 模式下物理阻断
+
+4. 入场前置门控（双轨）：
+   - `hard_block`：`daily_gate_mode == 'hard'` 且 `NOT (TR_exists AND Phase in {C, D})` → 阻断入场
+   - `soft_score`：`daily_gate_mode == 'soft'` → 按以下公式调整 `signal_quality`，不阻断：
+     ```python
+     k = 0.25  # 可配置，默认保守值，回测验证后可调至 0.30
+     signal_quality_adj = signal_quality * (1 + clip(daily_gate_score, -1, 1) * k)
+     # 保护阀：弱信号 + 日线不支持时额外惩罚
+     if daily_gate_score < 0 and signal_quality < 1.6:
+         signal_quality_adj *= 0.9
+     signal_quality_adj = clip(signal_quality_adj, 0.5, 3.0)  # 防止越界
+     ```
+   - `daily_gate_score` 取值：强确认=+1.0 / 冲突降级=+0.3 / 主判定否定=-1.0
+
+5. 增加开关参数：`use_daily_gate`、`daily_gate_mode`
+   - `hard`：严格拦截，日线未确认蓄积则物理阻断入场（默认用于降假信号测试）
+   - `soft`：只调分不拦截，日线偏多加分/不偏多降分，不硬阻断（默认用于防踏空场景）
+   - `off`：完全关闭门控，等同 P0 基线对照组（A/B 回测参照）
+
+**验收标准**
+- 假信号比例下降 > 20%
+- 总收益 ≥ 当前基线 95%
+- 交易数下降可接受，但利润因子不恶化
+- 三段回测闸门通过
+
+**回滚点**：独立 commit `feat(p1): daily hard+soft gate`，一键回退到 P0 基线
+
+**📋 P1 验证结论（2026-03-12）**
+
+> 状态：**完成（受限于 BTC 2023-2026 行情结构，硬门控退役，默认 off）**
+
+| 测试 | 模式 | 交易数 | 胜率 | 总收益 | CAGR | SQN | 结论 |
+|------|------|--------|------|--------|------|-----|------|
+| P0 基线 | off | 450 | 76.9% | 541.24% | 79.63% | 6.46 | 参照基准 |
+| TR 硬门 | hard | 117 | 53.0% | 10.88% | 3.31% | 0.70 | TR 永不满足 → 全量阻断 |
+| soft 对比 | soft | 450 | 76.9% | 541.24% | 79.63% | 6.46 | signal_quality 调分，回测无净益 |
+| B+C（macro_phase） | hard | 421 | 76.5% | 439.23% | 70.08% | 6.22 | macro_phase 窗口过宽，位移效应 |
+| B+C-v2（bear_market_mode） | hard | 450 | 76.9% | 541.24% | 79.63% | 6.46 | 与 Task 3.5 100% 重叠，冗余 |
+
+**根本原因**：BTC 2023-2026 以趋势行情为主，60日震荡区间（TR）条件极少满足。硬门控在趋势行情中等价于"永远不开仓"。`bear_market_mode` 硬门控已被 Task 3.5 全量覆盖，冗余无效。
+
+**最终决策**：
+- `daily_gate_mode` 默认 **`off`**（P0/P1 同等基线，无回归）
+- `soft/hard` 保留为**战术开关**，供 BTC 震荡积累期（TR 行情）启用
+- `daily_tr_detector.py` bug 修复（`float OR TypeError` + 死代码清理）已生效
+- 启用方式：`-e WY_P1_DAILY_GATE_MODE=soft` 或 `=hard`（docker run 传参）
+
+**已修复 bug（`daily_tr_detector.py`）**：
+1. `_compute_tr_exists`：`float | float` 位运算在 pandas 2.x 抛 `TypeError`，静默 fallback → 探测器全失效。已改为 `(above | below).rolling().sum().gt(0)`
+2. `_compute_atr`：`return df` 后存在孤立死代码块（docstring + 4 行）→ 已删除
+
+---
+
+### P2 — Composite Man RS 维度补全（预计 1~2 天）
+
+> 最快能补上的高价值项，同样依赖 informative_pairs 基础设施。加降级保护避免 CM 被异常数据打崩。
+
+**任务**
+1. 在 `informative_pairs()` 新增 RS 所需对照数据（BTC/USDT:USDT 1h）
+2. 计算 RS 特征（relative return + rolling corr）
+3. CM 评分由 4 维升级 5 维，RS 权重恢复（可配置，默认 17.6%）
+4. 加降级保护：`RS_available = False` 时自动降权，回测里单独统计 RS 命中率
+
+**验收标准**
+- CM 五维全激活，RS_available 标志正常工作
+- RS 缺失/异常场景不报错、不误触发
+- 回测收益/回撤不劣化
+- 三段回测闸门通过
+
+**回滚点**：独立 commit `feat(p2): cm rs-dimension + fallback`
+
+---
+
+### P4 — 自适应参数切换（预计 1 天）
+
+> 验证 MarketEnvironmentDetector 检测结果是否真正驱动关键阈值。前置：P2 完成后（RS补全后 market_env 可信度更高）。
+
+**任务**
+1. 审查 `MarketEnvironmentDetector` 是否真正驱动策略阈值（现有代码逐路径检查）
+2. 建三套参数组：`markup` / `trading_range` / `markdown`
+3. 动态切换关键阈值：Spring 深度、量能门槛、入场评分阈值、退出敏感度
+
+**验收标准**
+- 不同市场状态下触发分布更合理
+- 震荡期减少无效交易，趋势期不过度保守
+- 三段回测闸门通过
+
+**回滚点**：独立 commit `feat(p4): adaptive params by market_env`
+
+---
+
+### P3 — Effort/Result 波段级分析（预计 3~4 天）
+
+> 提升持仓管理质量，减少"该拿没拿住"和"过早离场"。与现有 bar 级信号融合（增量，不覆盖）。前置：P1 完成后进行。
+
+**任务**
+1. 基于已有 `WaveAnalyzer` 做波段 E/R 背离检测
+2. 用于持仓管理：
+   - 上涨波 E/R 背离 → 提前减仓/退出
+   - 下跌波 E/R 背离 → 增强 Spring 可信度
+3. 与现有 bar 级信号融合（不覆盖，做增量叠加）
+
+**验收标准**
+- 平均盈利单持仓质量提升
+- 减少"该拿没拿住"和"过早离场"
+- 三段回测闸门通过
+
+**回滚点**：独立 commit `feat(p3): swing-level effort-result`
+
+---
+
+### 执行节奏（建议）
+
+```
+Day 1-2 : P1（日线双轨门控）
+Day 3   : P2（CM RS维度 + 降级保护）
+Day 4   : 三段 A/B 回测闸门验证
+Day 5   : P4（自适应参数切换）
+Day 6-7 : P3（波段 E/R）+ 最终回测报告
+```
+
+> **硬性流程规则**：  
+> 1. 代码实现前先通过对话确认设计细节（逻辑边界、验收标准、防回归策略）  
+> 2. 每个 P 独立 commit，可随时回滚  
+> 3. 回测闸门不通过，不进入下一个 P
