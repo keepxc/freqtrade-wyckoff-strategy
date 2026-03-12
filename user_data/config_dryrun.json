@@ -35,8 +35,14 @@
         "name": "binance",
         "key": "YOUR_API_KEY",
         "secret": "YOUR_API_SECRET",
-        "ccxt_config": {},
-        "ccxt_async_config": {},
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "rateLimit": 100
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "rateLimit": 100
+        },
         "pair_whitelist": [
             "BTC/USDT:USDT"
         ],
@@ -78,7 +84,8 @@
     "timeframe": "1h",
     "initial_state": "running",
     "force_entry_enable": false,
+    "markets_refresh_interval": 720,
     "internals": {
-        "process_throttle_secs": 5
+        "process_throttle_secs": 300
     }
 }
