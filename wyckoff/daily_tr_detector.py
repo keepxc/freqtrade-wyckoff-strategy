@@ -79,6 +79,7 @@ _TR_WINDOW_FAST      = 20     # 快速窗口（日）
 _TR_WINDOW_SLOW      = 120    # 慢速窗口（日）
 _TR_MIN_OVERLAP      = 0.65   # 主窗口最低重叠度
 _TR_SLOW_MIN_OVERLAP = 0.55   # 慢速窗口最低重叠度（更宽松）
+_TR_CONFLICT_SCORE   = 0.30   # 主副冲突时的 soft 降级分值
 _TR_WIDTH_MIN_ATR    = 2.0    # TR 宽度下限（ATR 倍数）
 _TR_WIDTH_MAX_ATR    = 12.0   # TR 宽度上限（ATR 倍数）
 _TR_FAKEOUT_WINDOW   = 3      # 假突破回收确认窗口（根）
@@ -107,6 +108,7 @@ class DailyTRDetector:
         tr_window_slow: int = _TR_WINDOW_SLOW,
         tr_min_overlap: float = _TR_MIN_OVERLAP,
         tr_slow_min_overlap: float = _TR_SLOW_MIN_OVERLAP,
+        tr_conflict_score: float = _TR_CONFLICT_SCORE,
         tr_width_min_atr: float = _TR_WIDTH_MIN_ATR,
         tr_width_max_atr: float = _TR_WIDTH_MAX_ATR,
         core_band_offset: float = _TR_CORE_BAND_OFFSET,
@@ -119,6 +121,7 @@ class DailyTRDetector:
         self.tr_window_slow      = tr_window_slow
         self.tr_min_overlap      = tr_min_overlap
         self.tr_slow_min_overlap = tr_slow_min_overlap
+        self.tr_conflict_score   = tr_conflict_score
         self.tr_width_min_atr    = tr_width_min_atr
         self.tr_width_max_atr    = tr_width_max_atr
         self.core_band_offset    = core_band_offset
@@ -373,7 +376,7 @@ class DailyTRDetector:
         # TR 存在 + Phase C/D 双确认 → 强确认
         score[tr_exists & phase_cd]  = 1.0
         # TR 存在但 Phase 未知 → 冲突降级（soft 分数）
-        score[tr_exists & ~phase_cd] = 0.3
+        score[tr_exists & ~phase_cd] = self.tr_conflict_score
 
         df['daily_gate_score'] = score
         return df

@@ -340,6 +340,108 @@ class WaveAnalyzer:
         return true_reversal
     
 
+    # ============================================================================
+    # P3: 波段级 Effort/Result 背离检测（Swing-Level E/R Divergence）
+    # 目标：改善持仓管理、减轻过早离场
+    # 与 bar 级 E/R 增量融合，不覆盖原逻辑
+    # ============================================================================
+
+    def compute_swing_er_signals(self, dataframe: DataFrame) -> DataFrame:
+        """
+        P3: 波段级 Effort/Result 背离信号检测
+
+        基于已完成波段的努力/结果对比，检测两类背离：
+        1. swing_up_er_weak: 上涨波段高努力低结果 → 持仓弱化，辅助退出
+        2. swing_down_er_exhaustion: 下跌波段高努力低结果 → 抛盘枯竭，增强 Spring 可信度
+
+        设计原则（防前视偏差）：
+        - 仅在波段结束点（is_wave_end=True）上计算
+        - 使用 shift(1) + rolling 确保只用历史波段数据，不含当前
+        - 信号用 rolling(N).max() 向前展开，供 exit/entry 下游消费
+        - 不修改任何现有 bar 级 E/R 列
+        """
+        dataframe['swing_up_er_weak'] = False
+        dataframe['swing_down_er_exhaustion'] = False
+
+        if 'is_wave_end' not in dataframe.columns:
+            return dataframe
+
+        n_wave_ends = int(dataframe['is_wave_end'].sum())
+        if n_wave_ends < 6:
+            return dataframe
+
+        is_wave_end = dataframe['is_wave_end'].fillna(False).astype(bool)
+        wave_dir  = dataframe.get('wave_direction',  pd.Series('', index=dataframe.index))
+        wave_disp = dataframe.get('wave_displacement', pd.Series(0.0, index=dataframe.index))
+        wave_eff  = dataframe.get('wave_effort',       pd.Series(0.0, index=dataframe.index))
+
+        # ── 1. 上涨波段 E/R 背离 ─────────────────────────────────────────────
+        # 高努力（成交量大）但位移偏小 → 上涨遭遇阻力，持仓质量下降
+        #
+        # 修正（2026-03-13）：rolling 必须在波段级（dense）空间进行
+        # 原版在 bar 级稀疏 Series 上做 rolling(8)，波段间距 50+ bar，8 行内找不到
+        # 3 个非 NaN，min_periods=3 永远不满足 → 历史均值全为 NaN → 信号永远 0
+        up_end     = is_wave_end & (wave_dir == 'up')
+        up_end_idx = dataframe.index[up_end]   # 仅波段结束点的行索引（稀疏→稠密）
+        up_er_div  = pd.Series(False, index=dataframe.index)
+
+        if len(up_end_idx) >= 4:
+            up_disp_d = wave_disp.loc[up_end_idx]   # 稠密：仅波段端点
+            up_eff_d  = wave_eff.loc[up_end_idx]
+
+            # shift(1) 在波段级别：排除当前波段，防前视
+            hist_up_disp_d = up_disp_d.shift(1).rolling(window=8, min_periods=3).mean()
+            hist_up_eff_d  = up_eff_d.shift(1).rolling(window=8, min_periods=3).mean()
+
+            div_mask = (
+                hist_up_disp_d.notna() & hist_up_eff_d.notna() &
+                (hist_up_disp_d > 0) & (hist_up_eff_d > 0) &
+                (up_eff_d  > hist_up_eff_d  * 1.10) &   # 努力高于历史均值 ≥10%
+                (up_disp_d < hist_up_disp_d * 0.85)      # 但位移低于历史均值 ≥15%
+            )
+            div_positions = up_end_idx[div_mask.fillna(False).values]
+            up_er_div.loc[div_positions] = True
+
+        # 信号展开至后续 10 根 K 线（退出决策需在波段结束后尽快响应）
+        dataframe['swing_up_er_weak'] = (
+            up_er_div.rolling(10, min_periods=1).max().astype(bool)
+        )
+
+        # ── 2. 下跌波段枯竭（Spring 增强）────────────────────────────────────
+        # 有一定抛压参与（effort 不小），但价格跌幅明显偏弱 → 抛盘无法推价下跌 → 供应耗尽
+        down_end     = is_wave_end & (wave_dir == 'down')
+        down_end_idx = dataframe.index[down_end]
+        down_er_exh  = pd.Series(False, index=dataframe.index)
+
+        if len(down_end_idx) >= 4:
+            down_disp_d = wave_disp.loc[down_end_idx]
+            down_eff_d  = wave_eff.loc[down_end_idx]
+
+            hist_down_disp_d = down_disp_d.shift(1).rolling(window=8, min_periods=3).mean()
+            hist_down_eff_d  = down_eff_d.shift(1).rolling(window=8, min_periods=3).mean()
+
+            exh_mask = (
+                hist_down_disp_d.notna() & hist_down_eff_d.notna() &
+                (hist_down_disp_d > 0) & (hist_down_eff_d > 0) &
+                (down_eff_d  > hist_down_eff_d  * 0.90) &   # 有一定抛压参与
+                (down_disp_d < hist_down_disp_d * 0.78)      # 但跌幅明显偏弱（抛盘枯竭）
+            )
+            exh_positions = down_end_idx[exh_mask.fillna(False).values]
+            down_er_exh.loc[exh_positions] = True
+
+        # 信号展开至后续 20 根 K 线（Spring 通常跟随在枯竭信号后 10-20 根 K 内）
+        dataframe['swing_down_er_exhaustion'] = (
+            down_er_exh.rolling(20, min_periods=1).max().astype(bool)
+        )
+
+        up_weak_cnt  = int(up_er_div.sum())
+        down_exh_cnt = int(down_er_exh.sum())
+        logger.info(
+            f'P3 波段 E/R: 上涨波弱势={up_weak_cnt} 个波段结束点 | '
+            f'下跌波枯竭={down_exh_cnt} 个波段结束点'
+        )
+        return dataframe
+
     def _calculate_enhanced_effort_result_harmony(self, dataframe: DataFrame) -> DataFrame:
         """
         增强的努力结果和谐性计算

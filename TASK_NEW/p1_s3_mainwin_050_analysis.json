@@ -1,0 +1,139 @@
+{
+  "params": {
+    "pair": "BTC/USDT:USDT",
+    "timerange": "20230101-20260228",
+    "gate_k": 0.25,
+    "tr_window_main": 50,
+    "tr_window_fast": 20,
+    "tr_window_slow": 120,
+    "tr_use_slow_check": true,
+    "tr_min_overlap": 0.65,
+    "weak_signal_threshold": 1.6,
+    "clip": [
+      0.5,
+      3.0
+    ]
+  },
+  "off": {
+    "name": "off",
+    "bar_count": 27697,
+    "entry_signal_count": 8947,
+    "daily_tr_exists": {
+      "count": 9216,
+      "ratio": 0.3327
+    },
+    "gate_score_distribution_all": {
+      "-1.0": 18481,
+      "0.3": 4008,
+      "1.0": 5208
+    },
+    "gate_score_distribution_entry": {
+      "-1.0": 6031,
+      "0.3": 1462,
+      "1.0": 1454
+    },
+    "conflict_ratio_all": 0.1447,
+    "conflict_ratio_within_tr": 0.4349,
+    "signal_quality_all": {
+      "mean": 1.0467,
+      "median": 1.0,
+      "bucket_counts": {
+        "0.50-0.99": 0,
+        "1.00-1.24": 25237,
+        "1.25-1.49": 2200,
+        "1.50-1.99": 6,
+        "2.00-2.49": 31,
+        "2.50-3.00": 223
+      }
+    },
+    "signal_quality_entry": {
+      "mean": 1.1404,
+      "median": 1.0,
+      "bucket_counts": {
+        "0.50-0.99": 0,
+        "1.00-1.24": 6506,
+        "1.25-1.49": 2200,
+        "1.50-1.99": 6,
+        "2.00-2.49": 31,
+        "2.50-3.00": 204
+      }
+    }
+  },
+  "soft": {
+    "name": "soft",
+    "bar_count": 27697,
+    "entry_signal_count": 8947,
+    "daily_tr_exists": {
+      "count": 9216,
+      "ratio": 0.3327
+    },
+    "gate_score_distribution_all": {
+      "-1.0": 18481,
+      "0.3": 4008,
+      "1.0": 5208
+    },
+    "gate_score_distribution_entry": {
+      "-1.0": 6031,
+      "0.3": 1462,
+      "1.0": 1454
+    },
+    "conflict_ratio_all": 0.1447,
+    "conflict_ratio_within_tr": 0.4349,
+    "signal_quality_all": {
+      "mean": 0.9864,
+      "median": 1.0,
+      "bucket_counts": {
+        "0.50-0.99": 5875,
+        "1.00-1.24": 19465,
+        "1.25-1.49": 1757,
+        "1.50-1.99": 374,
+        "2.00-2.49": 126,
+        "2.50-3.00": 100
+      }
+    },
+    "signal_quality_entry": {
+      "mean": 0.9537,
+      "median": 0.81,
+      "bucket_counts": {
+        "0.50-0.99": 5875,
+        "1.00-1.24": 734,
+        "1.25-1.49": 1757,
+        "1.50-1.99": 374,
+        "2.00-2.49": 126,
+        "2.50-3.00": 81
+      }
+    }
+  },
+  "soft_vs_off": {
+    "entry_signal_count": 8947,
+    "boosted_count": 2846,
+    "penalized_count": 6031,
+    "unchanged_count": 70,
+    "avg_delta": -0.1867,
+    "median_delta": -0.325,
+    "off_entry_signal_quality": {
+      "mean": 1.1404,
+      "median": 1.0,
+      "bucket_counts": {
+        "0.50-0.99": 0,
+        "1.00-1.24": 6506,
+        "1.25-1.49": 2200,
+        "1.50-1.99": 6,
+        "2.00-2.49": 31,
+        "2.50-3.00": 204
+      }
+    },
+    "soft_entry_signal_quality": {
+      "mean": 0.9537,
+      "median": 0.81,
+      "bucket_counts": {
+        "0.50-0.99": 5875,
+        "1.00-1.24": 734,
+        "1.25-1.49": 1757,
+        "1.50-1.99": 374,
+        "2.00-2.49": 126,
+        "2.50-3.00": 81
+      }
+    }
+  }
+}

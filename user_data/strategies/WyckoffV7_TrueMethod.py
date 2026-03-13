@@ -343,12 +343,10 @@ class WyckoffV7_TrueMethod(IStrategy):
     # Task 3.5: 熊市防御止损（markdown 环境下多头收紧至 -6%）
     bear_market_stoploss: float = -0.06
     # ROI设置 - 威科夫真实方法版
-    # 50%目标
-    # 1小时后30%
-    # 3小时后15%
-    # 6小时后8%
-    # 12小时后3%
-    minimal_roi = {'0': 0.5, '60': 0.3, '180': 0.15, '360': 0.08, '720': 0.03}
+    # P0-E1 结论（2026-03-13）：去掉 3% floor 后全量 +330pp / CAGR +27pp / 熊市 SQN+1.18，Max DD 仅+1.24pp
+    # nofloat 已通过三段回测验证，升级为默认值
+    # 原表：{'0': 0.5, '60': 0.3, '180': 0.15, '360': 0.08, '720': 0.03}
+    minimal_roi = {'0': 0.5, '60': 0.3, '180': 0.15, '360': 0.08}
     # === Phase 1: Weis Wave 参数 ===
     # Milestone 1.1: Wave Segmentation Engine 参数
     wave_min_percent = DecimalParameter(0.005, 0.015, default=0.008, space='buy')  # 最小波段0.8%
@@ -387,6 +385,7 @@ class WyckoffV7_TrueMethod(IStrategy):
     use_daily_gate   = os.getenv('WY_P1_USE_DAILY_GATE', '1').lower() not in ('0', 'false', 'off')
     daily_gate_mode  = os.getenv('WY_P1_DAILY_GATE_MODE', 'off').lower()  # 默认 off；TR行情可切换 soft/hard
     daily_gate_k     = float(os.getenv('WY_P1_DAILY_GATE_K', '0.25'))
+    daily_tr_conflict_score = float(os.getenv('WY_P1_DAILY_TR_CONFLICT_SCORE', '0.30'))
     daily_tr_window_main = int(os.getenv('WY_P1_DAILY_TR_WINDOW_MAIN', '60'))
     daily_tr_window_fast = int(os.getenv('WY_P1_DAILY_TR_WINDOW_FAST', '20'))
     daily_tr_window_slow = int(os.getenv('WY_P1_DAILY_TR_WINDOW_SLOW', '120'))
@@ -398,6 +397,7 @@ class WyckoffV7_TrueMethod(IStrategy):
     daily_tr_core_band_offset = float(os.getenv('WY_P1_DAILY_TR_CORE_BAND_OFFSET', '0.25'))
     daily_tr_fakeout_window = int(os.getenv('WY_P1_DAILY_TR_FAKEOUT_WINDOW', '3'))
     daily_tr_break_buffer = float(os.getenv('WY_P1_DAILY_TR_BREAK_BUFFER', '1.02'))
+    daily_gate_weak_threshold = float(os.getenv('WY_P1_DAILY_GATE_WEAK_THRESHOLD', '1.6'))  # I3: 弱信号额外惩罚阈值
     # P2: Composite Man RS 对照基准（默认 BTC 永续）
     # P2 baseline（2026-03-13 固化）: ETH/USDT:USDT 基准，soft_defense=1，RR_extra=0.40
     rs_benchmark_pair = os.getenv('WY_RS_BENCHMARK_PAIR', 'ETH/USDT:USDT')
@@ -412,6 +412,10 @@ class WyckoffV7_TrueMethod(IStrategy):
     rs_bear_sos_quality_gate: float = float(os.getenv('WY_RS_BEAR_SOS_QUALITY_GATE', '70'))
     # P2-fix-B: daily_choch+bear_mode 无条件收紧多头止损至 -6% 入场源（无 RS 依赖，2026-03-13）
     use_rs_bear_choch_tight_sl = os.getenv('WY_RS_BEAR_CHOCH_TIGHT_SL', '1').lower() not in ('0', 'false', 'off')
+    # P3: 波段级 Effort/Result 背离（默认关闭，验证通过后可手动开启）
+    # 作用：swing_up_er_weak → 辅助提前退出；swing_down_er_exhaustion → Spring 质量×1.15
+    # 开启方式：docker run -e WY_P3_SWING_ER=1
+    use_p3_swing_er = os.getenv('WY_P3_SWING_ER', '0').lower() not in ('0', 'false', 'off')
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
@@ -572,6 +576,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                 tr_window_slow=self.daily_tr_window_slow,
                 tr_min_overlap=self.daily_tr_min_overlap,
                 tr_slow_min_overlap=self.daily_tr_slow_min_overlap,
+                tr_conflict_score=self.daily_tr_conflict_score,
                 tr_width_min_atr=self.daily_tr_width_min_atr,
                 tr_width_max_atr=self.daily_tr_width_max_atr,
                 core_band_offset=self.daily_tr_core_band_offset,
@@ -583,6 +588,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                 '✅ DailyTRDetector initialized '
                 f'(win={self.daily_tr_window_main}/{self.daily_tr_window_fast}/{self.daily_tr_window_slow}, '
                 f'overlap={self.daily_tr_min_overlap:.2f}/{self.daily_tr_slow_min_overlap:.2f}, '
+                f'conflict={self.daily_tr_conflict_score:.2f}, '
                 f'width_atr={self.daily_tr_width_min_atr:.2f}-{self.daily_tr_width_max_atr:.2f}, '
                 f'core={self.daily_tr_core_band_offset:.2f}, fakeout={self.daily_tr_fakeout_window}, '
                 f'buffer={self.daily_tr_break_buffer:.3f})'
@@ -669,6 +675,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         # Milestone 1.1: Wave Segmentation Engine
         # Stage 1: 使用模块化的波段分析
         dataframe = self.wave_analyzer._segment_weis_waves(dataframe)
+        # P3: 波段级 E/R 背离信号（增量层，不覆盖 bar 级信号）
+        if self.use_p3_swing_er and self.wave_analyzer:
+            dataframe = self.wave_analyzer.compute_swing_er_signals(dataframe)
+        else:
+            dataframe['swing_up_er_weak'] = False
+            dataframe['swing_down_er_exhaustion'] = False
         # Milestone 1.2: Effort-Result Calculator (Priority 3 增强版)
         dataframe = self._calculate_enhanced_effort_result_harmony(dataframe)
         # Milestone 1.3: SOT Detection (预留接口)
@@ -2756,7 +2768,8 @@ class WyckoffV7_TrueMethod(IStrategy):
                 sq_orig = dataframe.loc[soft_adj_mask, 'signal_quality'].copy()
                 sq_adj  = sq_orig * (1.0 + _clipped_score[soft_adj_mask] * _k)
                 # 保护阀：弱信号 + 日线不支持时额外惩罚
-                penalty_mask = soft_adj_mask & (_gate_score < 0) & (dataframe['signal_quality'] < 1.6)
+                _weak_threshold = getattr(self, 'daily_gate_weak_threshold', 1.6)
+                penalty_mask = soft_adj_mask & (_gate_score < 0) & (dataframe['signal_quality'] < _weak_threshold)
                 sq_adj[penalty_mask[soft_adj_mask]] = sq_adj[penalty_mask[soft_adj_mask]] * 0.9
                 # 防越界
                 sq_adj = sq_adj.clip(0.5, 3.0)
@@ -2766,6 +2779,26 @@ class WyckoffV7_TrueMethod(IStrategy):
                 logger.info(
                     f'P1 daily_gate soft模式: k={_k}, '
                     f'加分={_boosted}笔 / 降分={_penalized}笔'
+                )
+
+        # === P3: 下跌波枯竭 → Spring 可信度增强（增量层，signal_quality ×1.15）===
+        # 原理：下跌波高努力低结果 → 抛盘无法推价下跌 → 供应枯竭 → Spring 入场可信度上升
+        # 约束：不覆盖 bar 级 E/R，仅在 Spring 信号 + swing_down_er_exhaustion 共振时生效
+        if self.use_p3_swing_er:
+            _swing_down_exh = dataframe.get(
+                'swing_down_er_exhaustion', pd.Series(False, index=dataframe.index)
+            ).astype(bool)
+            _spring_signals = (
+                spring_3_entry | spring_2_entry | spring_1_entry | spring_recovery_entry
+            )
+            spring_p3_boost_mask = _spring_signals & _swing_down_exh & final_entry
+            if spring_p3_boost_mask.any():
+                dataframe.loc[spring_p3_boost_mask, 'signal_quality'] = (
+                    dataframe.loc[spring_p3_boost_mask, 'signal_quality'] * 1.15
+                ).clip(upper=3.0)
+                n_p3_boost = int(spring_p3_boost_mask.sum())
+                logger.info(
+                    f'P3 Spring+下跌波枯竭共振: {n_p3_boost} 个 Spring 信号质量×1.15'
                 )
 
         # === SOS 退出逻辑优化：准备元数据（移至 signal_quality 计算之后，含 JAC 共振因子）===
@@ -3161,6 +3194,21 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 使用新的两阶段气候退出
         # Phase 2 优化退出信号（宽松版本）
         exit_condition = sot_exit | severe_divergence_exit | down_wave_exit | wyckoff_climax_exit | efficiency_decline_exit | support_break_exit | quality_deterioration_exit | comprehensive_weakness_exit
+
+        # P3: 波段级上涨 E/R 背离退出（增量信号，不覆盖原逻辑）
+        # 条件：波段级弱势 AND 当前处于上涨波段 AND bar 级也有警告（双重确认，降低误触发）
+        if self.use_p3_swing_er:
+            swing_er_exit = (
+                dataframe.get('swing_up_er_weak', pd.Series(False, index=dataframe.index)) &
+                (dataframe['wave_direction'] == 'up') &
+                dataframe['wyckoff_warning']   # bar 级需同时有警告，防止孤立误触发
+            )
+            exit_condition = exit_condition | swing_er_exit
+            swing_er_exit_cnt = int(swing_er_exit.sum())
+            if swing_er_exit_cnt > 0:
+                logger.info(f'P3 swing_up_er_weak 退出信号: {swing_er_exit_cnt} 根 K 线')
+        else:
+            swing_er_exit = pd.Series(False, index=dataframe.index)
         dataframe.loc[exit_condition, 'exit_long'] = 1
         # 退出标签（包含Phase 2信号）
         # 核心退出标签
@@ -3173,6 +3221,9 @@ class WyckoffV7_TrueMethod(IStrategy):
         dataframe.loc[support_break_exit, 'exit_tag'] = 'wyckoff_support_break'  # Phase 2
         dataframe.loc[quality_deterioration_exit, 'exit_tag'] = 'wyckoff_quality'  # Phase 2
         dataframe.loc[comprehensive_weakness_exit, 'exit_tag'] = 'wyckoff_weakness'  # Phase 2
+        # P3: 波段级上涨 E/R 背离退出标签
+        if self.use_p3_swing_er:
+            dataframe.loc[swing_er_exit, 'exit_tag'] = 'p3_swing_up_er_weak'  # P3
 
         # ==========================================================================
         # Task 2.10: SOW 快速平多（exit_long）+ 空头止盈（exit_short）
