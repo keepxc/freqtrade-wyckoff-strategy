@@ -1,0 +1,39 @@
+================================================================================
+Quality Bucket Analysis Report
+================================================================================
+Total Trades: 374
+Analysis Date: 2026-03-14 14:47:06
+
+Quality Tier Statistics:
+--------------------------------------------------------------------------------
+Tier            Count    WinRate    AvgProfit    PF       Sharpe   MaxDD     
+--------------------------------------------------------------------------------
+exceptional     2            50.0%       1.92%   0.80   -0.11      0.00%
+high            88           96.6%       3.26%  39.14    1.17      3.26%
+medium          263          68.4%       2.95%   2.25    0.30     24.53%
+low             3            33.3%       0.17%   0.18   -0.82      0.61%
+very_low        18           33.3%       8.11%   1.03    0.01     26.43%
+
+Validation Results:
+--------------------------------------------------------------------------------
+Overall: ❌ FAILED
+
+  ❌ sufficient_samples
+  ❌ win_rate_monotonic
+  ❌ pf_monotonic
+  ✅ significant_difference
+
+Warnings:
+  ⚠️ exceptional tier has only 2 samples (min: 10)
+  ⚠️ low tier has only 3 samples (min: 10)
+  ⚠️ Win rate is not monotonically decreasing across quality tiers
+  ⚠️ Profit Factor is not monotonically decreasing across quality tiers
+
+Recommendations:
+  ⚠️ Quality mapping validation failed. DO NOT enable dynamic position sizing.
+  Recommended actions:
+  1. Collect more samples for under-represented tiers
+  2. Review quality scoring logic for inconsistencies
+  3. Consider adjusting quality tier thresholds
+
+================================================================================

@@ -66,6 +66,9 @@ Phase E（价格上涨）：
     bars_since_bc            : int  — 距上次 BC 已过 K 线数（999=未发生）
     tr_midpoint              : float — 当前积累/派发交易区间中轴价位
     tr_phase_tag             : str   — 'accum' / 'distrib' / 'unknown'（区间性质）
+    tr_upper                 : float — 名义 TR 上边界（Phase A 完成后锁定为 AR 高点；历史结构字段，BC 不清零）
+    tr_lower                 : float — 名义 TR 下边界（Phase A 完成后锁定为 SC 低点；历史结构字段，BC 不清零）
+    phase_b_high             : float — Phase B 期间观测到的上探最高价（诊断 UT/UTAD 幅度用；不参与 tr_upper 更新）
 """
 
 import numpy as np
@@ -87,6 +90,9 @@ _ST_SC_VOLUME_RATIO = 0.5  # 积累端 ST：成交量 < SC 量 × 0.5（Task 3.4
 _ST_BC_VOLUME_RATIO = 0.5  # 派发端 ST：成交量 < BC 量 × 0.5（Task 3.4）
 _ST_LOOKBACK = 80        # ST 最长在 SC 后多少根 K 线内
 _PHASE_B_MAX_BARS = 300  # Phase B 横盘最长容忍 K 线数
+_PHASE_B_MIN_BARS = 20   # Phase B 最短驻留时间（1H 默认 20 bars ≈ 20 小时）
+                         # 防止 Phase A→B→C→D 过短序列违反因果定律（P6-2）
+                         # 经验参考：15m≈24~32, 1H≈20, 4H≈10~12, 1D≈6~10
 _SOW_AFTER_BC_MIN = 5    # BC 后至少 5 根才可确认 SOW（防误判）
 
 
@@ -220,6 +226,9 @@ class EventSequenceStateMachine:
         dataframe['phase_confidence'] = 0.0
         dataframe['tr_midpoint']      = 0.0
         dataframe['tr_phase_tag']     = 'unknown'
+        dataframe['tr_upper']         = np.nan   # P6-0: 名义 TR 上边界（Phase A 完成后锁定）
+        dataframe['tr_lower']         = np.nan   # P6-0: 名义 TR 下边界（SC 低点锁定）
+        dataframe['phase_b_high']     = np.nan   # P6-0: Phase B 期间上探最高值（诊断用）
         dataframe['ar_speed_valid']   = False    # Task 3.4：AR 在 3-10 根窗口内且为局部高点
         dataframe['st_type']          = 'none'   # Task 3.4：'accumulation'/'distribution'/'none'
 
@@ -551,6 +560,10 @@ class EventSequenceStateMachine:
 
         seq_spring_confirmed：复用 spring_detected（数值上等同，但作为序列上下文的
         显式字段保存，避免后续直接依赖 spring_detected 的字段名语义歧义）。
+
+        P6-2（2026-03-16）：在允许 Spring 触发 Phase C 前，加入 Phase B 最小时长
+        前置校验（_PHASE_B_MIN_BARS）。Phase B 持续时间不足时，忽略该 Spring，
+        防止短促 A→B→C→D→E 序列违反威科夫因果定律。
         """
         spring_detected = dataframe.get('spring_detected', pd.Series(False, index=dataframe.index))
         sos_detected    = dataframe.get(
@@ -558,23 +571,36 @@ class EventSequenceStateMachine:
             pd.Series(False, index=dataframe.index)
         )
         phase_a_done = dataframe['accum_phase_a_complete']
+        in_b_done    = dataframe['accum_in_phase_b']
         n = len(dataframe)
 
         # seq_spring_confirmed：Phase A/B 之后出现的 spring
         seq_spring = np.zeros(n, dtype=bool)
         in_c       = np.zeros(n, dtype=bool)
 
-        spring_seen   = False
-        sos_seen      = False
-        spring_vals   = spring_detected.values
-        sos_vals      = sos_detected.values
-        phase_a_vals  = phase_a_done.values
+        spring_seen       = False
+        sos_seen          = False
+        spring_vals       = spring_detected.values
+        sos_vals          = sos_detected.values
+        phase_a_vals      = phase_a_done.values
+        in_b_vals         = in_b_done.values
+        phase_b_start_idx = -1   # 当前 Phase B 起始 bar 索引（-1=未进入）
+        prev_in_b         = False
 
         for i in range(n):
+            # P6-2: 追踪 Phase B 起始（False→True 跳变时记录）
+            if in_b_vals[i] and not prev_in_b:
+                phase_b_start_idx = i
+            prev_in_b = in_b_vals[i]
+
             if spring_vals[i] and phase_a_vals[i]:
-                spring_seen = True
-                sos_seen    = False   # Spring 重置 SOS 标记（新周期开始）
-                seq_spring[i] = True
+                # P6-2 guard: Phase B 必须已持续至少 _PHASE_B_MIN_BARS 根 K 线
+                phase_b_duration = (i - phase_b_start_idx) if phase_b_start_idx >= 0 else 0
+                if phase_b_duration >= _PHASE_B_MIN_BARS:
+                    spring_seen = True
+                    sos_seen    = False   # Spring 重置 SOS 标记（新周期开始）
+                    seq_spring[i] = True
+                # else: Phase B 时间不足，跳过此 Spring（不进入 Phase C）
 
             if spring_seen and spring_vals[i]:
                 seq_spring[i] = True
@@ -913,51 +939,101 @@ class EventSequenceStateMachine:
         - 派发区（tr_phase_tag='distrib'）：AR 低点 ~ BC 高点的中值
 
         中轴供 Task 3.3 Phase 识别和 Task 2.12 P&F 目标位对齐使用。
+
+        P6-0 新增字段（2026-03-16）：
+          tr_upper    — Phase A 完成后锁定的名义 TR 上边界（ar_high），不随 Phase B 新高更新。
+                        BC 出现时值保留（历史结构字段），但下游应同时检查 accum_phase_a_complete。
+          tr_lower    — 对应积累周期 SC 低点的名义 TR 下边界，与 tr_upper 同步锁定。
+          phase_b_high — Phase B 期间观测到的上探极值（诊断 UT/UTAD 幅度，不写入 tr_upper）。
         """
         n = len(dataframe)
 
-        phase_vals  = dataframe['wyckoff_phase'].values
-        close_vals  = dataframe['close'].values
-        high_vals   = dataframe['high'].values
-        low_vals    = dataframe['low'].values
+        phase_vals       = dataframe['wyckoff_phase'].values
+        high_vals        = dataframe['high'].values
+        low_vals         = dataframe['low'].values
+        phase_a_vals     = dataframe['accum_phase_a_complete'].values
+        in_b_vals        = dataframe['accum_in_phase_b'].values
 
-        tr_mid      = np.zeros(n, dtype=float)
-        tr_tag      = ['unknown'] * n
+        tr_mid           = np.zeros(n, dtype=float)
+        tr_tag           = ['unknown'] * n
+        tr_upper_arr     = np.full(n, np.nan)
+        tr_lower_arr     = np.full(n, np.nan)
+        phase_b_high_arr = np.full(n, np.nan)
 
-        # 滚动记录 SC 后的低点（TR 底部）和 AR 后的高点（TR 顶部）
-        sc_low  = 0.0
-        ar_high = 0.0
-        bc_high = 0.0
+        # 积累侧滚动状态
+        sc_low          = 0.0
+        ar_high         = 0.0
+        locked_tr_upper = np.nan   # Phase A 完成后锁定，不再因新高更新
+        locked_tr_lower = np.nan
+        phase_a_locked  = False
+        pb_high         = np.nan   # Phase B 上探极值，持续更新
+
+        # 派发侧滚动状态
+        bc_high     = 0.0
         ar_low_dist = 0.0
 
-        sc_mask  = dataframe['seq_sc_confirmed'].values
-        ar_mask  = dataframe['seq_ar_confirmed'].values
-        bc_mask  = dataframe['seq_bc_confirmed'].values
+        sc_mask = dataframe['seq_sc_confirmed'].values
+        ar_mask = dataframe['seq_ar_confirmed'].values
+        bc_mask = dataframe['seq_bc_confirmed'].values
 
         for i in range(n):
+            # SC：新积累周期开始，重置本周期内所有滚动状态
             if sc_mask[i]:
-                sc_low  = low_vals[i]
-                ar_high = 0.0  # 重置 AR 高点
+                sc_low          = low_vals[i]
+                ar_high         = 0.0
+                locked_tr_upper = np.nan   # 新周期，旧锁定已无意义
+                locked_tr_lower = np.nan
+                phase_a_locked  = False
+                pb_high         = np.nan
 
             if ar_mask[i]:
-                ar_high = max(ar_high, high_vals[i])
+                ar_high     = max(ar_high, high_vals[i])
                 ar_low_dist = low_vals[i]
 
             if bc_mask[i]:
                 bc_high = high_vals[i]
+                # BC 出现：积累侧 accum_phase_a_complete 将被上游重置为 False
+                # 但 locked_tr_upper/lower 保留历史值，供分配侧诊断引用
+                # （下游 P6-1/P6-3 必须同时检查 accum_phase_a_complete == True）
 
+            # Phase A 完成后首次锁定 tr_upper/tr_lower
+            # 此后 Phase B 内的新高只写入 phase_b_high，不更新 locked_tr_upper
+            if phase_a_vals[i] and not phase_a_locked and ar_high > 0 and sc_low > 0:
+                locked_tr_upper = ar_high
+                locked_tr_lower = sc_low
+                phase_a_locked  = True
+
+            # phase_b_high：Phase B 内持续更新上探极值（诊断用，不写入 tr_upper）
+            if in_b_vals[i]:
+                if np.isnan(pb_high):
+                    pb_high = high_vals[i]
+                else:
+                    pb_high = max(pb_high, high_vals[i])
+
+            # 写入结构边界字段（历史结构字段，一旦锁定即保留）
+            if not np.isnan(locked_tr_upper):
+                tr_upper_arr[i] = locked_tr_upper
+                tr_lower_arr[i] = locked_tr_lower
+
+            if not np.isnan(pb_high):
+                phase_b_high_arr[i] = pb_high
+
+            # tr_midpoint（保持现有行为，由当前周期 sc_low/ar_high 实时计算）
             p = phase_vals[i]
             if p in ('phase_a', 'phase_b', 'phase_c', 'phase_d', 'phase_e'):
                 if sc_low > 0 and ar_high > 0:
-                    tr_mid[i]  = (sc_low + ar_high) / 2.0
-                    tr_tag[i]  = 'accum'
+                    tr_mid[i] = (sc_low + ar_high) / 2.0
+                    tr_tag[i] = 'accum'
             elif p in ('dist_phase_a', 'dist_phase_b', 'dist_phase_c', 'dist_phase_d'):
                 if bc_high > 0 and ar_low_dist > 0:
-                    tr_mid[i]  = (bc_high + ar_low_dist) / 2.0
-                    tr_tag[i]  = 'distrib'
+                    tr_mid[i] = (bc_high + ar_low_dist) / 2.0
+                    tr_tag[i] = 'distrib'
 
-        dataframe['tr_midpoint']  = tr_mid
-        dataframe['tr_phase_tag'] = tr_tag
+        dataframe['tr_midpoint']   = tr_mid
+        dataframe['tr_phase_tag']  = tr_tag
+        dataframe['tr_upper']      = tr_upper_arr
+        dataframe['tr_lower']      = tr_lower_arr
+        dataframe['phase_b_high']  = phase_b_high_arr
         return dataframe
 
     # =========================================================================

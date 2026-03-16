@@ -1,0 +1,126 @@
+{
+  "test_rule": {
+    "rule_id": "test_rule",
+    "rule_name": "Test Rule",
+    "enabled": false,
+    "version": "1.0.0",
+    "author": "",
+    "created_at": "2026-03-14T07:17:54.572912",
+    "description": "Test rule for validation",
+    "parameters": {},
+    "rollback_version": null,
+    "audit_log": [
+      {
+        "action": "registered",
+        "timestamp": "2026-03-14T07:17:54.572925",
+        "enabled": false
+      },
+      {
+        "action": "enabled",
+        "timestamp": "2026-03-14T07:17:54.577768",
+        "reason": "Testing"
+      },
+      {
+        "action": "disabled",
+        "timestamp": "2026-03-14T07:17:54.595917",
+        "reason": "Testing"
+      }
+    ]
+  },
+  "daily_gate_soft_mode": {
+    "rule_id": "daily_gate_soft_mode",
+    "rule_name": "Daily Gate Soft Mode",
+    "enabled": false,
+    "version": "1.0.0",
+    "author": "system",
+    "created_at": "2026-03-14T07:23:24.710131",
+    "description": "Daily gate soft mode (no hard block)",
+    "parameters": {
+      "mode": "soft"
+    },
+    "rollback_version": null,
+    "audit_log": [
+      {
+        "action": "registered",
+        "timestamp": "2026-03-14T07:23:24.710144",
+        "enabled": false
+      },
+      {
+        "action": "enabled",
+        "timestamp": "2026-03-14T07:23:24.782545",
+        "reason": "演示 P1 soft mode 测试"
+      },
+      {
+        "action": "disabled",
+        "timestamp": "2026-03-14T07:23:24.806674",
+        "reason": "演示完成，恢复默认状态"
+      }
+    ]
+  },
+  "wave_er_exit_enhancement": {
+    "rule_id": "wave_er_exit_enhancement",
+    "rule_name": "Wave E/R Exit Enhancement",
+    "enabled": false,
+    "version": "1.0.0",
+    "author": "system",
+    "created_at": "2026-03-14T07:23:24.714886",
+    "description": "Use wave-level effort/result for exit enhancement",
+    "parameters": {
+      "threshold": 0.7
+    },
+    "rollback_version": null,
+    "audit_log": [
+      {
+        "action": "registered",
+        "timestamp": "2026-03-14T07:23:24.714907",
+        "enabled": false
+      }
+    ]
+  },
+  "market_env_routing": {
+    "rule_id": "market_env_routing",
+    "rule_name": "Market Environment Signal Routing",
+    "enabled": false,
+    "version": "1.0.0",
+    "author": "system",
+    "created_at": "2026-03-14T07:23:24.740133",
+    "description": "Route signals based on market environment",
+    "parameters": {
+      "enabled_envs": [
+        "markup",
+        "trading_range"
+      ]
+    },
+    "rollback_version": null,
+    "audit_log": [
+      {
+        "action": "registered",
+        "timestamp": "2026-03-14T07:23:24.740148",
+        "enabled": false
+      }
+    ]
+  },
+  "dynamic_position_sizing": {
+    "rule_id": "dynamic_position_sizing",
+    "rule_name": "Dynamic Position Sizing",
+    "enabled": false,
+    "version": "1.0.0",
+    "author": "system",
+    "created_at": "2026-03-14T07:23:24.760682",
+    "description": "Adjust position size based on quality bucket",
+    "parameters": {
+      "mode": "defensive",
+      "high_multiplier": 1.0,
+      "medium_multiplier": 0.85,
+      "low_multiplier": 0.5
+    },
+    "rollback_version": null,
+    "audit_log": [
+      {
+        "action": "registered",
+        "timestamp": "2026-03-14T07:23:24.760725",
+        "enabled": false
+      }
+    ]
+  }
+}

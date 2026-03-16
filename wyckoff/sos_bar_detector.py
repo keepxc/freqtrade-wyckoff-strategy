@@ -186,6 +186,102 @@ class SOSBarDetector:
             logger.debug("SOS Bar 检测完成: 未发现符合四大硬指标的 SOS Bar")
         
         return dataframe
+
+    # =========================================================================
+    # P6-1：SOS Bar 后续确认窗口（sos_bar_confirmed）
+    # =========================================================================
+
+    # 确认窗口参数（可配置）
+    _SOS_CONFIRM_WINDOW = 3            # 默认 3 根，保守模式可调至 5
+    _SOS_CONFIRM_EPSILON_ATR_MULT = 0.10  # epsilon = 0.10 × ATR_14
+
+    def confirm_sos_bars(self, dataframe: DataFrame) -> DataFrame:
+        """
+        P6-1：为 sos_bar_detected 增加后续确认窗口，输出 sos_bar_confirmed。
+
+        目的：过滤 UTAD 式假突破（突破后快速失守回 TR 内部），保留真实 SOS/JAC
+        （突破后站稳 TR 上边界以上）。
+
+        判据定稿（2026-03-16 理论沟通）：
+          前置条件（四项，缺一不触发）：
+            - sos_bar_detected == True
+            - accum_phase_a_complete == True
+            - tr_upper 非 NaN（P6-0 提供）
+            - atr 非 NaN
+
+          快速失守否决（方案 A：相邻连续，非窗口累计）：
+            检查未来 3 根中的两组相邻对：(i+1, i+2) 和 (i+2, i+3)
+            若任一组同时满足 close < tr_upper - epsilon → sos_bar_confirmed = False
+
+          确认：未触发否决 → sos_bar_confirmed = True
+
+          增强（仅加分，非硬门槛）：close[i+3] >= tr_upper - epsilon → 质量加分
+
+        参数：
+          _SOS_CONFIRM_WINDOW           = 3
+          _SOS_CONFIRM_EPSILON_ATR_MULT = 0.10
+        """
+        dataframe['sos_bar_confirmed'] = False
+
+        required_cols = ['sos_bar_detected', 'accum_phase_a_complete', 'tr_upper', 'atr']
+        for col in required_cols:
+            if col not in dataframe.columns:
+                logger.warning(f"⚠️ P6-1 confirm_sos_bars: 缺少字段 {col}，跳过确认逻辑")
+                return dataframe
+
+        n              = len(dataframe)
+        sos_vals       = dataframe['sos_bar_detected'].values
+        phase_a_vals   = dataframe['accum_phase_a_complete'].values
+        tr_upper_vals  = dataframe['tr_upper'].values
+        atr_vals       = dataframe['atr'].values
+        close_vals     = dataframe['close'].values
+        confirmed      = np.zeros(n, dtype=bool)
+
+        for i in range(n):
+            # 前置条件
+            if not sos_vals[i]:
+                continue
+            if not phase_a_vals[i]:
+                continue
+            tr_u = tr_upper_vals[i]
+            atr  = atr_vals[i]
+            if np.isnan(tr_u) or np.isnan(atr) or atr <= 0:
+                continue
+
+            epsilon = self._SOS_CONFIRM_EPSILON_ATR_MULT * atr
+
+            # 窗口边界：防止尾部越界
+            w = self._SOS_CONFIRM_WINDOW  # = 3
+            if i + w >= n:
+                # 尾部 bar：窗口不完整，保守处理为不确认
+                continue
+
+            c1 = close_vals[i + 1]
+            c2 = close_vals[i + 2]
+            c3 = close_vals[i + 3]
+            threshold = tr_u - epsilon
+
+            # 快速失守否决（方案 A：相邻连续 2 根）
+            pair_1_fails = (c1 < threshold) and (c2 < threshold)  # (i+1, i+2)
+            pair_2_fails = (c2 < threshold) and (c3 < threshold)  # (i+2, i+3)
+
+            if pair_1_fails or pair_2_fails:
+                # 快速失守，不确认
+                continue
+
+            confirmed[i] = True
+
+        dataframe['sos_bar_confirmed'] = confirmed.astype(bool)
+
+        confirmed_count = int(confirmed.sum())
+        sos_count       = int(sos_vals.sum())
+        filtered_count  = sos_count - confirmed_count
+        if sos_count > 0:
+            logger.info(
+                f"P6-1 SOS 确认: {sos_count} 个 detected → {confirmed_count} 个 confirmed"
+                f"（过滤 {filtered_count} 个快速失守/假突破）"
+            )
+        return dataframe
     
     def get_sos_signal_conditions(self, dataframe: DataFrame) -> pd.Series:
         """

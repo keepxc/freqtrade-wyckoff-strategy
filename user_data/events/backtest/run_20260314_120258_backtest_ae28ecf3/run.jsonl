@@ -1,0 +1,3 @@
+{"event_type": "run_event", "event_subtype": "run_end", "run_id": "run_20260314_120258_backtest_ae28ecf3", "ts": "2026-03-14T12:02:58.086664+00:00", "status": "completed", "notes": null}
+{"event_type": "run_event", "event_subtype": "run_end", "run_id": "run_20260314_120258_backtest_ae28ecf3", "ts": "2026-03-14T12:02:58.228525+00:00", "status": "completed", "notes": null}
+{"event_type": "run_event", "event_subtype": "run_end", "run_id": "run_20260314_120258_backtest_ae28ecf3", "ts": "2026-03-14T12:02:58.229492+00:00", "status": "completed", "notes": null}

@@ -140,7 +140,7 @@ class MarketEnvironmentDetector:
             return dataframe
 
         # ── ATR（前瞻防护：用 shift(1) 的 ATR，消除当前K线影响）──────
-        atr = dataframe['atr'].shift(1).fillna(method='bfill').replace(0, np.nan).fillna(1.0)
+        atr = dataframe['atr'].shift(1).ffill().replace(0, np.nan).fillna(1.0)
 
         # ── 近期窗口（最近 half 根）的最高/最低 ──────────────────────
         recent_high = dataframe['high'].rolling(half, min_periods=half // 2).max()

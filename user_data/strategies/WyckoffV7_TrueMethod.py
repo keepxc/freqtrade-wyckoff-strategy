@@ -419,6 +419,15 @@ class WyckoffV7_TrueMethod(IStrategy):
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
+        
+        # P5: 初始化事件桥接器
+        try:
+            from user_data.strategy_event_bridge import StrategyEventBridge
+            self.event_bridge = StrategyEventBridge(self, config)
+        except Exception as e:
+            self.event_bridge = None
+            logger.warning(f'⚠️ StrategyEventBridge initialization failed: {e}')
+        
         # Stage 1: 初始化波段分析器
         if WAVE_ANALYZER_AVAILABLE:
             self.wave_analyzer = WaveAnalyzer(self, WyckoffWave)
@@ -463,6 +472,15 @@ class WyckoffV7_TrueMethod(IStrategy):
         except ImportError as e:
             self.sos_bar_detector = None
             logger.warning(f'⚠️ SOSBarDetector not available: {e}')
+
+        # P6-3: 初始化 LPS 检测器
+        try:
+            from wyckoff.lps_detector import LPSDetector
+            self.lps_detector = LPSDetector(self)
+            logger.info('✅ LPSDetector initialized')
+        except ImportError as e:
+            self.lps_detector = None
+            logger.warning(f'⚠️ LPSDetector not available: {e}')
 
         # Phase 2.4: 初始化 Phase D 确认入场检测器
         if PHASE_D_DETECTOR_AVAILABLE:
@@ -1430,6 +1448,26 @@ class WyckoffV7_TrueMethod(IStrategy):
             try:
                 dataframe = self.event_seq_sm.detect(dataframe)
                 logger.debug('✅ EventSequenceStateMachine 检测完成')
+                # === P6-1：SOS Bar 后续确认窗口 ===
+                # 依赖 accum_phase_a_complete / tr_upper（由 event_seq_sm 产出），必须在此之后运行
+                if self.sos_bar_detector:
+                    try:
+                        dataframe = self.sos_bar_detector.confirm_sos_bars(dataframe)
+                        logger.debug('✅ P6-1 SOS Bar 确认完成（sos_bar_confirmed）')
+                    except Exception as e:
+                        logger.error(f'❌ P6-1 SOS Bar 确认失败: {e}', exc_info=True)
+                        dataframe['sos_bar_confirmed'] = False
+                # === P6-3：LPS 候选事件检测 ===
+                # 依赖 sos_bar_confirmed / tr_upper / accum_phase_a_complete，必须在 P6-1 之后运行
+                if hasattr(self, 'lps_detector') and self.lps_detector:
+                    try:
+                        dataframe = self.lps_detector.detect_lps(dataframe)
+                        logger.debug('✅ P6-3 LPS 检测完成（lps_bar_detected）')
+                    except Exception as e:
+                        logger.error(f'❌ P6-3 LPS 检测失败: {e}', exc_info=True)
+                        dataframe['lps_pullback_active'] = False
+                        dataframe['lps_bar_detected']    = False
+                        dataframe['lps_quality_score']   = 0.0
             except Exception as e:
                 logger.error(f'❌ 事件序列状态机失败: {e}', exc_info=True)
                 dataframe['wyckoff_phase']         = 'unknown'
@@ -1458,6 +1496,10 @@ class WyckoffV7_TrueMethod(IStrategy):
                 dataframe['bars_since_bc']         = 999
                 dataframe['tr_midpoint']           = 0.0
                 dataframe['tr_phase_tag']          = 'unknown'
+                dataframe['tr_upper']              = np.nan
+                dataframe['tr_lower']              = np.nan
+                dataframe['phase_b_high']          = np.nan
+                dataframe['sos_bar_confirmed']     = False
         else:
             dataframe['wyckoff_phase']         = 'unknown'
             dataframe['phase_confidence']      = 0.0
@@ -1485,6 +1527,10 @@ class WyckoffV7_TrueMethod(IStrategy):
             dataframe['bars_since_bc']         = 999
             dataframe['tr_midpoint']           = 0.0
             dataframe['tr_phase_tag']          = 'unknown'
+            dataframe['tr_upper']              = np.nan
+            dataframe['tr_lower']              = np.nan
+            dataframe['phase_b_high']          = np.nan
+            dataframe['sos_bar_confirmed']     = False
 
         # === Task 3.3: Phase A-E Context 识别器 ===
         # 物理依据：基于 Task 3.2 事件序列确认的 Phase 结构，提供 Phase 感知的入场上下文：
@@ -3021,6 +3067,26 @@ class WyckoffV7_TrueMethod(IStrategy):
                 f'Task 2.10 做空信号: SOW={sow_cnt}, UTAD={utad_cnt}, LPSY={lpsy_cnt} → '
                 f'最终 enter_short={short_final_cnt}'
             )
+        
+        # P5 V1B-1: 发射 detector 状态变化事件（仅在值改变时发射）
+        if self.event_bridge is not None:
+            self.event_bridge.emit_detector_events_from_dataframe(
+                pair=metadata['pair'],
+                timeframe=self.timeframe,
+                dataframe=dataframe,
+            )
+
+        # P5 V1B-2: 每根 bar 记录 regime 快照
+        if self.event_bridge is not None:
+            self.event_bridge.emit_regime_snapshot(
+                pair=metadata['pair'],
+                timeframe=self.timeframe,
+                dataframe=dataframe,
+            )
+
+        # P5: 发射信号事件
+        if self.event_bridge is not None:
+            self.event_bridge.emit_signals_from_dataframe(dataframe, metadata)
 
         return dataframe
 
@@ -4513,6 +4579,66 @@ class WyckoffV7_TrueMethod(IStrategy):
             
         验证需求: 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3
         """
+        # 调用内部实现
+        exit_reason = self._custom_exit_impl(pair, trade, current_time, current_rate, current_profit, **kwargs)
+        
+        # P5: 如果有退出原因，发射交易平仓事件
+        if exit_reason is not None and self.event_bridge is not None:
+            duration_minutes = int((current_time - trade.open_date_utc).total_seconds() / 60)
+            self.event_bridge.emit_trade_close(
+                pair=pair,
+                trade_id=str(trade.id),
+                side='long' if not trade.is_short else 'short',
+                exit_reason=exit_reason,
+                exit_tag=exit_reason,
+                exit_price=current_rate,
+                profit_pct=current_profit,
+                profit_abs=trade.calc_profit(current_rate),
+                duration_minutes=duration_minutes,
+                current_time=current_time,
+            )
+        
+        return exit_reason
+    
+    def _custom_exit_impl(self, pair: str, trade: 'Trade', current_time: datetime, current_rate: float, current_profit: float, **kwargs) -> Optional[str]:
+        """
+        自定义退出逻辑 - SOS 优化版
+        
+        实现威科夫理论驱动的退出逻辑，对 SOS (Sign of Strength) 信号交易
+        应用更宽松的退出条件，让强势信号的利润充分奔跑。
+        
+        退出优先级（从高到低）：
+        1. 威科夫气候行动退出 (wyckoff_climax_exit) - 最高优先级，立即退出
+        2. 严重背离退出 (severe_divergence_exit) - 立即退出
+        3. SOT 退出 (sot_exit) - 立即退出
+        4. 下降波段退出 (down_wave_exit) - SOS 专用逻辑应用于此
+        5. ROI 和止损 - 由 Freqtrade 框架自动处理
+        
+        SOS 专用逻辑：
+        - 识别 SOS 交易（enter_tag == 'wyckoff_sos'）
+        - 根据 SOS 质量评分计算退出容忍度乘数（1.0x - 2.0x）
+        - 应用放宽的下降波段退出条件：
+          * 波段效率阈值提高 50%（0.001 → 0.0015）
+          * 要求连续 N 根 K 线确认（默认 2 根）
+          * 忽略低效率波段（< sos_min_wave_efficiency_threshold）
+        
+        向后兼容性：
+        - 非 SOS 交易使用标准退出条件
+        - 高优先级退出信号不受 SOS 容忍度影响
+        
+        Args:
+            pair: 交易对（如 'BTC/USDT'）
+            trade: Freqtrade Trade 对象
+            current_time: 当前时间
+            current_rate: 当前价格
+            current_profit: 当前收益率
+            **kwargs: 其他参数，包含 dataframe
+            
+        Returns:
+            Optional[str]: 退出信号名称，None 表示不退出
+            
+        验证需求: 5.1, 5.2, 5.3, 5.4, 6.1, 6.2, 6.3
+        """
         # ===== 1. 数据可用性检查 =====
         dataframe = kwargs.get('dataframe')
         if dataframe is None or len(dataframe) == 0:
@@ -4691,6 +4817,23 @@ class WyckoffV7_TrueMethod(IStrategy):
                 f'std={pnf_meta["target_standard"]:.2f}  '
                 f'short_cons={pnf_meta["target_short_conservative"]:.2f}'
             )
+        
+        # P5: 发射交易开仓事件
+        if self.event_bridge is not None:
+            trade = kwargs.get('trade')
+            trade_id = str(trade.id) if trade else f"trade_{int(current_time.timestamp())}"
+            self.event_bridge.emit_trade_open(
+                pair=pair,
+                trade_id=trade_id,
+                side=side,
+                enter_tag=entry_tag or 'unknown',
+                entry_price=rate,
+                stake_amount=amount * rate,
+                leverage=1.0,  # 策略不使用杠杆
+                current_time=current_time,
+                dataframe=dataframe_pnf,
+            )
+        
         # 返回 True 确认入场
         return True
 
@@ -4751,3 +4894,11 @@ class WyckoffV7_TrueMethod(IStrategy):
                     logger.warning(f'Failed to store PnF metadata: {e}')
         # 本策略不使用杠杆
         return 1.0
+
+    def __del__(self):
+        """清理资源：关闭事件桥接器"""
+        if hasattr(self, 'event_bridge') and self.event_bridge is not None:
+            try:
+                self.event_bridge.close()
+            except Exception as e:
+                logger.warning(f'⚠️ EventBridge cleanup error: {e}')
