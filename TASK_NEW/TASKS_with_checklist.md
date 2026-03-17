@@ -16,7 +16,7 @@
 
 ---
 
-**最后更新**: 2026-03-14（**P0-E1 nofloat 已升级为新默认**：`minimal_roi` 默认已改为 nofloat 模式；**P1-A 已完成**：维持默认 `daily_gate_mode=off`；**P2 已完成**：Regime-aware 授权系统已实现，默认 disabled，保留为预埋点；**P3 已完成**：波段级 Effort/Result 已实现并验证）
+**最后更新**: 2026-03-17（**P0-Next Core Audit 退出层实验已完成**：V3 DW阈值0.003 ❌，V4 tight SL-8% ❌，架构发现：vectorized信号主导custom_exit；P0-E1 nofloat 已升级为新默认；P1-A、P2、P3 主线任务已完成）
 **详细文档**: `docs/PHASES.md` | `docs/DONE.md` | `docs/PROGRESS.md`
 
 ---
@@ -39,11 +39,12 @@ docker compose logs -f --tail=100 freqtrade
 ## 🔴 当前状态（一眼看清）
 
 **下一个任务**: **进入 vNext 阶段**（2026-03-14）— P0/P1/P2/P3 主线任务已完成，当前版本收尾完成
-**当前基线回测（nofloat 模式，20230101-20260228 --cache none）**: 收益 **809.18%** | 交易 374 笔 | CAGR 101.01% | Sharpe 1.90 | SQN 5.93 | 最大回撤 9.72%
+**当前基线回测（nofloat 模式，20230101-20260228 --cache none）**: 收益 **965.76%** | 交易 393 笔 | CAGR 111.37% | Sharpe 1.94 | SQN 5.91 | 最大回撤 8.13%
 **P0-E1 结论（2026-03-13）**: ✅ nofloat 已升级为新默认，移除 3% ROI floor，全量 +330pp，熊市段 SQN 从 3.19→4.37
 **P1-A 结论（2026-03-13）**: ✅ 已完成，维持默认 `daily_gate_mode = off`（当前挂接形态传导力不足）
 **P2 结论（2026-03-14）**: ✅ 已完成，Regime-aware 授权系统已实现，默认 disabled，保留为预埋点
 **P3 结论（2026-03-13）**: ✅ 已完成，波段级 Effort/Result 已实现并验证，默认关闭预埋
+**P0-Next 退出层优化结论（2026-03-17）**: ✅ Core Audit 发现 axis_support×down_wave WR=65.7% avg=+0.80%（vs roi WR=100% avg=+7.92%）；实验V3/V4均负向；架构发现：freqtrade中vectorized exit信号主导custom_exit；down_wave_threshold不可提高；下一步待定
 **Dry Run**: 🔴 待更新（建议更新至 nofloat 基线）
 ## P1-A：当前挂接形态验证（已完成）
 
@@ -660,6 +661,21 @@ P4 当前不进入执行队列，保留为未来 regime-aware 优化预埋点。
 - [x] ROI floor 实验（P0-E1）：`WY_P0_ROI_MODE` 三档开关，nofloat 通过三段验证，建议升级默认
 - [~] 研究 Phase-aware 退出（`wyckoff/exit_logic.py` ExitLogic 类已有完整实现，但策略未 import/实例化，归档为未来预埋点）
 - [ ] 研究分批止盈 + 动态保护（Freqtrade 原生不支持分批减仓，待研究方案）
+- [x] **P0-Next Core Audit 退出层实验（2026-03-17）**
+  > **背景**: 基线 965.76% (393笔/74%WR/8.13%DD)。Core Audit: axis_support×down_wave=248笔/65.7%WR/+0.80%avg（vs roi=100%WR/+7.92%）
+  >
+  > **架构发现（关键）**：freqtrade回测中vectorized exit先于custom_exit生效；down_wave情形下vectorized覆盖custom_exit的任何门控，因此custom_exit中的down_wave修改全部INERT。
+  >
+  > | 实验 | 结果 | 结论 |
+  > |---|---|---|
+  > | V1 consecutive confirm (custom_exit) | 248→248笔，965%不变 | ❌ INERT |
+  > | V2 profit gate (custom_exit) | 完全一致 | ❌ INERT |
+  > | 架构验证 移除vectorized down_wave | 393→98笔，965%→43% | ❌ 灾难性，custom_exit无法补位 |
+  > | V3 DW阈值0.003 (vectorized) | 393→328笔，965%→569% | ❌ axis_support WR几乎无改善但损失优质退出 |
+  > | V4 axis tight SL -8% | 404笔，965%→956%，trailing 5→17笔 | ❌ 止损太近，总损失-128%→-347% |
+  >
+  > **结论**: 当前架构下 down_wave 退出质量无有效改进路径；trailing_stop收紧反而有害；**基线已恢复 965.76%**。
+  > **预埋代码保留**: `use_axis_support_dw_confirm`/`_check_down_wave_exit_axis_support`(INERT)，`down_wave_eff_threshold`(默认0.001)，`use_axis_weak_tight_sl`(默认off)
 
 约束：
 - 不允许显著增加回撤

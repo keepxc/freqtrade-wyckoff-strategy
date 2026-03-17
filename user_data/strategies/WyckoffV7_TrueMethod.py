@@ -412,6 +412,28 @@ class WyckoffV7_TrueMethod(IStrategy):
     rs_bear_sos_quality_gate: float = float(os.getenv('WY_RS_BEAR_SOS_QUALITY_GATE', '70'))
     # P2-fix-B: daily_choch+bear_mode 无条件收紧多头止损至 -6% 入场源（无 RS 依赖，2026-03-13）
     use_rs_bear_choch_tight_sl = os.getenv('WY_RS_BEAR_CHOCH_TIGHT_SL', '1').lower() not in ('0', 'false', 'off')
+    # P0-Next-1: axis_weak 收紧止损实验（2026-03-17）
+    # 背景：5 笔 TSL 交易全部从入场即下跌至 -12%（max_profit=0），全为 wyckoff_axis_weak
+    # 实验：收紧至 -8%，只牺牲 1 笔微盈（+0.03%），节省 5×4% 损失
+    # 默认关闭（default='0'），开启方式：docker run -e WY_AXIS_WEAK_TIGHT_SL=1
+    use_axis_weak_tight_sl = os.getenv('WY_AXIS_WEAK_TIGHT_SL', '0').lower() not in ('0', 'false', 'off')
+    axis_weak_stoploss: float = -0.08
+    # P0-Next-2: axis_support 差异化 down_wave 确认实验（2026-03-17）
+    # 背景：Core Audit 显示 axis_support×down_wave WR=65.7% vs wave_start×down_wave WR=98.6%
+    # 实验：axis_support持仓要求连续2根K线确认（效率阈值×2.0），wave_start维持原条件
+    # 默认关闭，开启方式：docker run -e WY_AXIS_SUPPORT_DW_CONFIRM=1
+    use_axis_support_dw_confirm = os.getenv('WY_AXIS_SUPPORT_DW_CONFIRM', '0').lower() not in ('0', 'false', 'off')
+    axis_support_dw_consecutive: int = 2    # 连续确认K线数（类比 sos_require_consecutive_down_waves）
+    axis_support_dw_eff_mult: float = 2.0   # 效率阈值倍数: 0.001 → 0.002
+    # 利润门控：axis_support 持仓低于此收益时，不允许 down_wave 出场（强制持有）
+    # 目的：避免在微盈/接近成本时被弱下降波带出；让更多笔转向 roi 出场
+    # 默认 1%，可通过 WY_AXIS_SUPPORT_DW_MIN_PROFIT 覆盖（如 0.005 = 0.5%）
+    axis_support_dw_min_profit: float = float(os.getenv('WY_AXIS_SUPPORT_DW_MIN_PROFIT', '0.01'))
+    # P0-Next-3: 向量化 down_wave 退出效率阈值（2026-03-17）
+    # 背景：axis_support×down_wave WR=65.7%，疑似弱下降波过早结束持仓（效率仅略高于 0.001）
+    # 实验：提高全局效率阈值，过滤弱下降波，观察 axis_support×down_wave WR 是否提升
+    # 默认 0.001（原值不变），开启实验：docker run -e WY_DW_EFF_THRESHOLD=0.003
+    down_wave_eff_threshold: float = float(os.getenv('WY_DW_EFF_THRESHOLD', '0.001'))
     # P3: 波段级 Effort/Result 背离（默认关闭，验证通过后可手动开启）
     # 作用：swing_up_er_weak → 辅助提前退出；swing_down_er_exhaustion → Spring 质量×1.15
     # 开启方式：docker run -e WY_P3_SWING_ER=1
@@ -2467,6 +2489,8 @@ class WyckoffV7_TrueMethod(IStrategy):
         #   Weak   (test<2)  → 保持现有条件（wyckoff_context_ok，需要积累/趋势确认）
 
         # 基础轴线条件（三级共享）
+        # A-2c-1 [新基准 2026-03-17]：过滤极低量入场（volume < 0.5x sma20，坏单率56.1%）
+        # 效果：947.68% → 965.76%，DD 8.47% → 8.13%
         _axis_base = (
             (dataframe['nearest_support'] > 0) &
             (dataframe['support_distance'] < dataframe['dynamic_distance_threshold']) &
@@ -2474,7 +2498,8 @@ class WyckoffV7_TrueMethod(IStrategy):
             (dataframe['test_confidence'] > 0.4) &
             harmony_ok &
             no_sot_warning &
-            quality_ok
+            quality_ok &
+            (dataframe['volume'] >= dataframe['volume_sma_20'] * 0.5)
         )
         not_distribution = dataframe['wyckoff_context'] != 'distribution'
 
@@ -3048,8 +3073,14 @@ class WyckoffV7_TrueMethod(IStrategy):
         short_intent_ok = ~composite_intent_vals.isin(['accumulating', 'trending_up', 'testing'])
         rr_short_ok = dataframe.get('rr_short_standard', pd.Series(0.0, index=dataframe.index)) >= min_rr
 
+        # ── A-1: bear_market_mode 闸门（仅熊市阶段允许空头） ────────────────────
+        # 非熊市阶段禁止入场做空，彻底阻断牛市中空头持续亏损的来源。
+        _short_bear_gate = dataframe.get(
+            'bear_market_mode', pd.Series(False, index=dataframe.index)
+        ).astype(bool)
+
         # ── 最终做空入场 ─────────────────────────────────────────────────────────
-        final_short_entry = short_intent_ok & (sow_entry | utad_entry | lpsy_entry) & rr_short_ok
+        final_short_entry = short_intent_ok & (sow_entry | utad_entry | lpsy_entry) & rr_short_ok & _short_bear_gate
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
         # 入场标签
@@ -3062,10 +3093,11 @@ class WyckoffV7_TrueMethod(IStrategy):
         utad_cnt = utad_entry.sum()
         lpsy_cnt = lpsy_entry.sum()
         short_final_cnt = final_short_entry.sum()
+        bear_gate_cnt   = int(_short_bear_gate.sum())
         if short_final_cnt > 0 or sow_cnt > 0 or utad_cnt > 0 or lpsy_cnt > 0:
             logger.info(
                 f'Task 2.10 做空信号: SOW={sow_cnt}, UTAD={utad_cnt}, LPSY={lpsy_cnt} → '
-                f'最终 enter_short={short_final_cnt}'
+                f'最终 enter_short={short_final_cnt} (bear_gate_bars={bear_gate_cnt})'
             )
         
         # P5 V1B-1: 发射 detector 状态变化事件（仅在值改变时发射）
@@ -3112,8 +3144,13 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 极高努力但结果微弱
         severe_divergence_exit = (dataframe['harmony_score'] < -0.5) & dataframe['wyckoff_warning'] & (dataframe['effort'] > 2.0)
         # 3. 下降波段开始退出
-        # 有效的下降波段
-        down_wave_exit = dataframe['is_wave_start'] & (dataframe['wave_direction'] == 'down') & (dataframe['wave_efficiency'] > 0.001)
+        # A-3: 增加最小位移约束 (≥0.8%) 过滤微幅下降段，仅在有实质性向下动能时退出
+        down_wave_exit = (
+            dataframe['is_wave_start'] &
+            (dataframe['wave_direction'] == 'down') &
+            (dataframe['wave_efficiency'] > self.down_wave_eff_threshold) &  # P0-Next-3: 可配置阈值
+            (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
+        )
         # 4. 威科夫气候行动退出（两阶段确认机制）
         # === 第一阶段：标记"潜在气候区"（不立即退出）===
         # 1. 超买状态检查（价格位置）- 提高阈值降低敏感度
@@ -3259,6 +3296,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 核心退出信号（保持不变）
         # 使用新的两阶段气候退出
         # Phase 2 优化退出信号（宽松版本）
+        # 最终退出条件（down_wave_exit 由向量化信号传递，custom_exit 提供 SOS 专用覆盖）
         exit_condition = sot_exit | severe_divergence_exit | down_wave_exit | wyckoff_climax_exit | efficiency_decline_exit | support_break_exit | quality_deterioration_exit | comprehensive_weakness_exit
 
         # P3: 波段级上涨 E/R 背离退出（增量信号，不覆盖原逻辑）
@@ -4001,7 +4039,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 收盘极低位（控制权转移）
         # 极宽价差（打破趋势背脊）
         # 位移超过前波50%
-        # 或创近期新低
+        # 或创近期新低（A-4 已回退：rolling5 效果不佳，恢复 rolling20）
         change_of_character = (volume_ratio > 2.0) & (close_position < 0.3) & (range_ratio > 1.5) & ((current_wave_displacement > historical_displacement * 1.5) | (dataframe['close'] < dataframe['close'].rolling(20).min()))
         # === 威科夫吸收保护机制 ===
         # 识别"接盘"行为：巨大努力但结果微弱
@@ -4492,6 +4530,54 @@ class WyckoffV7_TrueMethod(IStrategy):
             return (True, exit_reason)
         return (False, '')
 
+    def _check_down_wave_exit_axis_support(self, dataframe: DataFrame, current_index: int) -> Tuple[bool, str]:
+        """
+        检查 axis_support 交易的下降波段退出条件（严格版本）
+
+        Core Audit 发现：axis_support×down_wave WR=65.7% vs wave_start×down_wave WR=98.6%
+        推断存在大量被 down_wave 过早带出的 axis_support 持仓，对应实际应走到 roi 的交易。
+
+        严格策略：
+        1. 效率阈值提高：0.001 * axis_support_dw_eff_mult（默认 0.002）
+        2. 连续确认：当前+前 N-1 根K线均满足条件（默认 N=2）
+
+        实验控制：use_axis_support_dw_confirm=True 时激活，默认关闭（P0-Next-2）
+        """
+        if current_index < 0 or current_index >= len(dataframe):
+            return (False, '')
+        if 'is_wave_start' not in dataframe.columns or 'wave_direction' not in dataframe.columns or 'wave_efficiency' not in dataframe.columns:
+            return (False, '')
+        threshold = 0.001 * self.axis_support_dw_eff_mult
+        consecutive_required = self.axis_support_dw_consecutive
+        # 当前K线必须满足严格阈值
+        cur_ok = (
+            dataframe.loc[current_index, 'is_wave_start'] and
+            dataframe.loc[current_index, 'wave_direction'] == 'down' and
+            dataframe.loc[current_index, 'wave_efficiency'] > threshold
+        )
+        if not cur_ok:
+            return (False, '')
+        # 检查前 N-1 根K线
+        consecutive_count = 1
+        for i in range(1, consecutive_required):
+            prev_index = current_index - i
+            if prev_index < 0:
+                break
+            prev_ok = (
+                dataframe.loc[prev_index, 'is_wave_start'] and
+                dataframe.loc[prev_index, 'wave_direction'] == 'down' and
+                dataframe.loc[prev_index, 'wave_efficiency'] > threshold
+            )
+            if prev_ok:
+                consecutive_count += 1
+            else:
+                break
+        if consecutive_count >= consecutive_required:
+            eff = dataframe.loc[current_index, 'wave_efficiency']
+            reason = f'axis_support_dw_confirmed (eff={eff:.4f}, thr={threshold:.4f}, consec={consecutive_count}/{consecutive_required})'
+            return (True, reason)
+        return (False, '')
+
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: datetime,
                          current_rate: float, current_profit: float, **kwargs) -> float:
         """
@@ -4533,6 +4619,16 @@ class WyckoffV7_TrueMethod(IStrategy):
                             is_short=False, leverage=trade.leverage
                         )
                         return max(sl, -0.99)
+            # P0-Next-1: axis_weak 收紧止损（-8%）
+            # 放在 bear_mode 检查之后：bear_mode 已提前 return -6%（更严），无需额外处理
+            # 注意：不依赖 dataframe，trade.enter_tag 直接可用
+            # 兼容两种标签：wyckoff_axis_support（当前默认）和 wyckoff_axis_weak（A-2f 预检期间）
+            if self.use_axis_weak_tight_sl and trade.enter_tag in ('wyckoff_axis_support', 'wyckoff_axis_weak'):
+                sl = stoploss_from_open(
+                    self.axis_weak_stoploss, current_profit,
+                    is_short=False, leverage=trade.leverage
+                )
+                return max(sl, -0.99)
         # 默认：维持固定入场源止损（等同于原始 stoploss=-0.12 行为，防止 custom_stoploss 产生追踪效应）
         # 重要：直接返回 self.stoploss 会导致每根 K 线追踪—需用 stoploss_from_open 锁定固定止损水位
         return stoploss_from_open(
@@ -4739,11 +4835,23 @@ class WyckoffV7_TrueMethod(IStrategy):
                 logger.debug(f'SOS 交易（{pair}）: 波段指标列不可用，跳过 SOS 优化退出逻辑，使用标准退出条件')
         # === 非 SOS 交易：使用标准下降波段退出条件 ===
         elif safe_get_column(dataframe, 'is_wave_start') and safe_get_column(dataframe, 'wave_direction') and safe_get_column(dataframe, 'wave_efficiency'):
-            # 标准条件：is_wave_start && wave_direction=='down' && wave_efficiency > 0.001
-            if dataframe.loc[current_index, 'is_wave_start'] and dataframe.loc[current_index, 'wave_direction'] == 'down' and (dataframe.loc[current_index, 'wave_efficiency'] > 0.001):
-                wave_efficiency = dataframe.loc[current_index, 'wave_efficiency']
-                logger.info(f'标准下降波段退出: {pair}, 波段效率={wave_efficiency:.4f}, 收益={current_profit:.2%}')
-                return 'wyckoff_down_wave'
+            # P0-Next-2: axis_support/axis_weak 开启严格连续确认（flag 激活时）
+            if self.use_axis_support_dw_confirm and trade.enter_tag in ('wyckoff_axis_support', 'wyckoff_axis_weak'):
+                # 利润门控：低于最低利润阈值时不允许 down_wave 出场
+                if current_profit < self.axis_support_dw_min_profit:
+                    pass  # 低利润 → 跳过 down_wave，等待更高利润
+                else:
+                    should_exit, exit_reason = self._check_down_wave_exit_axis_support(dataframe, current_index)
+                    if should_exit:
+                        logger.info(f'axis_support差异化下降波段退出: {pair}, {exit_reason}, 收益={current_profit:.2%}')
+                        return 'wyckoff_down_wave'
+                # flag 开启时 axis_support 不满足严格条件 → 不触发标准 down_wave
+            else:
+                # 标准条件：is_wave_start && wave_direction=='down' && wave_efficiency > 0.001
+                if dataframe.loc[current_index, 'is_wave_start'] and dataframe.loc[current_index, 'wave_direction'] == 'down' and (dataframe.loc[current_index, 'wave_efficiency'] > 0.001):
+                    wave_efficiency = dataframe.loc[current_index, 'wave_efficiency']
+                    logger.info(f'标准下降波段退出: {pair}, 波段效率={wave_efficiency:.4f}, 收益={current_profit:.2%}')
+                    return 'wyckoff_down_wave'
         # 没有触发任何退出条件
         return None
 

@@ -220,22 +220,27 @@ class AxisSystem:
             return dataframe
         
         # 从 axis_lines 中提取 test_count 并映射到 dataframe
+        # Fix: 追踪最小距离对应的 test_count，而非用已存最小值比较（原逻辑恒不满足条件）
         for i in range(len(dataframe)):
             current_price = dataframe.iloc[i]['close']
             
             support_test_count = 0
             resistance_test_count = 0
+            min_sup_dist = float('inf')
+            min_res_dist = float('inf')
             
             # 找到最近的支撑和阻力的 test_count
             for axis in self.axis_lines:
                 distance = axis.distance_from_price(current_price)
                 
                 if axis.line_type == 'support':
-                    if distance < dataframe.iloc[i]['support_distance']:
+                    if distance < min_sup_dist:
+                        min_sup_dist = distance
                         support_test_count = axis.test_count
                 
                 elif axis.line_type == 'resistance':
-                    if distance < dataframe.iloc[i]['resistance_distance']:
+                    if distance < min_res_dist:
+                        min_res_dist = distance
                         resistance_test_count = axis.test_count
             
             # 更新 dataframe
