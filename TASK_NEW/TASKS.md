@@ -703,7 +703,7 @@ python -c "import sqlite3; conn=sqlite3.connect('user_data/market.db'); [print(f
 ## P7-min 执行顺序
 
 1. `P7-1 signal_decision_trace`
-2. `P7-2 exit_decision_event`
+2. **`P7-2 exit_decision_event` ← 当前主线（2026-03-19）**
 3. `P7-3 P6 trade diff`（条件启动）
 
 ---
@@ -1076,7 +1076,401 @@ axis_support 只有 8.8% 的交易走到 roi（收益 7.92% avg），91.2% 被 d
 
 ---
 
-## P5-V3：受控进化闭环（未来治理层）
+## ▶ 下一主线方向：双通道分流（2026-03-17 更新）
+
+### 背景与决策依据
+
+微调路线已穷尽：trailing 收紧 / down_wave 门控 / EMA 过滤 / confidence 过滤 / axis tier / 高量低量过滤 —— 全部失败或边际极低。
+
+**根本原因**：同一条退出主裁判（down_wave）不适合同时服务两种完全不同语义的入场。
+
+| 入场通道 | 交易语义 | down_wave WR | 适配性 |
+|---------|---------|-------------|--------|
+| `wave_start` | 强趋势 / 快速兑现 | **98.6%** | 极强 |
+| `axis_support` | 支撑承接 / 持仓等待 | **65.7%** | 弱 |
+
+**最优下一步**：拆分两条赚钱子系统，分别量化独立贡献，为差异化退出层/ROI/风险管理提供数据支撑。
+
+---
+
+## C-1：wave_start-only 通道实验 ✅ 已完成 2026-03-17
+
+### 实现方式
+- 环境变量：`WY_CHANNEL=wave_start`，默认关闭
+- 屏蔽块：`channel_mode` 在 `final_entry` 前将非 wave_start 信号全部归零
+
+### 回测结果（backtest-result-2026-03-17_15-03-43）
+
+| 指标 | wave_start-only | Baseline (全通道) |
+|------|--------|---------|
+| 总收益 | **440.71%** | 965.76% |
+| CAGR | 70.54% | 未记录 |
+| 总笔数 | **161** | 393 |
+| 平均卫 | 2.65% | 未记录 |
+| 平均持仓 | 1d 07:53 | 未记录 |
+| **WR** | **96.3%** (155/0/6) | 74.0% |
+| **最大回撤** | **1.23%** | 8.13% |
+| Sharpe | **2.70** | 1.94 |
+| SQN | **12.79** | 5.91 |
+| Calmar | 592.14 | 未记录 |
+| Profit Factor | 112.85 | 未记录 |
+
+退出分布：
+| 退出原因 | 笔数 | avg | WR |
+|---------|-----|-----|-----|
+| wyckoff_down_wave | 139 | +2.13% | 97.8% |
+| roi | 16 | +8.01% | 100% |
+| wyckoff_efficiency_decline | 3 | +0.64% | 33.3% |
+| wyckoff_divergence | 1 | +0.48% | 100% |
+| wyckoff_climax | 2 | +0.04% | 50% |
+
+### 结论
+- wave_start 单独运行：**几乎完美的交易系统**
+- 1.23% DD 远好于 baseline（全部回撤来自 axis_support）
+- SQN 12.79 ＋Sharpe 2.70：质量极高
+- down_wave 退出 WR=97.8%：语义完全适配 wave_start 语义
+
+---
+
+## C-2：axis_support-only 通道实验 ✅ 已完成 2026-03-17
+
+### 实现方式
+- 环境变量：`WY_CHANNEL=axis_support`
+
+### 回测结果（backtest-result-2026-03-17_15-09-xx）
+
+| 指标 | axis_support-only | Baseline (全通道) |
+|------|-----------|---------|
+| 总收益 | **531.70%** | 965.76% |
+| CAGR | 79.14% | 未记录 |
+| 总笔数 | **364** | 393 |
+| 平均卫 | 1.30% | 未记录 |
+| 平均持仓 | 2d 00:34 | 未记录 |
+| **WR** | **71.4%** (260/0/104) | 74.0% |
+| **最大回撤** | **8.13%** | 8.13% |
+| Sharpe | 1.71 | 1.94 |
+| SQN | 5.41 | 5.91 |
+| Calmar | 108.27 | 未记录 |
+| Profit Factor | 2.27 | 未记录 |
+
+退出分布：
+| 退出原因 | 笔数 | avg | WR |
+|---------|-----|-----|-----|
+| wyckoff_down_wave | 318 | +1.09% | 71.4% |
+| roi | 24 | +7.92% | 100% |
+| wyckoff_divergence | 3 | +0.31% | 100% |
+| force_exit | 1 | +0.12% | 100% |
+| wyckoff_efficiency_decline | 4 | -0.64% | 25% |
+| wyckoff_climax | 9 | -0.57% | 44.4% |
+| trailing_stop_loss | 5 | -12.01% | 0% |
+
+### 结论
+- axis_support 是 **所有 DD 的来源**：baseline DD=8.13% 完全由 axis_support 贡献
+- down_wave 退出 WR 只有 71.4%：退出语义与 axis_support 进场语义完全不配
+- roi 路径 WR=100%, avg=+7.92%：这 24 笔才是 axis_support 的 sweet spot
+- TSL 5 笔全部不兌，-12% avg：-83.8pp 直接损失
+
+---
+
+## C-3：双通道综合结论 ✅ 已收口 2026-03-17
+
+### 关键发现
+
+| | wave_start-only | axis_support-only | 全通道 baseline |
+|--|--------|------------|---------|
+| 总收益 | 440.71% | 531.70% | 965.76% |
+| WR | **96.3%** | 71.4% | 74.0% |
+| 最大DD | **1.23%** | 8.13% | 8.13% |
+| Sharpe | **2.70** | 1.71 | 1.94 |
+| SQN | **12.79** | 5.41 | 5.91 |
+| 笔数 | 161 | 364 | 393 |
+| down_wave WR | **97.8%** | 71.4% | 混合 |
+
+**核心论断**：
+1. **wave_start 是高纯度系统**：SQN 12.79 / Sharpe 2.70 / DD 1.23%，不需动，只需保护
+2. **axis_support 是全部 DD 来源**： baseline DD 8.13% 完全是 axis_support 的贡献
+3. **axis_support 的真实电价在 roi**：24 笔 roi (avg +7.92%, WR=100%) 是其核心价值
+4. **down_wave 这个退出语义对 axis_support 根本不适用**：318 笔中 91 笔被错误带出
+5. **两个通道运行时不是简单叠加**：因为 max_open_trades=1，两个通道互相竞争资金，整体结果面目大于单个但质量被抹平
+
+### 决策方向
+
+**选定：路线 A —— 为 axis_support 设计独立 ROI 梯度**
+
+王牌数据：
+- axis_support 中 24 笔走到 roi 的：WR=100%, avg=+7.92%
+- 它们被拦截的 318 笔 down_wave 中有多少笔原本应该加入 roi 组？
+- 目标：把 axis_support 的 roi 占比从 6.6%（=24/364）提到 20-30%，这唯一需要的拤手就是调整 ROI 梯度
+
+**暂不做**：
+- 路线 B（拆独立子策略）：需要 Freqtrade 多实例架构，工程量过大
+- 路线 C（关闭 axis_support）：axis_support 单独 531.7%，有独立价值，射杯了主老
+
+### 下一步：C-4 —— axis_support 部分的独立 ROI 梯度实验
+
+详见 C-4 节点。
+
+---
+
+## C-4：axis_support 退出优化实验系列
+
+### C-4-v1：严格连续确认（CONFIRM flag）❌ FAIL 2026-03-17
+**实验**：WY_AXIS_SUPPORT_DW_CONFIRM=1，axis_support持仓要求2根K线连续确认+效率阈值×2。  
+**结果**：965.76%，393笔，与baseline完全一致。  
+**根因**：BTC 2023-2026强趋势市场中，大多数down_wave效率远高于0.002（双倍阈值仍被轻易满足）。  
+**结论**：阈值调节路径无效。
+
+### C-4-v2：完全禁用 axis_support down_wave ❌ FAIL 2026-03-18
+**实验**：WY_AXIS_NO_DW=1，axis_support持仓完全跳过down_wave退出，依赖ROI+TSL。  
+**实现细节**：
+- 第一次尝试（class variable + custom_exit pass）→ 完全无效  
+- 根因诊断：`populate_exit_trend` 向量化写入 exit_tag='wyckoff_down_wave'，  
+  `custom_exit` 返回 None 无法阻止向量化信号触发  
+- 修复：改用 `confirm_trade_exit` 返回 False 拦截（唯一能取消任何退出的钩子）  
+- 确认 flag 生效后，结果如下：
+
+**C-4-v2 结果（confirm_trade_exit 拦截生效后）**：
+| 指标 | baseline | C-4-v2（禁用DW） |
+|------|----------|-----------------|
+| 总收益 | 965.76% | **86.70%** |
+| 笔数 | 393 | 137 |
+| WR | 74.0% | 70.1% |
+| Sharpe | 1.94 | 0.31 |
+| SQN | 5.91 | 1.60 |
+| Max DD | 8.13% | **18.17%** |
+| TSL亏损笔 | 5笔 avg-12% | **18笔 avg-12%** |
+| axis_support×roi | 24笔 | 38笔 |
+
+**根本结论**：down_wave 对 axis_support 是**保护性退出机制**，不是拖累。  
+- 原先 axis_support×down_wave 85笔亏损（avg约-1~-2%）如不通过DW及时止出  
+  → 拖成TSL -12%的深度亏损（净增13笔×12% ≈ -156%级别损失）  
+- ROI增加从24→38笔（+14笔×+7.75%），但远不足以弥补TSL增加损失  
+- **禁用DW路径已证伪，axis_support必须保留down_wave作为限损机制**
+
+### C-4 系列总结
+**两条路径均已失败**：
+1. 调节DW阈值（CONFIRM）→ BTC趋势市场下无鉴别力
+2. 禁用DW（NO_DW）→ 失去限损功能，灾难性增加TSL
+
+**关键认知升级**：
+- axis_support×down_wave WR=65.7%：这不是"DW选错方向"，而是"DW在合适时机止损"
+- axis_support×down_wave的85笔亏损：它们本就是正确的限损退出，平均亏损可控
+- axis_support的真正问题是**入场信号质量**，而非退出机制
+
+---
+
+## T-1/T-2/T-3 双通道架构分析框架（已收口 2026-03-19）
+
+### 背景
+C-4系列结束后，转入数据驱动的架构分析：量化两个通道的机会成本、独立贡献和优先级关系。
+
+---
+
+### T-1：axis_support 机会成本分析 ✅ 完成 2026-03-19
+
+**问题**：axis_support 持仓期间是否挤占了本可入场的 wave_start？
+
+**分析方法**：交叉比对全量回测（393笔）与 wave_start-only 回测（161笔），识别被 axis_support 占位时错过的 wave_start 信号。
+
+**结果**：
+- axis_support 窗口覆盖 64 个 wave_start 信号（共292个axis_support交易窗口中有冲突）
+- 这 64 个被阻断的 wave_start 潜在收益（C-1基准）：WR 95.3%，avg +2.49%，理论贡献 ≈ 160pp
+- axis_support 实际产出：+318pp（292笔 × avg +1.09%）
+- 机会成本覆盖率：**318% / 160% = 199%**
+
+**结论**：axis_support 以 **199%** 的比例覆盖了它的机会成本。双通道并存在整体收益上是正当的。
+
+---
+
+### T-2：双通道固定账户台账 ✅ 完成 2026-03-19
+
+**全量 baseline（393笔）账户分拆**：
+
+| 通道 | 交易数 | 总收益贡献 | WR | avg盈亏 | avg持仓 | TSL笔数 | 大亏笔数 |
+|------|--------|-----------|-----|---------|---------|--------|--------|
+| `wave_start` | 86 | **+253.22%** | **97.7%** | +2.94% | 31.5h | **0笔** | **0笔** |
+| `axis_support` | 292 | **+318.32%** | 66.4% | +1.09% | 56.8h | **5笔(-12%)** | **6笔** |
+| others (sos/lps/spring) | 15 | +33%左右 | — | — | — | — | — |
+
+**关键事实**：
+- wave_start 贡献全策略总收益的 **41.9%**，用 86 笔
+- axis_support 贡献 **52.7%**，用 292 笔（3.4倍交易数）
+- **全部 5 笔 TSL（-12%）来自 axis_support，wave_start 零 TSL**
+- wave_start 是高效率、低风险通道；axis_support 是高容量、高噪声通道
+
+---
+
+### T-3：wave_start 优先级实验 ❌ FAIL 2026-03-19
+
+**实验设计**：`WY_WS_PRIORITY=1` — 当同一K线同时触发 wave_start 和 axis_support 入场时，清除 axis_support 信号，wave_start 优先。
+
+**实际清除量**：69个冲突K线（日志确认）
+
+**结果**：
+
+| 指标 | baseline | T-3 (WY_WS_PRIORITY=1) | 变化 |
+|------|----------|----------------------|------|
+| 总收益 | **965.76%** | 773.69% | **-192pp ↓** |
+| 交易数 | 393 | 429 | +36 |
+| WR | 74.0% | 75.5% | +1.5pp |
+| Sharpe | 1.94 | 1.94 | = |
+| SQN | 5.91 | 5.64 | -0.27 |
+| 最大回撤 | 8.13% | 8.21% | +0.08pp |
+| **TSL 笔数** | **5笔** | **48笔** | **+43 爆炸** |
+
+**失败根因**：
+- 清除冲突K线上的 axis_support 信号后，后续 axis_support 在更差位置入场（TSL 5→37笔）
+- wave_start 自身新增 TSL 11笔（持仓期间资金被抢占导致入场时机变差）
+- max_open_trades=1/2 限制下，优先级调整引发连锁时序错位
+
+**结论**：T-1 发现的 64 个冲突窗口中，wave_start 缺席不是被 axis_support"抢占席位"造成的，有更复杂的市场时序原因。强行重排优先级只会破坏 axis_support 的入场时机。
+
+---
+
+### 双通道改造线最终收口（2026-03-19）
+
+**已证伪的全部路径**：
+
+| 实验 | 结果 | 核心发现 |
+|------|------|---------|
+| C-4-v1 (CONFIRM flag) | ❌ FAIL | BTC趋势下DW效率远高于双倍阈值，无鉴别力 |
+| C-4-v2 (完全禁用DW) | ❌ 灾难性 | 965%→87%，TSL 5→18，DW是保护机制 |
+| Route 1 (利润锁定) | ❌ 数据关闭 | 仅7/85笔曾到达+2%，样本不足 |
+| Route 2 (入场质量过滤A-2系列) | ❌ 6轮穷尽 | 6轮A-2实验全部失败 |
+| T-3 (wave_start优先) | ❌ FAIL | TSL 5→48，收益-192pp |
+
+**决策：关闭双通道改造线**
+
+- 双通道**可继续作为分析框架**（解释系统为何赚钱、为何回撤）
+- 但**不再作为交易逻辑改造主线**
+- Baseline 965.76% 是当前最优配置，axis_support×down_wave 结构维持原样
+
+**明确不再开的方向**：
+- axis_support ROI 梯度
+- axis_support down_wave 延迟/降权
+- wave_start 优先级二次修补
+- 新一轮 signal filter
+- 完整 regime 参数系统
+- P5-V3 / P5-WS（当前阶段）
+
+---
+
+## P7-2 增强版：exit_decision_event 证据层（当前主线 2026-03-19）
+
+### 背景与优先原因
+
+本轮 T-3 失败再次暴露了核心缺口：**能看到数字，但看不到每笔退出发生时的结构状态、候选队列、浮亏深度**。
+
+当前 P5-V1B-3 中的 `exit_decision_event` 只覆盖了 `phase-aware exit` 和 `p3_swing_up_er_weak`。需要扩充到真实退出黑盒。
+
+**为什么现在做**：不是为了立刻重开 P0，而是为未来再次出现以下问题时，能直接定位证据：
+- 某笔为什么被 down_wave 带出而不是 ROI
+- 退出前后结构是否已恶化
+- TSL 触发前的浮亏/持仓状态是什么
+- 是否存在"本可继续持有但被保护机制提前带出"的样本簇
+
+### 目标
+
+在实际退出发生时，记录完整的决策上下文，覆盖：
+1. 所有候选退出理由（不只是最终理由）
+2. 每个候选是否触发、为何未触发
+3. 退出时的浮动收益、持仓时长、结构状态
+
+### 扩充字段（在 V1B-3 基础上新增）
+
+| 新增字段 | 作用 |
+|---------|------|
+| `exit_candidate_list` | 退出时刻所有候选原因（ROI / TSL / down_wave / climax / divergence） |
+| `triggered_reason` | 实际触发的退出原因 |
+| `float_profit_at_exit` | 退出时浮动收益率 |
+| `max_profit_seen` | 持仓期峰值浮动收益（已有字段，确认接入） |
+| `trade_hold_bars` | 持仓时长（bar数） |
+| `structure_deteriorated` | 退出前是否存在结构恶化信号（bool） |
+| `tsl_dist_atr_mult` | TSL触发时：价格距触发线距离（ATR倍数）|
+| `down_wave_concurrent_roi` | down_wave触发时：ROI候选是否同时存在（bool）|
+
+### 诊断能力目标
+
+补齐后，以下 5 个诊断问题变为可回答：
+
+1. 某笔为什么被 down_wave 带出 → `exit_candidate_list` + `triggered_reason`
+2. 退出前结构是否已恶化 → `structure_deteriorated`
+3. 是否存在"可继续持有但被保护机制提前带出"样本簇 → `float_profit_at_exit` + `down_wave_concurrent_roi`
+4. TSL 触发前的形态/收益/波动状态 → `tsl_dist_atr_mult` + `max_profit_seen` + `trade_hold_bars`
+5. ROI 和 down_wave 是否存在竞争冲突 → `down_wave_concurrent_roi`
+
+### 修改位置
+- `custom_exit()` / `_custom_exit_impl()`：捕获候选队列和最终决策
+- `confirm_trade_exit()`：记录被阻断的退出候选
+- `event_emitter.py` / `strategy_event_bridge.py`：新增 `emit_exit_decision()` 方法
+- SQLite：`exit_decision_events` 表（V1B-3已建，扩充字段）
+
+### 验收标准
+- 每次退出判断均有对应事件记录
+- 能看出"原本想怎么退、最后怎么退、当时状态是什么"
+- 能区分：结构退出 / ROI / TSL / down_wave fallback
+- dry-run 运行 7 天后，能回答上述 5 个诊断问题
+
+### 启用条件
+- 默认 off，通过 `WY_EXIT_TRACE=1` 启用
+- 独立 commit，不影响主退出链逻辑
+- 先在回测模式验证字段完整性，再接 dry-run
+
+---
+
+### ✅ 实施完成（2026-03-19）
+
+**代码变更**（`WyckoffV7_TrueMethod.py`）：
+
+1. `custom_exit` 末尾：添加 `WY_EXIT_TRACE` 门控，调用 `_emit_exit_trace`
+2. 新方法 `_emit_exit_trace`：每次 `custom_exit` 被调用时记录完整候选状态
+3. `confirm_trade_exit`：扩展为三段捕获：
+   - `C-4-v2 blocked`：`WY_AXIS_NO_DW` 阻断的 down_wave（`triggered=False`）
+   - `confirm_trade_exit_tsl`：TSL 触发（含 max_profit_seen / hold_hours）
+   - `confirm_trade_exit_vectorized`：所有向量化退出（down_wave / roi / climax / divergence 等）
+
+**事件结构（存入 `metadata_json`，无需 schema 迁移）**：
+
+```json
+{
+  "enter_tag": "wyckoff_axis_support",
+  "float_profit": 0.025998,
+  "max_profit_seen": 0.034447,
+  "hold_hours": 39.0,
+  "exit_candidates": ["wyckoff_down_wave"],
+  "structure_deteriorated": false,
+  "down_wave_concurrent_roi": false,
+  "market_env": null,
+  "current_rate": 87654.3
+}
+```
+
+**回测验证（20260101-20260128）**：
+- 总事件：489 条
+- `custom_exit`：480 条（每 bar 评估记录）
+- `confirm_trade_exit_vectorized`：9 条（实际向量化退出，含完整字段）
+- 样本验证：`wyckoff_down_wave` 退出，profit=0.026，max_seen=0.034，hold=39h ✓
+
+**5 个诊断问题 → 现已可回答**：
+1. 某笔为何被 down_wave 带出 → `candidate_reason` + `exit_logic_module`
+2. 退出前结构是否恶化 → `structure_deteriorated`（custom_exit 路径）
+3. "可继续持有但被保护机制带出" → `float_profit` + `max_profit_seen` 对比
+4. TSL 触发前状态 → `confirm_trade_exit_tsl` 的 `max_profit_seen` + `hold_hours`
+5. ROI 与 down_wave 竞争 → `down_wave_concurrent_roi`
+
+**运行命令**：
+```bash
+# 回测模式启用跟踪
+docker compose run --rm -e WY_EXIT_TRACE=1 freqtrade backtesting \
+  --config user_data/config_backtest.json \
+  --strategy WyckoffV7_TrueMethod \
+  --timerange 20230101-20260228 --cache none
+
+# dry-run 模式启用跟踪（加入 docker-compose 或 .env）
+WY_EXIT_TRACE=1
+```
+
+---## P5-V3：受控进化闭环（未来治理层）
 
 ### 状态
 当前暂不进入主线开发。  
@@ -1133,15 +1527,14 @@ axis_support 只有 8.8% 的交易走到 roi（收益 7.92% avg），91.2% 被 d
 ## 从这里往后的主线顺序
 
 ### 当前顺序
-1. `Core Audit — 收益导向版`
-2. `P7-min — Audit 运行时证据补丁`
-3. `P0 — 退出层优化`
+1. `Core Audit — 收益导向版` ✅ 已完成
+2. `P0 — 退出层微调` ✅ 已穷尽（FAIL）
+3. **`C-1 / C-2 / C-3 — 双通道分流实验`** ← **当前主线**
 4. `P5-V3`
 5. `P5-WS`
 
 ### 当前最重要的一句话
-**先把“谁真影响成交、谁真影响退出收益、哪些方向继续做是在浪费时间”查清楚，再进入下一阶段开发。**
-
+**微调路线已穷尽。下一步是拆分两条赊錢子系统，让 wave_start 和 axis_support 用不同的退出哲学独立运行，用数据决定架构。**
 ---
 
 ## Fix Pack A — 当前优先修复包（先修真钱问题）

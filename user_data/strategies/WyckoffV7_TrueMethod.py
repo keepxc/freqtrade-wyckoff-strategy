@@ -422,6 +422,7 @@ class WyckoffV7_TrueMethod(IStrategy):
     # 背景：Core Audit 显示 axis_support×down_wave WR=65.7% vs wave_start×down_wave WR=98.6%
     # 实验：axis_support持仓要求连续2根K线确认（效率阈值×2.0），wave_start维持原条件
     # 默认关闭，开启方式：docker run -e WY_AXIS_SUPPORT_DW_CONFIRM=1
+    # C-4 结论（2026-03-17）：INERT — BTC趋势市场双倍阈值+2连续全部被满足，等同于无效
     use_axis_support_dw_confirm = os.getenv('WY_AXIS_SUPPORT_DW_CONFIRM', '0').lower() not in ('0', 'false', 'off')
     axis_support_dw_consecutive: int = 2    # 连续确认K线数（类比 sos_require_consecutive_down_waves）
     axis_support_dw_eff_mult: float = 2.0   # 效率阈值倍数: 0.001 → 0.002
@@ -429,6 +430,15 @@ class WyckoffV7_TrueMethod(IStrategy):
     # 目的：避免在微盈/接近成本时被弱下降波带出；让更多笔转向 roi 出场
     # 默认 1%，可通过 WY_AXIS_SUPPORT_DW_MIN_PROFIT 覆盖（如 0.005 = 0.5%）
     axis_support_dw_min_profit: float = float(os.getenv('WY_AXIS_SUPPORT_DW_MIN_PROFIT', '0.01'))
+
+    # C-4-v2: axis_support 完全禁用 down_wave（纯 ROI + TSL 退出）
+    # 背景：C-4（CONFIRM=1）完全无效，BTC趋势市场下双倍阈值被轻易满足
+    # 实验：axis_support 持仓完全跳过 down_wave 退出逻辑，依赖 ROI（8%）+ TSL
+    # 预期：若被 down_wave 提前带出的 248 笔中有部分能持续走到 roi，则总收益提升
+    # 风险：若部分亏损单原本靠 down_wave 限损，禁止后可能触发 TSL (-12%)
+    # 默认关闭，开启：docker run -e WY_AXIS_NO_DW=1
+    use_axis_no_dw: bool = os.getenv('WY_AXIS_NO_DW', '0').lower() not in ('0', 'false', 'off')
+
     # P0-Next-3: 向量化 down_wave 退出效率阈值（2026-03-17）
     # 背景：axis_support×down_wave WR=65.7%，疑似弱下降波过早结束持仓（效率仅略高于 0.001）
     # 实验：提高全局效率阈值，过滤弱下降波，观察 axis_support×down_wave WR 是否提升
@@ -438,6 +448,19 @@ class WyckoffV7_TrueMethod(IStrategy):
     # 作用：swing_up_er_weak → 辅助提前退出；swing_down_er_exhaustion → Spring 质量×1.15
     # 开启方式：docker run -e WY_P3_SWING_ER=1
     use_p3_swing_er = os.getenv('WY_P3_SWING_ER', '0').lower() not in ('0', 'false', 'off')
+
+    # ============================================================
+    # 通道分流实验（2026-03-17）
+    # 背景：Core Audit 显示两条入场路径语义完全不同：
+    #   wave_start × down_wave WR=98.6% → 强趋势/快速兑现通道
+    #   axis_support × down_wave WR=65.7% → 支撑承接通道（退出哲学应独立）
+    # 目标：单独跑各通道，量化独立贡献，为拆分退出层/ROI/风险管理提供数据支撑
+    # 用法：
+    #   docker run -e WY_CHANNEL=wave_start   → 只运行 wave_start 通道
+    #   docker run -e WY_CHANNEL=axis_support → 只运行 axis_support 通道
+    #   docker run -e WY_CHANNEL=            → 全通道（默认，与当前行为一致）
+    # ============================================================
+    channel_mode: str = os.getenv('WY_CHANNEL', '').lower().strip()
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
@@ -2716,6 +2739,52 @@ class WyckoffV7_TrueMethod(IStrategy):
         else:
             daily_gate_hard_block = pd.Series(False, index=dataframe.index)
 
+        # === 通道分流：按 WY_CHANNEL 屏蔽非目标通道的入场信号 ===
+        # 默认为空（全通道），只在实验模式下激活
+        _ch = self.channel_mode
+        if _ch in ('wave_start', 'axis_support'):
+            _false = pd.Series(False, index=dataframe.index)
+            if _ch == 'wave_start':
+                # 仅保留 wave_start_entry；清除所有 axis/spring/sos/lps/phase_d 信号
+                axis_support_entry     = _false.copy()
+                spring_recovery_entry  = _false.copy()
+                spring_1_entry         = _false.copy()
+                spring_2_entry         = _false.copy()
+                spring_3_entry         = _false.copy()
+                sos_entry              = _false.copy()
+                lps_pullback_entry     = _false.copy()
+                efficiency_entry       = _false.copy()
+                phase_d_entry          = _false.copy()
+                phase_d_high_quality   = _false.copy()
+                spring_test_sig_bar_entry = _false.copy()
+                axis_sos_confluence    = _false.copy()
+                logger.info('通道分流: WY_CHANNEL=wave_start — 仅 wave_start 通道激活')
+            elif _ch == 'axis_support':
+                # 仅保留 axis_support_entry；清除所有 wave/sos/lps/spring/phase_d 信号
+                wave_start_entry       = _false.copy()
+                efficiency_entry       = _false.copy()
+                sos_entry              = _false.copy()
+                lps_pullback_entry     = _false.copy()
+                spring_recovery_entry  = _false.copy()
+                spring_1_entry         = _false.copy()
+                spring_2_entry         = _false.copy()
+                spring_3_entry         = _false.copy()
+                phase_d_entry          = _false.copy()
+                phase_d_high_quality   = _false.copy()
+                spring_test_sig_bar_entry = _false.copy()
+                axis_sos_confluence    = _false.copy()
+                logger.info('通道分流: WY_CHANNEL=axis_support — 仅 axis_support 通道激活')
+
+        # T-3: wave_start 通道优先级实验（2026-03-19）
+        # 当 wave_start 与 axis_support 在同一根 K 线同时触发时，wave_start 优先
+        # axis_support 让出当根 K 线（不影响各自独立时间窗的信号）
+        # 开启: docker run -e WY_WS_PRIORITY=1
+        if os.getenv('WY_WS_PRIORITY', '0') not in ('0', 'false', 'off', ''):
+            conflict_mask = wave_start_entry & axis_support_entry
+            if conflict_mask.any():
+                axis_support_entry = axis_support_entry & ~conflict_mask
+                logger.info(f'T-3 wave_start 优先: 清除 {int(conflict_mask.sum())} 个冲突 K 线的 axis_support 信号')
+
         final_entry = (
             composite_intent_ok & (
                 dataframe['trading_allowed'] & (lps_pullback_entry | sos_entry | wave_start_entry | efficiency_entry) |
@@ -4592,6 +4661,22 @@ class WyckoffV7_TrueMethod(IStrategy):
         和轻展打止捯（2023-2026 牛市短期调整不触发）形成双层防护
         """
         if not trade.is_short:
+            # === 方案C: 浮盈梯度止损保护（最高优先级，不依赖行情数据）===
+            # 当多头浮盈达到阶梯阈值后，止损锁定在保底利润线上，防止冲高回落浮盈归零
+            # 阶梯：≥3% → 锁+0.5% 入场源，≥5% → 锁+2%，≥8% → 锁+4%
+            # 示例：浮盈=5%，锁+2% → 当前价回落超(5%-2%)/1.05≈2.86%时出场
+            if current_profit >= 0.03:
+                if current_profit >= 0.08:
+                    lock_profit = 0.04      # 盈利≥8%，锁定+4% 入场源保底
+                elif current_profit >= 0.05:
+                    lock_profit = 0.02      # 盈利≥5%，锁定+2% 入场源保底
+                else:
+                    lock_profit = 0.005     # 盈利≥3%，锁定+0.5% 入场源保底
+                sl = stoploss_from_open(
+                    lock_profit, current_profit,
+                    is_short=False, leverage=trade.leverage
+                )
+                return max(sl, -0.99)
             dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if len(dataframe) > 0:
                 last_row = dataframe.iloc[-1]
@@ -4694,8 +4779,93 @@ class WyckoffV7_TrueMethod(IStrategy):
                 current_time=current_time,
             )
         
+        # P7-2: exit_decision_event 退出决策跟踪（WY_EXIT_TRACE=1 启用）
+        if self.event_bridge is not None and os.getenv('WY_EXIT_TRACE', '0') not in ('0', 'false', 'off', ''):
+            self._emit_exit_trace(pair, trade, current_time, current_rate, current_profit, exit_reason, kwargs.get('dataframe'))
+
         return exit_reason
-    
+
+    def _emit_exit_trace(self, pair: str, trade: 'Trade', current_time: datetime,
+                         current_rate: float, current_profit: float,
+                         exit_reason: Optional[str], dataframe) -> None:
+        """P7-2: 发射退出决策跟踪事件（仅当 WY_EXIT_TRACE=1 时调用）
+
+        每次 custom_exit 被调用时均记录一条事件，无论是否触发退出。
+        包含当前 bar 所有活跃的退出候选信号，方便事后分析退出竞争关系。
+        """
+        try:
+            ci = len(dataframe) - 1 if dataframe is not None and len(dataframe) > 0 else -1
+            candidates: list = []
+            structure_deteriorated = False
+
+            if dataframe is not None and ci >= 0:
+                if 'wyckoff_climax_exit' in dataframe.columns and bool(dataframe.loc[ci, 'wyckoff_climax_exit']):
+                    candidates.append('wyckoff_climax')
+                    structure_deteriorated = True
+                if 'severe_divergence_exit' in dataframe.columns and bool(dataframe.loc[ci, 'severe_divergence_exit']):
+                    candidates.append('wyckoff_divergence')
+                    structure_deteriorated = True
+                if ('is_wave_start' in dataframe.columns
+                        and 'wave_direction' in dataframe.columns
+                        and 'wave_efficiency' in dataframe.columns
+                        and bool(dataframe.loc[ci, 'is_wave_start'])
+                        and dataframe.loc[ci, 'wave_direction'] == 'down'
+                        and float(dataframe.loc[ci, 'wave_efficiency'] or 0) > 0.001):
+                    candidates.append('wyckoff_down_wave')
+
+            # max_profit_seen（基于 trade.max_rate / min_rate）
+            try:
+                if not trade.is_short:
+                    _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if trade.open_rate > 0 else None
+                else:
+                    _max_p = (trade.open_rate - trade.min_rate) / trade.open_rate if trade.open_rate > 0 else None
+                max_profit_seen = round(_max_p, 6) if _max_p is not None else None
+            except Exception:
+                max_profit_seen = None
+
+            hold_hours = round((current_time - trade.open_date_utc).total_seconds() / 3600, 2)
+
+            # down_wave 触发时是否同时存在 ROI 候选
+            down_wave_concurrent_roi = False
+            if exit_reason == 'wyckoff_down_wave' and self.minimal_roi:
+                min_roi = min(self.minimal_roi.values())
+                down_wave_concurrent_roi = current_profit >= min_roi
+
+            # phase / market_env（存在时读取）
+            phase_context: Optional[str] = None
+            market_env: Optional[str] = None
+            if dataframe is not None and ci >= 0:
+                _last = dataframe.iloc[ci]
+                if 'phase_context_tag' in dataframe.columns:
+                    _v = _last.get('phase_context_tag')
+                    phase_context = str(_v) if _v is not None else None
+                if 'market_env' in dataframe.columns:
+                    _v = _last.get('market_env')
+                    market_env = str(_v) if _v is not None else None
+
+            self.event_bridge.emit_exit_decision(
+                trade_id=str(trade.id),
+                pair=pair,
+                exit_logic_module='custom_exit',
+                candidate_reason=exit_reason or 'none',
+                triggered=(exit_reason is not None),
+                current_time=current_time,
+                phase_context_tag=phase_context,
+                metadata={
+                    'enter_tag': trade.enter_tag,
+                    'float_profit': round(current_profit, 6),
+                    'max_profit_seen': max_profit_seen,
+                    'hold_hours': hold_hours,
+                    'exit_candidates': candidates,
+                    'structure_deteriorated': structure_deteriorated,
+                    'down_wave_concurrent_roi': down_wave_concurrent_roi,
+                    'market_env': market_env,
+                    'current_rate': round(current_rate, 4),
+                },
+            )
+        except Exception as e:
+            logger.debug(f'P7-2 _emit_exit_trace failed [{pair}]: {e}')
+
     def _custom_exit_impl(self, pair: str, trade: 'Trade', current_time: datetime, current_rate: float, current_profit: float, **kwargs) -> Optional[str]:
         """
         自定义退出逻辑 - SOS 优化版
@@ -4782,6 +4952,25 @@ class WyckoffV7_TrueMethod(IStrategy):
                 and dataframe.loc[current_index, 'sow_exit_long_signal']):
             logger.info(f'SOW 快速平多（亏损触发）: {pair}, 收益={current_profit:.2%}, 价格={current_rate}')
             return 'sow_fast_exit'
+        # ===== 优先级 3.6: 浮盈弱势退出（方案B）=====
+        # 条件：多头 + 浮盈≥2.5% + 持仓≥12h + 量缩（<SMA20×0.7）+ 收阴
+        # 目的：冲高回落初期主动退出，配合方案C止损形成双层防护
+        # 持仓≥12h 门控防止开仓初期正常震荡触发
+        if (not trade.is_short
+                and current_profit >= 0.025
+                and (current_time - trade.open_date_utc).total_seconds() >= 43200):  # 12h
+            last_bar = dataframe.iloc[current_index]
+            _vol = float(last_bar.get('volume', 0) or 0)
+            _vol_sma = float(last_bar.get('volume_sma_20', 0) or 0)
+            _vol_shrink = _vol_sma > 0 and _vol < _vol_sma * 0.7
+            _bearish_bar = float(last_bar.get('close', 0)) < float(last_bar.get('open', 0))
+            if _vol_shrink and _bearish_bar:
+                _hold_h = (current_time - trade.open_date_utc).total_seconds() / 3600
+                logger.info(
+                    f'浮盈弱势退出: {pair}, 持仓={_hold_h:.1f}h, '
+                    f'收益={current_profit:.2%}, 量缩({_vol:.0f}<{_vol_sma*0.7:.0f})+阴线'
+                )
+                return 'profit_protect_exit'
         # ===== 优先级 3.8: Task 4.2 — P&F 目标位退出（威科夫因果律，盈利达到目标位时退出）=====
         # P&F 目标位直接从 dataframe 当前 bar 读取（比元数据链更可靠，回测/实盘均有效）
         # target_conservative/standard 由 SC/BC 锚点 ffill，入场后不会变更，直接读取等效于入场时的值
@@ -4835,8 +5024,13 @@ class WyckoffV7_TrueMethod(IStrategy):
                 logger.debug(f'SOS 交易（{pair}）: 波段指标列不可用，跳过 SOS 优化退出逻辑，使用标准退出条件')
         # === 非 SOS 交易：使用标准下降波段退出条件 ===
         elif safe_get_column(dataframe, 'is_wave_start') and safe_get_column(dataframe, 'wave_direction') and safe_get_column(dataframe, 'wave_efficiency'):
+            # C-4-v2: axis_support 完全禁用 down_wave（纯 ROI + TSL 退出）
+            # 直接读取 env var（绕过 Freqtrade 可能重置类变量的问题）
+            _axis_no_dw = os.getenv('WY_AXIS_NO_DW', '0') not in ('0', 'false', 'off', '')
+            if _axis_no_dw and trade.enter_tag == 'wyckoff_axis_support':
+                pass  # 完全跳过：等待 ROI / TSL / climax 退出
             # P0-Next-2: axis_support/axis_weak 开启严格连续确认（flag 激活时）
-            if self.use_axis_support_dw_confirm and trade.enter_tag in ('wyckoff_axis_support', 'wyckoff_axis_weak'):
+            elif self.use_axis_support_dw_confirm and trade.enter_tag in ('wyckoff_axis_support', 'wyckoff_axis_weak'):
                 # 利润门控：低于最低利润阈值时不允许 down_wave 出场
                 if current_profit < self.axis_support_dw_min_profit:
                     pass  # 低利润 → 跳过 down_wave，等待更高利润
@@ -4943,6 +5137,114 @@ class WyckoffV7_TrueMethod(IStrategy):
             )
         
         # 返回 True 确认入场
+        return True
+
+    def confirm_trade_exit(self, pair: str, trade: 'Trade', order_type: str, amount: float, rate: float,
+                           time_in_force: str, exit_reason: str, current_time: datetime, **kwargs) -> bool:
+        """
+        P7-2 + C-4-v2: 退出确认钩子
+
+        职责：
+        1. C-4-v2: axis_support 禁用 down_wave（WY_AXIS_NO_DW=1，默认 off）
+        2. P7-2: 捕获 trailing_stop_loss 退出上下文（绕过 custom_exit 的退出路径）
+        3. P7-2: 捕获被拦截的退出事件
+
+        说明：populate_exit_trend 向量化写入 exit_tag='wyckoff_down_wave'，
+        custom_exit 返回 None 无法阻止向量化信号触发。
+        confirm_trade_exit 返回 False 是唯一可以阻止任何退出的方式。
+        """
+        _trace_enabled = (
+            self.event_bridge is not None
+            and os.getenv('WY_EXIT_TRACE', '0') not in ('0', 'false', 'off', '')
+        )
+
+        # C-4-v2: axis_support 禁用 down_wave（默认 off）
+        if (os.getenv('WY_AXIS_NO_DW', '0') not in ('0', 'false', 'off', '')
+                and trade.enter_tag == 'wyckoff_axis_support'
+                and exit_reason == 'wyckoff_down_wave'):
+            logger.debug(f'C-4-v2: 拦截 axis_support down_wave 退出 [{pair}], profit={trade.calc_profit_ratio(rate):.2%}')
+            # P7-2: 记录被拦截的退出
+            if _trace_enabled:
+                try:
+                    _p = trade.calc_profit_ratio(rate)
+                    self.event_bridge.emit_exit_decision(
+                        trade_id=str(trade.id), pair=pair,
+                        exit_logic_module='confirm_trade_exit',
+                        candidate_reason=exit_reason,
+                        triggered=False,
+                        current_time=current_time,
+                        blocked_reason='WY_AXIS_NO_DW',
+                        metadata={
+                            'enter_tag': trade.enter_tag,
+                            'float_profit': round(_p, 6),
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f'P7-2 confirm_trade_exit blocked trace failed [{pair}]: {e}')
+            return False  # 取消 down_wave 退出，等待 ROI / TSL
+
+        # P7-2: TSL 退出跟踪（trailing_stop_loss 绕过 custom_exit，在此捕获完整上下文）
+        if exit_reason == 'trailing_stop_loss' and _trace_enabled:
+            try:
+                _p = trade.calc_profit_ratio(rate)
+                _hold_hours = round((current_time - trade.open_date_utc).total_seconds() / 3600, 2)
+                try:
+                    if not trade.is_short:
+                        _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if trade.open_rate > 0 else None
+                    else:
+                        _max_p = (trade.open_rate - trade.min_rate) / trade.open_rate if trade.open_rate > 0 else None
+                    _max_profit_seen = round(_max_p, 6) if _max_p is not None else None
+                except Exception:
+                    _max_profit_seen = None
+                self.event_bridge.emit_exit_decision(
+                    trade_id=str(trade.id), pair=pair,
+                    exit_logic_module='confirm_trade_exit_tsl',
+                    candidate_reason='trailing_stop_loss',
+                    triggered=True,
+                    current_time=current_time,
+                    metadata={
+                        'enter_tag': trade.enter_tag,
+                        'float_profit': round(_p, 6),
+                        'max_profit_seen': _max_profit_seen,
+                        'hold_hours': _hold_hours,
+                        'current_rate': round(rate, 4),
+                    },
+                )
+            except Exception as e:
+                logger.debug(f'P7-2 TSL trace failed [{pair}]: {e}')
+
+        # P7-2: 捕获所有其他退出（向量化 down_wave / roi / climax / roi / force_exit 等）
+        # TSL 已在上方单独捕获（含更丰富字段），此处补 catch-all
+        _VECTORIZED_REASONS = {
+            'wyckoff_down_wave', 'wyckoff_climax', 'wyckoff_divergence',
+            'wyckoff_efficiency_decline', 'roi', 'force_exit',
+        }
+        if exit_reason in _VECTORIZED_REASONS and _trace_enabled:
+            try:
+                _p = trade.calc_profit_ratio(rate)
+                _hold_hours = round((current_time - trade.open_date_utc).total_seconds() / 3600, 2)
+                try:
+                    _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if not trade.is_short and trade.open_rate > 0 else None
+                    _max_profit_seen = round(_max_p, 6) if _max_p is not None else None
+                except Exception:
+                    _max_profit_seen = None
+                self.event_bridge.emit_exit_decision(
+                    trade_id=str(trade.id), pair=pair,
+                    exit_logic_module='confirm_trade_exit_vectorized',
+                    candidate_reason=exit_reason,
+                    triggered=True,
+                    current_time=current_time,
+                    metadata={
+                        'enter_tag': trade.enter_tag,
+                        'float_profit': round(_p, 6),
+                        'max_profit_seen': _max_profit_seen,
+                        'hold_hours': _hold_hours,
+                        'current_rate': round(rate, 4),
+                    },
+                )
+            except Exception as e:
+                logger.debug(f'P7-2 vectorized exit trace failed [{pair}]: {e}')
+
         return True
 
     def leverage(self, pair: str, current_time: datetime, current_rate: float, proposed_leverage: float, max_leverage: float, entry_tag: Optional[str], side: str, **kwargs) -> float:
