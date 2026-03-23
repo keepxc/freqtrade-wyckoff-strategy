@@ -65,3 +65,9 @@ temp_*.py
 # ä½†æ’é™¤å¤‡ä»½æ–‡ä»¶
 *_backup_*/
 wyckoff_backup_*/
+
+# »Ø²âÊÂ¼şÈÕÖ¾ÓëÁÙÊ±Êä³ö£¨²»ÉÏ´«£©
+user_data/events/backtest/
+user_data/backtest_*.txt
+temp_extract_ca/
+temp_extract_fixpack/

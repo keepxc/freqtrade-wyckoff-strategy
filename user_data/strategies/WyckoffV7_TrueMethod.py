@@ -2411,13 +2411,22 @@ class WyckoffV7_TrueMethod(IStrategy):
             dataframe.get('spring_detected', pd.Series(False, index=dataframe.index)) |
             (dataframe.get('spring_quality', pd.Series('none', index=dataframe.index)) != 'none')
         )
+        # P0-Next-3: Gate Sync 修正 — bar 级 SOW/UTAD 存在时阻断 axis 多头入场
+        # 背景：制度分类器（wyckoff_context/bear_market_mode）存在翻转滞后
+        #   SOWBarDetector 先于分类器探测到物理弱势信号（如 2026-03-18 SOW=4, UTAD=1）
+        #   在"翻转延迟窗口"内 not_distribution=True，导致 axis_support 被错误放行
+        # 修复：当 bar 内检测到 SOW 或 UTAD 时，直接否决 axis_trading_allowed
+        _no_raw_sow_utad = ~(
+            dataframe.get('sow_bar_detected', pd.Series(False, index=dataframe.index)).astype(bool) |
+            dataframe.get('utad_detected',    pd.Series(False, index=dataframe.index)).astype(bool)
+        )
         dataframe['axis_trading_allowed'] = (
             (not_distribution & trend_support) |
             (in_phase_e & not_distribution & phase_e_trend_ok & no_physical_reset) |
             (axis_strong_or_medium & composite_intent_ok_axis & not_distribution & no_physical_reset) |
             (macro_markup_ok & not_distribution & no_physical_reset) |                  # 路径4
             (_spring_zone_ok & not_distribution)                                        # 路径5
-        )
+        ) & _no_raw_sow_utad                                                            # P0-Next-3
         # Spring #3 专用交易许可（最宽松）
         # 理论：Spring #3 代表供应完全枯竭，是最高质量信号
         # "Spring 创造牛市，不是牛市的结果"
@@ -4661,22 +4670,20 @@ class WyckoffV7_TrueMethod(IStrategy):
         和轻展打止捯（2023-2026 牛市短期调整不触发）形成双层防护
         """
         if not trade.is_short:
-            # === 方案C: 浮盈梯度止损保护（最高优先级，不依赖行情数据）===
-            # 当多头浮盈达到阶梯阈值后，止损锁定在保底利润线上，防止冲高回落浮盈归零
-            # 阶梯：≥3% → 锁+0.5% 入场源，≥5% → 锁+2%，≥8% → 锁+4%
-            # 示例：浮盈=5%，锁+2% → 当前价回落超(5%-2%)/1.05≈2.86%时出场
-            if current_profit >= 0.03:
-                if current_profit >= 0.08:
-                    lock_profit = 0.04      # 盈利≥8%，锁定+4% 入场源保底
-                elif current_profit >= 0.05:
-                    lock_profit = 0.02      # 盈利≥5%，锁定+2% 入场源保底
-                else:
-                    lock_profit = 0.005     # 盈利≥3%，锁定+0.5% 入场源保底
-                sl = stoploss_from_open(
-                    lock_profit, current_profit,
-                    is_short=False, leverage=trade.leverage
-                )
-                return max(sl, -0.99)
+            # === 方案C: 浮盈梯度止损保护（已禁用，2026-03-23）===
+            # 原逻辑：≥3% → 锁+0.5%，≥5% → 锁+2%，≥8% → 锁+4%
+            # 禁用原因：阈值过窄，BTC 日内 3% 回踩正常，导致大量本可达 ROI(8%) 的仓位被过早切出
+            # 数据证据：从 03-17→03-19 TSL 从 5 次暴增到 50 次，ROI 退出从 34 减到 26，总收益 -192%
+            # 后续：dry-run 观察后重新设计（建议触发阈值≥7%，锁定比例更宽松）
+            # if current_profit >= 0.03:
+            #     if current_profit >= 0.08:
+            #         lock_profit = 0.04
+            #     elif current_profit >= 0.05:
+            #         lock_profit = 0.02
+            #     else:
+            #         lock_profit = 0.005
+            #     sl = stoploss_from_open(lock_profit, current_profit, is_short=False, leverage=trade.leverage)
+            #     return max(sl, -0.99)
             dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if len(dataframe) > 0:
                 last_row = dataframe.iloc[-1]
@@ -4971,6 +4978,28 @@ class WyckoffV7_TrueMethod(IStrategy):
                     f'收益={current_profit:.2%}, 量缩({_vol:.0f}<{_vol_sma*0.7:.0f})+阴线'
                 )
                 return 'profit_protect_exit'
+
+        # ===== 优先级 3.7: WY_AXIS_FAILED_EXIT — 轴线支撑失败超时退出 =====
+        # 适用场景：wyckoff_axis_support 入场后从未盈利，支撑实质上已失守
+        # 触发条件：enter_tag=axis_support + 持仓>48h + max_profit_seen<=0.001 + profit<-0.03
+        # 慢牛/震荡里条件④永远不成立，零影响；阴跌扩大时作为安全兜底
+        # 默认关闭，通过 WY_AXIS_FAILED_EXIT=1 启用
+        if (os.getenv('WY_AXIS_FAILED_EXIT', '0') not in ('0', 'false', 'off', '')
+                and not trade.is_short
+                and trade.enter_tag == 'wyckoff_axis_support'):
+            _hold_h = (current_time - trade.open_date_utc).total_seconds() / 3600
+            if _hold_h > 48 and current_profit < -0.03:
+                try:
+                    _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if trade.open_rate > 0 else None
+                except Exception:
+                    _max_p = None
+                if _max_p is not None and _max_p <= 0.001:
+                    logger.info(
+                        f'轴线支撑失败退出: {pair}, 持仓={_hold_h:.1f}h, '
+                        f'收益={current_profit:.2%}, max_profit_seen={_max_p:.4f}'
+                    )
+                    return 'axis_support_failed_exit'
+
         # ===== 优先级 3.8: Task 4.2 — P&F 目标位退出（威科夫因果律，盈利达到目标位时退出）=====
         # P&F 目标位直接从 dataframe 当前 bar 读取（比元数据链更可靠，回测/实盘均有效）
         # target_conservative/standard 由 SC/BC 锚点 ffill，入场后不会变更，直接读取等效于入场时的值
