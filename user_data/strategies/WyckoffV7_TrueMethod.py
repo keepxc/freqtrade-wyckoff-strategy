@@ -4981,9 +4981,10 @@ class WyckoffV7_TrueMethod(IStrategy):
 
         # ===== 优先级 3.7: WY_AXIS_FAILED_EXIT — 轴线支撑失败超时退出 =====
         # 适用场景：wyckoff_axis_support 入场后从未盈利，支撑实质上已失守
-        # 触发条件：enter_tag=axis_support + 持仓>48h + max_profit_seen<=0.001 + profit<-0.03
+        # 触发条件：enter_tag=axis_support + 持仓>48h + max_profit_seen<=0.01 + profit<-0.03
         # 慢牛/震荡里条件④永远不成立，零影响；阴跌扩大时作为安全兜底
         # 默认关闭，通过 WY_AXIS_FAILED_EXIT=1 启用
+        # 注：阈值从 0.001 改为 0.01（1%），0.001太严导致开仓后任何微小反弹都使条件永久失效
         if (os.getenv('WY_AXIS_FAILED_EXIT', '0') not in ('0', 'false', 'off', '')
                 and not trade.is_short
                 and trade.enter_tag == 'wyckoff_axis_support'):
@@ -4993,7 +4994,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                     _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if trade.open_rate > 0 else None
                 except Exception:
                     _max_p = None
-                if _max_p is not None and _max_p <= 0.001:
+                if _max_p is not None and _max_p <= 0.01:
                     logger.info(
                         f'轴线支撑失败退出: {pair}, 持仓={_hold_h:.1f}h, '
                         f'收益={current_profit:.2%}, max_profit_seen={_max_p:.4f}'
