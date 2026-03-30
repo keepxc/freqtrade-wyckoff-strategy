@@ -4948,7 +4948,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             logger.info(f'严重背离退出: {pair}, 收益={current_profit:.2%}, 价格={current_rate}')
             return 'severe_divergence_exit'
         # 优先级 3: SOT 退出（立即退出）
-        if dataframe.loc[current_index, 'sot_exit']:
+        if safe_get_column(dataframe, 'sot_exit') and dataframe.loc[current_index, 'sot_exit']:
             logger.info(f'SOT 退出: {pair}, 收益={current_profit:.2%}, 价格={current_rate}')
             return 'sot_exit'
         # 优先级 3.5: SOW 快速平多（仅对亏损多头触发）
