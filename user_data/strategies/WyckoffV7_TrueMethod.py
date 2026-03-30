@@ -1422,6 +1422,33 @@ class WyckoffV7_TrueMethod(IStrategy):
         else:
             logger.debug('Task 4.1c bear_market_mode: 0 根K线激活（双层因果条件未同时满足）')
 
+        # === sustained_markdown: 独立空头闸门（不影响多头判断）===
+        # 设计目标：在 dist_cause_sufficient=False（BC→AR→UTAD 序列未完成）但 BTC 处于持续下跌时，
+        #           允许空头入场，而不触碰 bear_market_mode（多头阻断 + 止损收紧仍走原路径）。
+        # 触发条件：
+        #   1. daily_choch_confirmed=True（宏观结构已破，EMA200 下方）
+        #   2. 当前 1H close 低于 daily_ema200 * 0.97（已从顶部下跌 3% 以上）
+        #   3. 上述状态持续 >= 30 根 1H K线（约 30 小时，避免单日闪崩误触发）
+        # 退出条件：close > daily_ema200（宏观结构修复）或 daily_choch_confirmed=False
+        _daily_ema200 = dataframe.get('daily_ema200', pd.Series(float('nan'), index=dataframe.index))
+        _sm_raw = (
+            _daily_choch.astype(bool) &
+            (dataframe['close'] < _daily_ema200 * 0.97) &
+            _daily_ema200.notna()
+        )
+        # 持续性过滤：连续 >= 30 根 1H K线满足条件才激活
+        _sm_rolling = _sm_raw.astype(int).rolling(30, min_periods=30).min().fillna(0).astype(bool)
+        dataframe['sustained_markdown'] = _sm_rolling
+        _sm_bars = int(_sm_rolling.sum())
+        if _sm_bars > 0:
+            logger.info(
+                f'sustained_markdown (独立空头闸门): {_sm_bars}/{_all_bars} 根K线激活 '
+                f'({_sm_bars / _all_bars * 100:.1f}%，choch+close<EMA200*0.97 持续30根)'
+            )
+        else:
+            dataframe['sustained_markdown'] = False
+            logger.debug('sustained_markdown: 0 根K线激活')
+
         # === 临时兼容层（保持现有功能工作）===
         dataframe = self._compatibility_layer(dataframe)
 
@@ -3151,11 +3178,17 @@ class WyckoffV7_TrueMethod(IStrategy):
         short_intent_ok = ~composite_intent_vals.isin(['accumulating', 'trending_up', 'testing'])
         rr_short_ok = dataframe.get('rr_short_standard', pd.Series(0.0, index=dataframe.index)) >= min_rr
 
-        # ── A-1: bear_market_mode 闸门（仅熊市阶段允许空头） ────────────────────
-        # 非熊市阶段禁止入场做空，彻底阻断牛市中空头持续亏损的来源。
-        _short_bear_gate = dataframe.get(
+        # ── A-1: 空头闸门（bear_market_mode 或 sustained_markdown）────────────────────
+        # bear_market_mode：双层因果门控（daily_choch AND dist_cause_sufficient），严格熊市确认
+        # sustained_markdown：独立轻量门控（choch + close < EMA200*0.97 持续30根），解耦多头阻断
+        # 两者 OR：在派发序列未完成但持续下跌时也允许做空
+        _bear_gate = dataframe.get(
             'bear_market_mode', pd.Series(False, index=dataframe.index)
         ).astype(bool)
+        _sm_gate = dataframe.get(
+            'sustained_markdown', pd.Series(False, index=dataframe.index)
+        ).astype(bool)
+        _short_bear_gate = _bear_gate | _sm_gate
 
         # ── 最终做空入场 ─────────────────────────────────────────────────────────
         final_short_entry = short_intent_ok & (sow_entry | utad_entry | lpsy_entry) & rr_short_ok & _short_bear_gate
