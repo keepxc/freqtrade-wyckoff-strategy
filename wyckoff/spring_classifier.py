@@ -140,16 +140,28 @@ class SpringClassifier:
     def _detect_breakout_events(self, dataframe: DataFrame) -> pd.Series:
         """
         检测跌破支撑轴线的事件
-        
+
+        优先使用轴线系统的 nearest_support；当轴线不存在（nearest_support=0）时，
+        回退到 50 根滚动低点作为隐含支撑参考——与简化轴线逻辑保持一致。
+        这修复了"下跌区间无轴线 → nearest_support=0 → Spring 永远检测不到"的问题。
+
         Args:
             dataframe: 包含价格和轴线信息的 DataFrame
-            
+
         Returns:
             pd.Series: 布尔掩码，标记跌破事件
         """
+        has_axis = dataframe['nearest_support'] > 0
+        # 无轴线时的回退参考：50 根滚动最低点（shift(1) 保证无前瞻偏差）
+        fallback_support = dataframe['low'].rolling(50, min_periods=10).min().shift(1)
+        effective_support = pd.Series(
+            np.where(has_axis, dataframe['nearest_support'], fallback_support),
+            index=dataframe.index
+        )
         breakout_mask = (
-            (dataframe['low'] < dataframe['nearest_support']) &
-            (dataframe['nearest_support'] > 0)  # 确保支撑位有效
+            (dataframe['low'] < effective_support) &
+            effective_support.notna() &
+            (effective_support > 0)
         )
         return breakout_mask
     
