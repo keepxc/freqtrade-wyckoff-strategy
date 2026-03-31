@@ -5037,11 +5037,12 @@ class WyckoffV7_TrueMethod(IStrategy):
                 return 'profit_protect_exit'
 
         # ===== 优先级 3.7: WY_AXIS_FAILED_EXIT — 轴线支撑失败超时退出 =====
-        # 适用场景：wyckoff_axis_support 入场后从未盈利，支撑实质上已失守
-        # 触发条件：enter_tag=axis_support + 持仓>48h + max_profit_seen<=0.01 + profit<-0.03
-        # 慢牛/震荡里条件④永远不成立，零影响；阴跌扩大时作为安全兜底
+        # 适用场景：wyckoff_axis_support 入场后支撑失守，持续亏损
+        # 触发条件：enter_tag=axis_support + 持仓>48h + profit<-0.03
+        #   子条件（满足任一）：
+        #   A) 从未浮盈超1%（支撑从未生效）
+        #   B) 从最高点回撤超5%（支撑曾生效但已彻底失守）
         # 默认关闭，通过 WY_AXIS_FAILED_EXIT=1 启用
-        # 注：阈值从 0.001 改为 0.01（1%），0.001太严导致开仓后任何微小反弹都使条件永久失效
         if (os.getenv('WY_AXIS_FAILED_EXIT', '0') not in ('0', 'false', 'off', '')
                 and not trade.is_short
                 and trade.enter_tag == 'wyckoff_axis_support'):
@@ -5049,12 +5050,20 @@ class WyckoffV7_TrueMethod(IStrategy):
             if _hold_h > 48 and current_profit < -0.03:
                 try:
                     _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if trade.open_rate > 0 else None
+                    _drawdown_from_peak = (trade.max_rate - current_rate) / trade.max_rate if trade.max_rate > 0 else None
                 except Exception:
                     _max_p = None
-                if _max_p is not None and _max_p <= 0.01:
+                    _drawdown_from_peak = None
+                # A) 从未浮盈超1%：支撑从未生效
+                _never_profitable = _max_p is not None and _max_p <= 0.01
+                # B) 从最高点回撤超5%：支撑曾生效但已彻底失守
+                _peak_collapsed = _drawdown_from_peak is not None and _drawdown_from_peak > 0.05
+                if _never_profitable or _peak_collapsed:
                     logger.info(
                         f'轴线支撑失败退出: {pair}, 持仓={_hold_h:.1f}h, '
-                        f'收益={current_profit:.2%}, max_profit_seen={_max_p:.4f}'
+                        f'收益={current_profit:.2%}, max_profit={_max_p:.4f}, '
+                        f'peak_drawdown={_drawdown_from_peak:.4f}, '
+                        f'trigger={"never_profitable" if _never_profitable else "peak_collapsed"}'
                     )
                     return 'axis_support_failed_exit'
 
