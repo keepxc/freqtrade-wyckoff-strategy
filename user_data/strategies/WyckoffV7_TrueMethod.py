@@ -3256,8 +3256,11 @@ class WyckoffV7_TrueMethod(IStrategy):
         severe_divergence_exit = (dataframe['harmony_score'] < -0.5) & dataframe['wyckoff_warning'] & (dataframe['effort'] > 2.0)
         # 3. 下降波段开始退出
         # A-3: 增加最小位移约束 (≥0.8%) 过滤微幅下降段，仅在有实质性向下动能时退出
+        # 修复 Bug-2026-03-31: is_wave_start 在实盘最后一根K线上永远是 False（wave_analyzer
+        # 总是将最后bar标为wave终点），使用 rolling(4).max() 捕获最近3根K线内的wave_start。
+        _is_recent_wave_start = dataframe['is_wave_start'].rolling(4, min_periods=1).max().astype(bool)
         down_wave_exit = (
-            dataframe['is_wave_start'] &
+            _is_recent_wave_start &
             (dataframe['wave_direction'] == 'down') &
             (dataframe['wave_efficiency'] > self.down_wave_eff_threshold) &  # P0-Next-3: 可配置阈值
             (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
@@ -4610,30 +4613,37 @@ class WyckoffV7_TrueMethod(IStrategy):
         sos_threshold = base_threshold * 1.5 * exit_multiplier
         # 获取连续确认参数
         consecutive_required = int(self.sos_require_consecutive_down_waves.value)
-        # 检查当前 K 线的下降波段条件
-        current_is_wave_start = dataframe.loc[current_index, 'is_wave_start']
-        current_wave_direction = dataframe.loc[current_index, 'wave_direction']
-        current_wave_efficiency = dataframe.loc[current_index, 'wave_efficiency']
-        # 当前 K 线必须满足下降波段条件
-        current_down_wave = current_is_wave_start and current_wave_direction == 'down' and (current_wave_efficiency > sos_threshold)
-        if not current_down_wave:
-            return (False, '')
-        # 实现连续确认逻辑：检查前 N-1 根 K 线是否也满足条件
-        consecutive_count = 1  # 当前 K 线已满足
-        for i in range(1, consecutive_required):
-            prev_index = current_index - i
-            # 检查索引有效性
-            if prev_index < 0:
+        # 修复 Bug-2026-03-31: is_wave_start 在实盘最后一根K线上永远是 False。
+        # wave_analyzer 总是将最后一根K线标为当前wave的终点(is_wave_end)，不会是起点。
+        # 修复方案：在最近4根K线内查找最近一次下降波段起点（wave_start_idx）；
+        # 连续确认改为检查 wave_start_idx 之后的若干根K线是否持续处于同一下降波段
+        # （wave 内所有bar继承相同 direction/efficiency，is_wave_start 仅在首根bar为True）。
+        wave_start_idx = None
+        current_wave_efficiency = 0.0
+        for _lb in range(0, min(4, current_index + 1)):
+            _ci = current_index - _lb
+            if (dataframe.loc[_ci, 'is_wave_start'] and
+                    dataframe.loc[_ci, 'wave_direction'] == 'down' and
+                    dataframe.loc[_ci, 'wave_efficiency'] > sos_threshold):
+                wave_start_idx = _ci
+                current_wave_efficiency = dataframe.loc[_ci, 'wave_efficiency']
                 break
-            # 检查前一根 K 线是否满足下降波段条件
-            prev_is_wave_start = dataframe.loc[prev_index, 'is_wave_start']
-            prev_wave_direction = dataframe.loc[prev_index, 'wave_direction']
-            prev_wave_efficiency = dataframe.loc[prev_index, 'wave_efficiency']
-            prev_down_wave = prev_is_wave_start and prev_wave_direction == 'down' and (prev_wave_efficiency > sos_threshold)
-            if prev_down_wave:
+        if wave_start_idx is None:
+            return (False, '')
+        # 连续确认：wave_start 之后连续 N-1 根K线持续在同一下降波段
+        # 前续bars只需 wave_direction=='down'，不需要 is_wave_start（该字段仅首根有效）
+        consecutive_count = 1
+        for i in range(1, consecutive_required):
+            next_idx = wave_start_idx + i
+            if next_idx > current_index:
+                break
+            next_down = (
+                dataframe.loc[next_idx, 'wave_direction'] == 'down' and
+                dataframe.loc[next_idx, 'wave_efficiency'] > sos_threshold
+            )
+            if next_down:
                 consecutive_count += 1
             else:
-                # 如果有一根 K 线不满足，则连续确认失败
                 break
         # 判断是否满足连续确认要求
         if consecutive_count >= consecutive_required:
@@ -4660,32 +4670,37 @@ class WyckoffV7_TrueMethod(IStrategy):
             return (False, '')
         threshold = 0.001 * self.axis_support_dw_eff_mult
         consecutive_required = self.axis_support_dw_consecutive
-        # 当前K线必须满足严格阈值
-        cur_ok = (
-            dataframe.loc[current_index, 'is_wave_start'] and
-            dataframe.loc[current_index, 'wave_direction'] == 'down' and
-            dataframe.loc[current_index, 'wave_efficiency'] > threshold
-        )
-        if not cur_ok:
+        # 修复 Bug-2026-03-31: is_wave_start 在实盘最后一根K线上永远是 False。
+        # 使用回看窗口（最近4根K线）查找最近一次下降波段起点。
+        # 连续确认改为检查 wave_start 之后若干根K线是否持续在同一下降波段。
+        wave_start_idx = None
+        wave_start_eff = 0.0
+        for _lb in range(0, min(4, current_index + 1)):
+            _ci = current_index - _lb
+            if (dataframe.loc[_ci, 'is_wave_start'] and
+                    dataframe.loc[_ci, 'wave_direction'] == 'down' and
+                    dataframe.loc[_ci, 'wave_efficiency'] > threshold):
+                wave_start_idx = _ci
+                wave_start_eff = dataframe.loc[_ci, 'wave_efficiency']
+                break
+        if wave_start_idx is None:
             return (False, '')
-        # 检查前 N-1 根K线
+        # 连续确认：wave_start 之后连续 N-1 根K线持续在同一下降波段
         consecutive_count = 1
         for i in range(1, consecutive_required):
-            prev_index = current_index - i
-            if prev_index < 0:
+            next_idx = wave_start_idx + i
+            if next_idx > current_index:
                 break
-            prev_ok = (
-                dataframe.loc[prev_index, 'is_wave_start'] and
-                dataframe.loc[prev_index, 'wave_direction'] == 'down' and
-                dataframe.loc[prev_index, 'wave_efficiency'] > threshold
+            next_ok = (
+                dataframe.loc[next_idx, 'wave_direction'] == 'down' and
+                dataframe.loc[next_idx, 'wave_efficiency'] > threshold
             )
-            if prev_ok:
+            if next_ok:
                 consecutive_count += 1
             else:
                 break
         if consecutive_count >= consecutive_required:
-            eff = dataframe.loc[current_index, 'wave_efficiency']
-            reason = f'axis_support_dw_confirmed (eff={eff:.4f}, thr={threshold:.4f}, consec={consecutive_count}/{consecutive_required})'
+            reason = f'axis_support_dw_confirmed (eff={wave_start_eff:.4f}, thr={threshold:.4f}, consec={consecutive_count}/{consecutive_required})'
             return (True, reason)
         return (False, '')
 
@@ -4948,6 +4963,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         # ===== 1. 数据可用性检查 =====
         dataframe = kwargs.get('dataframe')
         if dataframe is None or len(dataframe) == 0:
+            # live/dry-run 模式下 kwargs 不含 dataframe，从 DataProvider 获取
+            try:
+                dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            except Exception:
+                dataframe = None
+        if dataframe is None or len(dataframe) == 0:
             logger.debug(f'custom_exit: dataframe 不可用 (pair={pair}), 跳过自定义退出逻辑')
             return None
         # ===== 2. 获取 SOS 元数据 =====
@@ -4996,7 +5017,10 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 条件：多头 + 浮盈≥2.5% + 持仓≥12h + 量缩（<SMA20×0.7）+ 收阴
         # 目的：冲高回落初期主动退出，配合方案C止损形成双层防护
         # 持仓≥12h 门控防止开仓初期正常震荡触发
-        if (not trade.is_short
+        # A/B 测试结论：关闭时总收益 +510pp（1464% vs 954%），Calmar +124，不拦截真正坏单
+        # 默认关闭，设置 WY_PROFIT_PROTECT=1 可手动启用
+        if (os.getenv('WY_PROFIT_PROTECT', '0') not in ('0', 'false', 'off')
+                and not trade.is_short
                 and current_profit >= 0.025
                 and (current_time - trade.open_date_utc).total_seconds() >= 43200):  # 12h
             last_bar = dataframe.iloc[current_index]
@@ -5033,6 +5057,20 @@ class WyckoffV7_TrueMethod(IStrategy):
                         f'收益={current_profit:.2%}, max_profit_seen={_max_p:.4f}'
                     )
                     return 'axis_support_failed_exit'
+
+        # ===== 优先级 3.75: 超时亏损保底退出 =====
+        # 场景：持仓超过10天且仍处于亏损状态，说明所有信号均未能触发正常退出
+        # 触发条件：多头 + 持仓 ≥ 240h(10天) + 当前亏损 ≥ -2%
+        # 目的：防止无限持仓；比 stoploss(-12%) 更早清仓持续亏损的卡仓
+        # 注：不影响盈利交易，仅对长期无进展的亏损仓位生效
+        if not trade.is_short:
+            _hold_h_timeout = (current_time - trade.open_date_utc).total_seconds() / 3600
+            if _hold_h_timeout >= 240 and current_profit < -0.02:
+                logger.info(
+                    f'超时亏损保底退出: {pair}, 持仓={_hold_h_timeout:.1f}h, '
+                    f'收益={current_profit:.2%}, enter_tag={trade.enter_tag}'
+                )
+                return 'timeout_loss_exit'
 
         # ===== 优先级 3.8: Task 4.2 — P&F 目标位退出（威科夫因果律，盈利达到目标位时退出）=====
         # P&F 目标位直接从 dataframe 当前 bar 读取（比元数据链更可靠，回测/实盘均有效）
@@ -5105,10 +5143,17 @@ class WyckoffV7_TrueMethod(IStrategy):
                 # flag 开启时 axis_support 不满足严格条件 → 不触发标准 down_wave
             else:
                 # 标准条件：is_wave_start && wave_direction=='down' && wave_efficiency > 0.001
-                if dataframe.loc[current_index, 'is_wave_start'] and dataframe.loc[current_index, 'wave_direction'] == 'down' and (dataframe.loc[current_index, 'wave_efficiency'] > 0.001):
-                    wave_efficiency = dataframe.loc[current_index, 'wave_efficiency']
-                    logger.info(f'标准下降波段退出: {pair}, 波段效率={wave_efficiency:.4f}, 收益={current_profit:.2%}')
-                    return 'wyckoff_down_wave'
+                # 修复 Bug-2026-03-31: is_wave_start 在实盘最后一根K线上永远是 False。
+                # wave_analyzer 总是将最后一根K线标为当前wave的终点(is_wave_end)，
+                # 不会是起点(is_wave_start)。使用回看窗口（最近4根K线）捕获刚开始的下降波段。
+                for _lb in range(0, min(4, current_index + 1)):
+                    _ci = current_index - _lb
+                    if (dataframe.loc[_ci, 'is_wave_start'] and
+                            dataframe.loc[_ci, 'wave_direction'] == 'down' and
+                            dataframe.loc[_ci, 'wave_efficiency'] > 0.001):
+                        wave_efficiency = dataframe.loc[_ci, 'wave_efficiency']
+                        logger.info(f'标准下降波段退出: {pair}, 波段效率={wave_efficiency:.4f}, 回看={_lb}根K线, 收益={current_profit:.2%}')
+                        return 'wyckoff_down_wave'
         # 没有触发任何退出条件
         return None
 
