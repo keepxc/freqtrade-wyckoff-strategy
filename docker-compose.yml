@@ -25,7 +25,6 @@ services:
       - "./wyckoff:/freqtrade/wyckoff"
     environment:
       - PYTHONPATH=/freqtrade
-      - WY_AXIS_FAILED_EXIT=1   # 轴线支撑失败超时止损（阴跌行情启用，牛市可设为0）
     # Expose api on port 8080 (localhost only)
     # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
     # for more information.
