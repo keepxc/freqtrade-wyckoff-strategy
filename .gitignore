@@ -59,6 +59,7 @@ temp_*.py
 # ä¿ç•™é‡è¦çš„é…ç½®å’Œç­–ç•¥æ–‡ä»¶
 !user_data/strategies/
 !user_data/config*.json
+user_data/config_dryrun.json
 !wyckoff/
 !.kiro/
 
@@ -66,7 +67,7 @@ temp_*.py
 *_backup_*/
 wyckoff_backup_*/
 
-# »Ø²âÊÂ¼şÈÕÖ¾ÓëÁÙÊ±Êä³ö£¨²»ÉÏ´«£©
+# ï¿½Ø²ï¿½ï¿½Â¼ï¿½ï¿½ï¿½Ö¾ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ï¿½ï¿½
 user_data/events/backtest/
 user_data/backtest_*.txt
 temp_extract_ca/
