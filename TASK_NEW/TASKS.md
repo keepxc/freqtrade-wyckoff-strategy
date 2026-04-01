@@ -76,6 +76,32 @@ python user_data/reports/build_weekly_report.py      --db user_data/market.db --
 
 # ── 快速查数据库行数 ──────────────────────────────────────────
 python -c "import sqlite3; conn=sqlite3.connect('user_data/market.db'); [print(f'{t}: {conn.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]}') for t in ['experiment_runs','signals','trades','detector_events','regime_snapshots','exit_decision_events','weekly_reports']]"
+
+# ── 本地数据下载（不使用 Docker）────────────────────────────────
+# 下载最新 K 线数据（1h + 1d，BTC/USDT 期货，更新到当天）
+python -m freqtrade download-data \
+  --config user_data/config_dryrun.json \
+  --pairs BTC/USDT:USDT \
+  --timeframes 1h 1d \
+  --trading-mode futures \
+  --timerange 20260101-$(date +%Y%m%d) \
+  --data-format-ohlcv feather
+
+# ── 本地回测 + 出报表（不使用 Docker）────────────────────────────
+# 1. 仅回测（本地直接运行，代理已配置在 config_backtest.json）
+python -m freqtrade backtesting \
+  --config user_data/config_backtest.json \
+  --strategy WyckoffV7_TrueMethod \
+  --timerange 20260318-20260401 \
+  --cache none
+
+# 2. 跳过回测，摄入最新事件目录 + 出报表
+python scripts/run_backtest_pipeline.py \
+  --skip-backtest \
+  --week-start 2026-03-18 --week-end 2026-04-01
+
+# 3. 全流程（仅摄入 + 报表，适合本地无 Docker 环境）
+#    先跑步骤 1，再跑步骤 2
 ```
 
 ### 任务

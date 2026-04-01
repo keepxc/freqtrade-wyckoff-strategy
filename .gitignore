@@ -60,6 +60,7 @@ temp_*.py
 !user_data/strategies/
 !user_data/config*.json
 user_data/config_dryrun.json
+user_data/config_backtest.json
 !wyckoff/
 !.kiro/
 
