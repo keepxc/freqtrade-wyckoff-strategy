@@ -141,6 +141,26 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
         (start_s, end_s, *priority_tags),
     )
 
+    # P5-WS: enter_tag × regime 分桶（用于识别标签在不同环境下的稳定性）
+    tag_regime_rows = fetch_all(
+        conn,
+        """
+        SELECT
+            COALESCE(enter_tag, 'unknown') AS enter_tag,
+            COALESCE(macro_phase_enter, 'unknown') AS macro_phase,
+            COUNT(*) AS n,
+            AVG(profit_pct) AS avg_pnl,
+            SUM(CASE WHEN profit_pct > 0 THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*),0) AS win_rate
+        FROM trades
+        WHERE exit_time IS NOT NULL
+          AND exit_time >= ? AND exit_time < ?
+        GROUP BY COALESCE(enter_tag, 'unknown'), COALESCE(macro_phase_enter, 'unknown')
+        ORDER BY n DESC, enter_tag, macro_phase
+        LIMIT 20
+        """,
+        (start_s, end_s),
+    )
+
     warnings: List[str] = []
     health_score = 1.0
 
@@ -250,8 +270,22 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
     lines.append("")
 
     if trade_n < 5:
-        lines.append("> ⚠️ **样本不足提醒**：本周已平仓交易小于 5 笔，所有统计结论仅供参考，不建议基于此做决策。")
+        lines.append("> [WARN] **样本不足提醒**：本周已平仓交易小于 5 笔，所有统计结论仅供参考，不建议基于此做决策。")
         lines.append("")
+
+    lines.append("## Enter Tag × Regime 分桶")
+    if tag_regime_rows:
+        lines.append("| enter_tag | macro_phase | N | 胜率 | avg_pnl |")
+        lines.append("|-----------|-------------|---|------|---------|")
+        for row in tag_regime_rows:
+            wr = row["win_rate"] or 0.0
+            pnl = row["avg_pnl"] or 0.0
+            lines.append(
+                f"| {row['enter_tag']} | {row['macro_phase']} | {row['n']} | {wr:.2%} | {pnl:.4f} |"
+            )
+    else:
+        lines.append("- 本周无可用的 enter_tag × regime 已平仓样本")
+    lines.append("")
 
     return "\n".join(lines), warnings, health_score
 

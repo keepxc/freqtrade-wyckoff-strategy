@@ -177,7 +177,8 @@ def run_ingest_one(events_dir: Path, db_path: Path, label: str = "") -> bool:
 
     ingest_script = ROOT / "user_data" / "ingest" / "ingest_jsonl.py"
     cmd = [sys.executable, str(ingest_script), "--db", str(db_path), "--events"] + [str(f) for f in sorted_files]
-    result = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
+    utf8_env = {**os.environ, "PYTHONUTF8": "1"}
+    result = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", env=utf8_env)
     if result.returncode != 0:
         log(f"✗ 摄入失败:\n{result.stderr}")
         return False
@@ -214,8 +215,9 @@ def run_fix_trades() -> None:
         log("⚠ quick_fix_trades.py 不存在，跳过")
         return
     log("▶ 运行 quick_fix_trades.py...")
+    utf8_env = {**os.environ, "PYTHONUTF8": "1"}
     result = subprocess.run([sys.executable, str(fix_script)], cwd=str(ROOT),
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8", env=utf8_env)
     if result.returncode == 0:
         log(f"✓ fix_trades 完成")
         if result.stdout.strip():
@@ -230,7 +232,8 @@ def run_reports(db_path: Path, week_start: str, week_end: str) -> None:
 
     def run_report(name: str, script: str, extra_args: list[str]) -> None:
         cmd = [sys.executable, script] + extra_args
-        result = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
+        utf8_env = {**os.environ, "PYTHONUTF8": "1"}
+        result = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace", env=utf8_env)
         if result.returncode != 0:
             log(f"  ✗ {name} 失败:\n{result.stderr[:500]}")
         else:

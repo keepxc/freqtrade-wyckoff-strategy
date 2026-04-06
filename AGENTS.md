@@ -55,7 +55,7 @@ The wider project order is:
 
 推荐回测命令：
 ```bash
-docker compose run --rm freqtrade backtesting --config user_data/config_backtest.json --strategy WyckoffV7_TrueMethod --timerange 20230101-20260228 --cache none
+docker compose run --rm freqtrade backtesting --config user_data/config_backtest.json --strategy WyckoffV7_TrueMethod --timerange 20230101-20260330 --cache none
 ```
 
 Dry-run 检查：

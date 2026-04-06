@@ -1967,7 +1967,146 @@ A-2d-1 已证明 `> 0.5` 切割 57% 信号，A-2d-2 更激进（还会滤 0.50~0
 5. ✅ A-2f：axis_strength_tier 过滤无效（全部信号均为 weak 级别，medium/strong = 0 笔）
 
 **当前一句话主线定义：**  
-**新基准 965.76%（A-2c-1）。axis_support 优化线全线证伪关闭。量能/置信度/分级三维度已穷尽。下一步：返回主任务线（P0 出场层 / Core Audit / P7-min）。**
+**新基准 1445.39%（20230101-20260330，467笔）。axis_support 优化线全线证伪关闭。量能/置信度/分级三维度已穷尽。下一步进入 RP（Regime-Aware Parameter Routing）。**
+
+---
+
+## 归档：P1-A 当前挂接形态验证（✅ 完成 2026-03-13）
+
+> 完整实验数据见 `TASK_NEW/TASKS_with_checklist_backup_20260401.md`
+
+### 概述
+在 `soft→signal_quality` 当前挂接形态下，做了完整三层参数验证（结构层/仲裁层/注入层），共 8 组实验 + 1 组最终组合。
+
+### 实验矩阵
+
+| 实验 | 层级 | 改动 | gate 变化 | 绩效变化 |
+|------|------|------|----------|---------|
+| **EXP-00 Baseline** | — | `daily_gate_mode=soft`, k=0.25, 阈值1.6 | — | 444笔/479.17%/8.48%DD/Sharpe 2.15 |
+| S1 | 结构层 | overlap 0.65→0.60 | TR+4.86pct | 零变化 |
+| S2 | 结构层 | slow_check=false | TR+5.03pct, +1.0组增加 | 零变化 |
+| S3 | 结构层 | main_window 60→50 | TR-3.56pct, 冲突率↑ | 零变化 |
+| A1 | 仲裁层 | conflict_score +0.3→0 | 加分组减少 | 零变化 |
+| A2 | 仲裁层 | conflict_score +0.3→0.6 | 冲突态惩罚减弱 | 零变化 |
+| I1 | 注入层 | k=0.20 | 注入力度减弱 | 零变化 |
+| I2 | 注入层 | k=0.30 | 注入力度增强 | 零变化 |
+| I3 | 注入层 | 弱信号阈值 1.6→1.4 | 与EXP-00完全一致 | 零变化 |
+| FINAL-COMB | 组合 | S2+A2+baseline_k | gate偏向中性 | 零变化 |
+
+### 关键结论
+- **三层均无稳定增益，维持默认 `daily_gate_mode=off`**
+- 根本原因：当前回测环境固定仓位，`signal_quality` 不做入场过滤；`soft` 机制能改变质量分但不能改变哪些信号成交
+- 该结论**不等同于整个 P1 参数空间被证伪**，而是说明当前挂接形态传导力不足
+- P1-B 保留为未来任务，需先打通传导路径（gate→入场过滤 或 gate→仓位乘数）
+
+### 输出文件
+- `TASK_NEW/p1_exp00_baseline_soft_analysis.json` ~ `p1_final_comb_analysis.json`（共 9 个机制分析文件）
+- `user_data/backtest_results/backtest-result-2026-03-13_05-02-28.zip`（EXP-00 基线）
+
+---
+
+## 归档：P3 波段级 Effort/Result（✅ 完成 2026-03-13）
+
+### 概述
+基于已有 `WaveAnalyzer` 实现波段级 E/R 背离检测，服务持仓管理与退出质量。
+
+### 实现内容
+- `swing_up_er_weak`：上涨波努力>110%均值 且位移<85%均值 → 退出信号（需同时 wyckoff_warning 双重确认）
+- `swing_down_er_exhaustion`：下跌波参与>90%但跌幅<78% → Spring signal_quality ×1.15 加成
+- 开关：`WY_P3_SWING_ER`，默认 off
+
+### 验证结果（20230101-20260228，三段回测）
+- 全量：444笔/479.17%/Sharpe 2.15/DD 8.48% — **与基线完全一致，零劣化**
+- SEG2 牛市段：P3 激活 3 笔退出，100% 胜率，avg +0.31%
+- SEG3 熊市段：P3 未触发（符合预期）
+
+### 待改进（P1-Next）
+- P1-Next-1：swing_up_er_weak 双重确认条件过于苛刻（实际退出触发=0），需去掉 wyckoff_warning 同步要求
+- P1-Next-2：Spring ×1.15 共振仅 2 次，样本不足暂不调
+
+---
+
+## 归档：P4 MarketEnvironmentDetector 审查（✅ 归档为预埋点）
+
+- `MarketEnvironmentDetector` 已完成 1H/4H 市场环境计算，但除 `bear_market_mode` 外未接入策略决策面
+- `bear_market_mode` 已覆盖最极端 markdown 风险（htf 持续 5 天 markdown → 禁止全部多头）
+- 真正空洞：`markup/trading_range/transition` 三类状态下参数未差异化
+- **当前不进入执行主线，保留为 future regime-aware optimization 预埋点**
+- 触发条件：某类 regime 长期跑输基线 / 同一参数在不同环境中表现分裂 / `bear_market_mode` 未覆盖的中间态带来持续噪声
+
+---
+
+## 归档：P0 Roadmap 退出层优化（✅ 完成 2026-03-17）
+
+### P0-E1 ROI 实验（2026-03-13）
+
+| 指标 | baseline | ext24h | **nofloat** |
+|---|---|---|---|
+| 总收益% | 479.17% | 561.89% | **809.18%** |
+| Max DD% | 8.48% | 8.48% | 9.72% |
+| Sharpe | **2.15** | 2.04 | 1.90 |
+| 2021-2022 SQN | 3.19 | — | **4.37** |
+
+**结论**：nofloat（移除 720:3% ROI floor）全量+330pp，Max DD 仅增 1.24pp。已升级为新默认 `{0:0.5, 60:0.3, 180:0.15, 360:0.08}`。
+
+### P0-Next Core Audit 退出层实验（2026-03-17）
+
+| 实验 | 结果 |
+|------|------|
+| V1/V2 custom_exit 门控 | ❌ INERT（vectorized exit 先于 custom_exit 生效） |
+| 架构验证：移除 vectorized DW | ❌ 灾难性 965%→43% |
+| V3 DW阈值 0.003 | ❌ 965%→569% |
+| V4 axis tight SL -8% | ❌ TSL 5→17笔，收益-9pp |
+
+**架构关键发现**：Freqtrade 回测中 vectorized exit 先于 custom_exit 生效；down_wave 退出质量无有效改进路径。
+
+### 预埋点
+- `[~]` Phase-aware exit：`wyckoff/exit_logic.py` ExitLogic 已实现，策略未接线
+- `[ ]` 分批止盈：Freqtrade 原生不支持分批减仓
+
+---
+
+## 归档：P2 Regime-aware 授权系统（✅ 完成 2026-03-14，默认 disabled）
+
+- 核心功能测试通过（RR multiplier / Holding time / Signal routing）
+- 策略集成完成，零影响基线
+- 文档：`wyckoff/P2_README.md` / 诊断：`check_p2_trigger.py`
+- **默认 disabled，等待触发条件后启用**
+
+---
+
+## 归档：RM-3 仓位管理系统（✅ 已实现，待启用 2026-03-14）
+
+### Quality Bucket 映射验证
+
+| 分层 | 数量 | 胜率 | PF | 信号类型 |
+|------|------|------|-----|---------|
+| high | 88 | 96.6% | 39.14 | wave_start(80), lps(7) |
+| medium | 263 | 68.4% | 2.25 | axis_support(253), sos(10) |
+| low | 3 | 33.3% | 0.18 | utad(3) |
+| very_low | 18 | 33.3% | 1.03 | sow(18) |
+
+- 仓位映射：high 1.0x / medium 0.85x / low 0.5x / markdown 0.7x
+- 开关：`WY_POSITION_MODE=off`（默认）/ `defensive`
+- 下一步：运行对比回测验证后考虑启用 defensive 模式
+- 文档：`wyckoff/RM3_POSITION_MANAGER_GUIDE.md` / `RM3_FINAL_VALIDATION_REPORT.md`
+
+---
+
+## 归档：FUT-E 验证与工程护城河（✅ 框架完成 2026-03-14）
+
+已完成：
+- `tests/test_daily_event_detector.py`：BC/BUEC 检测、序列扫描、置信度
+- `tests/test_event_sequence_state_machine.py`：PS/SC/AR/ST、Phase 转换、幂等性
+- `tests/test_market_env_detector.py`：markup/markdown/transition 检测
+- `tests/test_composite_man_detector.py`：意图判断、置信度
+- `tests/test_parameter_sensitivity.py`：参数敏感性测试框架
+- `wyckoff/detector_monitoring_panel.py`：激活率/冲突率/fallback 监控
+- `wyckoff/dryrun_drift_monitor.py`：漂移监控
+- `wyckoff/enter_tag_winrate_tracker.py`：胜率跟踪
+
+Docker 测试通过，框架生产就绪。详见 `tests/README_VALIDATION_FRAMEWORK.md`。
+
 
 ---
 
@@ -1975,14 +2114,9 @@ A-2d-1 已证明 `> 0.5` 切割 57% 信号，A-2d-2 更激进（还会滤 0.50~0
 
 ### 参数路由改造（Regime-Aware Parameter Routing）
 
-- 目标：将关键参数从主策略中解耦到独立配置层，由主策略按行情状态动态取值（而非全周期固定同参）
-- 启动时机：仅在当前主线任务（P0 出场层 / Core Audit / P7-min）完成后启动
-- 最小落地范围（MVP）：
-  - 入场阈值（entry thresholds）
-  - 止损参数（stoploss）
-  - ROI 结构（minimal_roi / routing）
-  - RR 门槛（pnf_min_rr / 熊市附加门槛）
-- 路由维度：`markup` / `markdown` / `trading_range`（保留 `transition` 回退默认）
-- 原则：先做“配置外置 + 取值路由”，不改变现有交易哲学与信号定义
+- **当前状态：已进入实施阶段（2026-04-01），详见 `TASKS_with_checklist.md` 中 RP 章节**
+- 目标：将关键参数从主策略中解耦到独立配置层，由主策略按行情状态动态取值
+- 最小落地范围（MVP）：stoploss / ROI / pnf_min_rr / dw_eff_threshold
+- 路由维度：`markup` / `markdown` / `transition`
+- 原则：先做"配置外置 + 取值路由"，不改变现有交易哲学与信号定义
 - 验收：分行情分桶回测结果可解释，且全周期收益/回撤不劣于当前基准
-

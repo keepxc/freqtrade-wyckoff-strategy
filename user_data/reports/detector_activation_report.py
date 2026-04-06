@@ -141,7 +141,7 @@ def build_report(
     lines.append("")
 
     if not recent_stats:
-        lines.append("> ⚠️ 本窗口内无 detector 事件记录，请检查事件流是否正常写入。")
+        lines.append("> [WARN] 本窗口内无 detector 事件记录，请检查事件流是否正常写入。")
 
     return "\n".join(lines)
 

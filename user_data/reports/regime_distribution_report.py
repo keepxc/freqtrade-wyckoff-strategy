@@ -109,7 +109,7 @@ def build_report(
     r_bear_on = r_bear.get("1", r_bear.get("True", 0))
     if r_bear_total > 0 and r_bear_on / r_bear_total > 0.5:
         lines.append(
-            f"> ⚠️ **P2 Regime Mismatch 预警**：近期 bear_market_mode=1 占比 "
+            f"> [WARN] **P2 Regime Mismatch 预警**：近期 bear_market_mode=1 占比 "
             f"{r_bear_on / r_bear_total:.1%}，超过 50%，建议检查 P2 触发条件。"
         )
         lines.append("")
