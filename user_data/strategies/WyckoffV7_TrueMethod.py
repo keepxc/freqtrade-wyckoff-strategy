@@ -462,6 +462,35 @@ class WyckoffV7_TrueMethod(IStrategy):
     # ============================================================
     channel_mode: str = os.getenv('WY_CHANNEL', '').lower().strip()
 
+    # RP-0: Regime-Aware Parameter Routing 基础设施
+    # 默认关闭；开启方式：docker run -e WY_REGIME_ROUTING=1
+    # 关闭时 get_regime_param() 返回 transition 值（= 当前默认参数，零回归保证）
+    use_regime_routing: bool = os.getenv('WY_REGIME_ROUTING', '0').lower() not in ('0', 'false', 'off')
+
+    # 三阶段参数查找表
+    # transition 值 = 当前固定参数（保证 routing=disabled 时零回归）
+    # markup / markdown 数值为初始方案，需通过分桶回测校准后修正
+    REGIME_PARAMS: dict = {
+        'markup': {
+            'stoploss':           -0.12,    # 趋势市场宽松止损（与当前一致）
+            'roi':                {0: 0.50, 60: 0.30, 180: 0.15, 360: 0.08},  # 有耐心，走到 ROI
+            'pnf_min_rr':         0.8,      # 放宽 RR：趋势中低 RR 高概率入场
+            'dw_eff_threshold':   0.0015,   # 略高：markup 趋势中不因弱 DW 提前退出
+        },
+        'markdown': {
+            'stoploss':           -0.10,    # 收紧：下行趋势不允许 12% 回撤（-0.08 过激，已调至 -0.10）
+            'roi':                {0: 0.25, 60: 0.15, 180: 0.08, 360: 0.04},  # 更积极兑现
+            'pnf_min_rr':         1.5,      # 提高：逆势交易必须更好的 RR
+            'dw_eff_threshold':   0.0008,   # 降低：更容易触发 DW 退出，减少利润回吐
+        },
+        'transition': {
+            'stoploss':           -0.12,    # 继承当前默认值（零回归基准）
+            'roi':                {0: 0.50, 60: 0.30, 180: 0.15, 360: 0.08},  # 继承当前默认
+            'pnf_min_rr':         1.0,      # 继承当前默认值
+            'dw_eff_threshold':   0.001,    # 继承当前默认值
+        },
+    }
+
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         
@@ -695,6 +724,32 @@ class WyckoffV7_TrueMethod(IStrategy):
             if not 1 <= consecutive_value <= 5:
                 logger.warning(f'⚠️ sos_require_consecutive_down_waves={consecutive_value} 超出推荐范围 [1, 5]，可能导致过度敏感或迟钝')
         logger.info('WyckoffV7_TrueMethod initialized - Phase 2: Axis Line System ✓ 完成')
+        logger.info(f'RP: WY_REGIME_ROUTING={int(self.use_regime_routing)} (regime-aware parameter routing)')
+
+    # RP-0: 路由基础设施工具方法 -----------------------------------------------
+
+    def _get_current_macro_phase(self, dataframe: DataFrame) -> str:
+        """从 dataframe 最后一行读取 macro_phase，无法获取时保守回退至 transition。"""
+        try:
+            if dataframe is not None and len(dataframe) > 0:
+                phase = dataframe.iloc[-1].get('macro_phase', 'transition')
+                if phase in self.REGIME_PARAMS:
+                    return str(phase)
+        except Exception:
+            pass
+        return 'transition'
+
+    def get_regime_param(self, name: str, macro_phase: str) -> object:
+        """按 macro_phase 查表返回对应参数值。
+
+        - WY_REGIME_ROUTING=0（默认）：始终返回 transition 值（= 当前固定参数，零回归）
+        - WY_REGIME_ROUTING=1：按 macro_phase 取值，未知 phase fallback 至 transition
+        """
+        phase = macro_phase if self.use_regime_routing else 'transition'
+        params = self.REGIME_PARAMS.get(phase, self.REGIME_PARAMS['transition'])
+        return params[name]
+
+    # -------------------------------------------------------------------------
 
     def informative_pairs(self):
         """
@@ -4775,10 +4830,14 @@ class WyckoffV7_TrueMethod(IStrategy):
                     is_short=False, leverage=trade.leverage
                 )
                 return max(sl, -0.99)
-        # 默认：维持固定入场源止损（等同于原始 stoploss=-0.12 行为，防止 custom_stoploss 产生追踪效应）
-        # 重要：直接返回 self.stoploss 会导致每根 K 线追踪—需用 stoploss_from_open 锁定固定止损水位
+        # RP-1: regime-aware stoploss 路由（默认 fallback）
+        # WY_REGIME_ROUTING=0: get_regime_param 返回 transition=-0.12（= self.stoploss，零回归保证）
+        # WY_REGIME_ROUTING=1: markup→-0.12 / transition→-0.12 / markdown→-0.08
+        _df_phase, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        _macro_phase = self._get_current_macro_phase(_df_phase)
+        _regime_sl = self.get_regime_param('stoploss', _macro_phase)
         return stoploss_from_open(
-            self.stoploss, current_profit,
+            _regime_sl, current_profit,
             is_short=trade.is_short, leverage=trade.leverage
         )
 
@@ -4997,6 +5056,8 @@ class WyckoffV7_TrueMethod(IStrategy):
                 return col_name in df.columns
             except:
                 return default if default is not None else False
+        # 确保 index 是 0-based，避免 dataframe 为切片时 loc[int] 报 KeyError
+        dataframe = dataframe.reset_index(drop=True)
         current_index = len(dataframe) - 1
         # ===== 4. 退出优先级逻辑 =====
         # 优先级 1: 威科夫气候行动退出（立即退出，不受 SOS 容忍度影响）
