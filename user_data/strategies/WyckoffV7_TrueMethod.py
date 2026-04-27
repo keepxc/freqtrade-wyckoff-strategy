@@ -2466,6 +2466,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         #   "对于 Spring #3，完全移除 EMA 限制 是符合原教旨威科夫理论的"
         # 只保留派发过滤，完全移除 EMA 和 market_env 限制
         dataframe['spring_3_trading_allowed'] = not_distribution
+        # 缓存波段列索引，供 custom_exit 辅助函数使用
+        self._wave_idx = {
+            'is_wave_start': dataframe.columns.get_loc('is_wave_start'),
+            'wave_direction': dataframe.columns.get_loc('wave_direction'),
+            'wave_efficiency': dataframe.columns.get_loc('wave_efficiency'),
+        }
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -4622,11 +4628,11 @@ class WyckoffV7_TrueMethod(IStrategy):
         current_wave_efficiency = 0.0
         for _lb in range(0, min(4, current_index + 1)):
             _ci = current_index - _lb
-            if (dataframe.loc[_ci, 'is_wave_start'] and
-                    dataframe.loc[_ci, 'wave_direction'] == 'down' and
-                    dataframe.loc[_ci, 'wave_efficiency'] > sos_threshold):
+            if ((_ci >= 0 and dataframe.iloc[_ci, self._wave_idx['is_wave_start']]) and
+                    dataframe.iloc[_ci, self._wave_idx['wave_direction']] == 'down' and
+                    dataframe.iloc[_ci, self._wave_idx['wave_efficiency']] > sos_threshold):
                 wave_start_idx = _ci
-                current_wave_efficiency = dataframe.loc[_ci, 'wave_efficiency']
+                current_wave_efficiency = dataframe.iloc[_ci, self._wave_idx['wave_efficiency']]
                 break
         if wave_start_idx is None:
             return (False, '')
@@ -4638,8 +4644,8 @@ class WyckoffV7_TrueMethod(IStrategy):
             if next_idx > current_index:
                 break
             next_down = (
-                dataframe.loc[next_idx, 'wave_direction'] == 'down' and
-                dataframe.loc[next_idx, 'wave_efficiency'] > sos_threshold
+                dataframe.iloc[next_idx, self._wave_idx['wave_direction']] == 'down' and
+                dataframe.iloc[next_idx, self._wave_idx['wave_efficiency']] > sos_threshold
             )
             if next_down:
                 consecutive_count += 1
@@ -4677,11 +4683,11 @@ class WyckoffV7_TrueMethod(IStrategy):
         wave_start_eff = 0.0
         for _lb in range(0, min(4, current_index + 1)):
             _ci = current_index - _lb
-            if (dataframe.loc[_ci, 'is_wave_start'] and
-                    dataframe.loc[_ci, 'wave_direction'] == 'down' and
-                    dataframe.loc[_ci, 'wave_efficiency'] > threshold):
+            if ((_ci >= 0 and dataframe.iloc[_ci, self._wave_idx['is_wave_start']]) and
+                    dataframe.iloc[_ci, self._wave_idx['wave_direction']] == 'down' and
+                    dataframe.iloc[_ci, self._wave_idx['wave_efficiency']] > threshold):
                 wave_start_idx = _ci
-                wave_start_eff = dataframe.loc[_ci, 'wave_efficiency']
+                wave_start_eff = dataframe.iloc[_ci, self._wave_idx['wave_efficiency']]
                 break
         if wave_start_idx is None:
             return (False, '')
@@ -4692,8 +4698,8 @@ class WyckoffV7_TrueMethod(IStrategy):
             if next_idx > current_index:
                 break
             next_ok = (
-                dataframe.loc[next_idx, 'wave_direction'] == 'down' and
-                dataframe.loc[next_idx, 'wave_efficiency'] > threshold
+                dataframe.iloc[next_idx, self._wave_idx['wave_direction']] == 'down' and
+                dataframe.iloc[next_idx, self._wave_idx['wave_efficiency']] > threshold
             )
             if next_ok:
                 consecutive_count += 1
@@ -5157,10 +5163,10 @@ class WyckoffV7_TrueMethod(IStrategy):
                 # 不会是起点(is_wave_start)。使用回看窗口（最近4根K线）捕获刚开始的下降波段。
                 for _lb in range(0, min(4, current_index + 1)):
                     _ci = current_index - _lb
-                    if (dataframe.loc[_ci, 'is_wave_start'] and
-                            dataframe.loc[_ci, 'wave_direction'] == 'down' and
-                            dataframe.loc[_ci, 'wave_efficiency'] > 0.001):
-                        wave_efficiency = dataframe.loc[_ci, 'wave_efficiency']
+                    if ((_ci >= 0 and dataframe.iloc[_ci, self._wave_idx['is_wave_start']]) and
+                            dataframe.iloc[_ci, self._wave_idx['wave_direction']] == 'down' and
+                            dataframe.iloc[_ci, self._wave_idx['wave_efficiency']] > 0.001):
+                        wave_efficiency = dataframe.iloc[_ci, self._wave_idx['wave_efficiency']]
                         logger.info(f'标准下降波段退出: {pair}, 波段效率={wave_efficiency:.4f}, 回看={_lb}根K线, 收益={current_profit:.2%}')
                         return 'wyckoff_down_wave'
         # 没有触发任何退出条件
