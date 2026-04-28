@@ -1278,10 +1278,10 @@ class WyckoffV7_TrueMethod(IStrategy):
                     )
                     dataframe['daily_choch_confirmed'] = dataframe.get(
                         'daily_choch_confirmed_1d', pd.Series(False, index=dataframe.index)
-                    )
+                    ).fillna(False).astype(bool)
                     dataframe['daily_sow_bar'] = dataframe.get(
                         'daily_sow_bar_1d', pd.Series(False, index=dataframe.index)
-                    )
+                    ).fillna(False).astype(bool)
                     # Task 4.1b-final 字段重命名
                     dataframe['daily_bc_detected'] = dataframe.get(
                         'daily_bc_detected_1d', pd.Series(False, index=dataframe.index)
@@ -1300,16 +1300,16 @@ class WyckoffV7_TrueMethod(IStrategy):
                     )
                     dataframe['daily_utad_detected'] = dataframe.get(
                         'daily_utad_detected_1d', pd.Series(False, index=dataframe.index)
-                    )
+                    ).fillna(False).astype(bool)
                     dataframe['daily_dist_sow_detected'] = dataframe.get(
                         'daily_dist_sow_detected_1d', pd.Series(False, index=dataframe.index)
-                    )
+                    ).fillna(False).astype(bool)
                     dataframe['buying_exhaustion'] = dataframe.get(
                         'buying_exhaustion_1d', pd.Series(False, index=dataframe.index)
-                    )
+                    ).fillna(False).astype(bool)
                     dataframe['dist_cause_sufficient'] = dataframe.get(
                         'dist_cause_sufficient_1d', pd.Series(False, index=dataframe.index)
-                    )
+                    ).fillna(False).astype(bool)
                     # P1: TR 检测器字段重命名
                     dataframe['daily_tr_exists'] = dataframe.get(
                         'daily_tr_exists_1d', pd.Series(False, index=dataframe.index)
@@ -1462,10 +1462,10 @@ class WyckoffV7_TrueMethod(IStrategy):
         #   路径B：Daily close > Daily EMA200 → 宏观结构重置，daily_choch_confirmed 自然失效
         _daily_choch = dataframe.get(
             'daily_choch_confirmed', pd.Series(False, index=dataframe.index)
-        )
+        ).fillna(False).astype(bool)
         _dist_cause = dataframe.get(
             'dist_cause_sufficient', pd.Series(False, index=dataframe.index)
-        )
+        ).fillna(False).astype(bool)
         dataframe['bear_market_mode'] = _daily_choch & _dist_cause
         _bm_bars  = int(dataframe['bear_market_mode'].sum())
         _all_bars = len(dataframe)
@@ -1782,23 +1782,27 @@ class WyckoffV7_TrueMethod(IStrategy):
             return pd.Series(False, index=dataframe.index)
         # 威科夫背离检测：基于相对强度分析，不是统计学
         wyckoff_divergence = pd.Series(False, index=dataframe.index)
+        volume_col = dataframe.columns.get_loc('volume')
+        high_col = dataframe.columns.get_loc('high')
+        low_col = dataframe.columns.get_loc('low')
+        close_col = dataframe.columns.get_loc('close')
         for i in range(30, len(dataframe)):
             # 1. 威科夫努力分析（成交量相对强度）
-            current_effort = dataframe['volume'].iloc[i]
+            current_effort = dataframe.iat[i, volume_col]
             recent_avg_effort = dataframe['volume'].iloc[i - 10:i].mean()
             effort_increasing = current_effort > recent_avg_effort * 1.8  # 努力显著增加
             # 2. 威科夫结果分析（价格运动相对强度）
-            current_result = dataframe['high'].iloc[i] - dataframe['low'].iloc[i]
+            current_result = dataframe.iat[i, high_col] - dataframe.iat[i, low_col]
             recent_avg_result = (dataframe['high'].iloc[i - 10:i] - dataframe['low'].iloc[i - 10:i]).mean()
             result_decreasing = current_result < recent_avg_result * 0.6  # 结果显著减少
             # 3. 威科夫阶段确认：必须在上升趋势中才有意义
-            price_trend = (dataframe['close'].iloc[i] - dataframe['close'].iloc[i - 20]) / dataframe['close'].iloc[i - 20]
+            price_trend = (dataframe.iat[i, close_col] - dataframe.iat[i - 20, close_col]) / dataframe.iat[i - 20, close_col]
             in_uptrend = price_trend > 0.01  # 在上升趋势中
             # 4. 威科夫供应出现证据
             supply_evidence = self._detect_supply_emergence_evidence(dataframe, i)
             # 威科夫背离确认：高努力 + 低结果 + 上升趋势 + 供应证据
             if effort_increasing and result_decreasing and in_uptrend and supply_evidence:
-                wyckoff_divergence.iloc[i] = True
+                wyckoff_divergence.iat[i] = True
         return wyckoff_divergence
 
     def _detect_supply_emergence_evidence(self, dataframe: DataFrame, idx: int) -> bool:
@@ -1812,13 +1816,17 @@ class WyckoffV7_TrueMethod(IStrategy):
         """
         if idx < 5:
             return False
+        open_col = dataframe.columns.get_loc('open')
+        high_col = dataframe.columns.get_loc('high')
+        low_col = dataframe.columns.get_loc('low')
+        close_col = dataframe.columns.get_loc('close')
         # 1. 上影线增长（遇到阻力）
-        current_upper_shadow = dataframe['high'].iloc[idx] - max(dataframe['open'].iloc[idx], dataframe['close'].iloc[idx])
-        current_body = abs(dataframe['close'].iloc[idx] - dataframe['open'].iloc[idx])
+        current_upper_shadow = dataframe.iat[idx, high_col] - max(dataframe.iat[idx, open_col], dataframe.iat[idx, close_col])
+        current_body = abs(dataframe.iat[idx, close_col] - dataframe.iat[idx, open_col])
         long_upper_shadow = current_upper_shadow > current_body * 0.5  # 上影线较长
         # 2. 收盘位置恶化
-        if dataframe['high'].iloc[idx] - dataframe['low'].iloc[idx] > 0:
-            close_position = (dataframe['close'].iloc[idx] - dataframe['low'].iloc[idx]) / (dataframe['high'].iloc[idx] - dataframe['low'].iloc[idx])
+        if dataframe.iat[idx, high_col] - dataframe.iat[idx, low_col] > 0:
+            close_position = (dataframe.iat[idx, close_col] - dataframe.iat[idx, low_col]) / (dataframe.iat[idx, high_col] - dataframe.iat[idx, low_col])
             poor_close = close_position < 0.4  # 收盘在下半部
         else:
             poor_close = False
@@ -1827,9 +1835,9 @@ class WyckoffV7_TrueMethod(IStrategy):
         for i in range(max(0, idx - 2), idx + 1):
             if i < len(dataframe):
                 # 卖压特征：收盘低于开盘，或上影线长
-                close_below_open = dataframe['close'].iloc[i] < dataframe['open'].iloc[i]
-                upper_shadow = dataframe['high'].iloc[i] - max(dataframe['open'].iloc[i], dataframe['close'].iloc[i])
-                body = abs(dataframe['close'].iloc[i] - dataframe['open'].iloc[i])
+                close_below_open = dataframe.iat[i, close_col] < dataframe.iat[i, open_col]
+                upper_shadow = dataframe.iat[i, high_col] - max(dataframe.iat[i, open_col], dataframe.iat[i, close_col])
+                body = abs(dataframe.iat[i, close_col] - dataframe.iat[i, open_col])
                 long_shadow = upper_shadow > body * 0.3
                 if close_below_open or long_shadow:
                     selling_pressure_count += 1
@@ -2477,7 +2485,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         )
         _daily_choch_perm2 = dataframe.get(
             'daily_choch_confirmed', pd.Series(False, index=dataframe.index)
-        )
+        ).fillna(False).astype(bool)
         # macro_phase == 'markup' 且 无结构破坏信号 → 旁路 EMA
         macro_markup_ok = (
             (_macro_phase_perm == 'markup') & ~_daily_choch_perm2
@@ -3516,7 +3524,9 @@ class WyckoffV7_TrueMethod(IStrategy):
         #   - 条件：daily_choch_confirmed=True AND rs_signal='falling'
         #   - 此时要求 sos_quality_score >= rs_bear_sos_quality_gate（默认70）才允许平空
         #   - 非熊市/RS非走弱：维持原逻辑（任意 SOS Bar 都平空）
-        _sos_choch = dataframe.get('daily_choch_confirmed', pd.Series(False, index=dataframe.index))
+        _sos_choch = dataframe.get(
+            'daily_choch_confirmed', pd.Series(False, index=dataframe.index)
+        ).fillna(False).astype(bool)
         _sos_rs_sig = dataframe.get('rs_signal', pd.Series('neutral', index=dataframe.index))
         _sos_quality = dataframe.get('sos_quality_score', pd.Series(0.0, index=dataframe.index))
         _sos_weak_bear = _sos_choch & (_sos_rs_sig == 'falling')
@@ -3562,6 +3572,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         
         # Task 2.2: 新增LPS关联的SOS质量评分字段
         dataframe['lps_sos_quality'] = 0.0
+        close_col = dataframe.columns.get_loc('close')
         
         # Step 1: 识别真正的高质量SOS突破（使用新SOS检测器）
         genuine_sos_points = self._identify_genuine_sos_breakout(dataframe, sos_breakout_detected)
@@ -3579,7 +3590,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             # 在过去10-30根K线内寻找SOS（LPS应该在SOS后不久出现）
             for lookback in range(10, 31):
                 check_idx = i - lookback
-                if check_idx >= 0 and check_idx < len(genuine_sos_points) and genuine_sos_points.iloc[check_idx]:
+                if check_idx >= 0 and check_idx < len(genuine_sos_points) and genuine_sos_points.iat[check_idx]:
                     sos_found = True
                     sos_idx = check_idx
                     # ⚠️ 修复未来函数：只使用历史数据
@@ -3589,7 +3600,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                     
                     # Task 2.2: 获取SOS质量评分
                     if 'sos_quality_score' in dataframe.columns:
-                        sos_quality = dataframe['sos_quality_score'].iloc[check_idx]
+                        sos_quality = dataframe.iat[check_idx, dataframe.columns.get_loc('sos_quality_score')]
                     break
             if not sos_found:
                 continue
@@ -3600,7 +3611,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             
             # Step 3: 威科夫"无供应测试"的物理特征
             # 3.1 价格必须回测到SOS突破位附近（测试性质）
-            current_price = dataframe['close'].iloc[i]  # 回测到突破位
+            current_price = dataframe.iat[i, close_col]  # 回测到突破位
             # 但不能跌破太多
             is_testing_breakout = current_price >= sos_level * 0.985 and current_price <= sos_level * 1.005
             if not is_testing_breakout:
@@ -3613,7 +3624,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             in_suitable_phase = self._is_in_wyckoff_phase_for_lps(dataframe, i, sos_idx)
             # 威科夫LPS确认：所有威科夫条件必须满足
             if no_supply_evidence and support_reaction and in_suitable_phase:
-                lps_entry.iloc[i] = True
+                lps_entry.iat[i] = True
                 # Task 2.2: 记录LPS关联的SOS质量评分
                 dataframe.loc[dataframe.index[i], 'lps_sos_quality'] = sos_quality
         
@@ -3666,21 +3677,23 @@ class WyckoffV7_TrueMethod(IStrategy):
             )
         else:
             # 降级方案：使用原有检测逻辑
+            close_col = dataframe.columns.get_loc('close')
+            volume_col = dataframe.columns.get_loc('volume')
             for i in range(len(dataframe)):
-                if not sos_detected.iloc[i]:
+                if not sos_detected.iat[i]:
                     continue
                 if i < 20:
                     continue
                 # 1. 突破强度确认
-                price_strength = (dataframe['close'].iloc[i] - dataframe['close'].iloc[i - 5]) / dataframe['close'].iloc[i - 5]
-                volume_confirmation = dataframe['volume'].iloc[i] > dataframe['volume'].iloc[i - 10:i].mean() * 1.5
+                price_strength = (dataframe.iat[i, close_col] - dataframe.iat[i - 5, close_col]) / dataframe.iat[i - 5, close_col]
+                volume_confirmation = dataframe.iat[i, volume_col] > dataframe['volume'].iloc[i - 10:i].mean() * 1.5
                 # 2. 阻力位突破确认
                 resistance_level = dataframe['high'].iloc[i - 20:i - 5].max()
-                clear_breakout = dataframe['close'].iloc[i] > resistance_level * 1.002
+                clear_breakout = dataframe.iat[i, close_col] > resistance_level * 1.002
                 # 3. 威科夫供应吸收证据
                 supply_absorbed = self._check_supply_absorption_evidence(dataframe, i)
                 if price_strength > 0.01 and volume_confirmation and clear_breakout and supply_absorbed:
-                    genuine_sos.iloc[i] = True
+                    genuine_sos.iat[i] = True
         
         return genuine_sos
 
@@ -3695,15 +3708,20 @@ class WyckoffV7_TrueMethod(IStrategy):
         4. 下跌乏力（供应枯竭）
         """
         # 1. 成交量萎缩（关键证据）
+        open_col = dataframe.columns.get_loc('open')
+        high_col = dataframe.columns.get_loc('high')
+        low_col = dataframe.columns.get_loc('low')
+        close_col = dataframe.columns.get_loc('close')
+        volume_col = dataframe.columns.get_loc('volume')
         recent_avg_volume = dataframe['volume'].iloc[max(0, idx - 20):idx].mean()
-        volume_drying_up = dataframe['volume'].iloc[idx] < recent_avg_volume * 0.4  # 严格的成交量萎缩
+        volume_drying_up = dataframe.iat[idx, volume_col] < recent_avg_volume * 0.4  # 严格的成交量萎缩
         # 2. 价差收窄（卖压不足）
-        current_spread = dataframe['high'].iloc[idx] - dataframe['low'].iloc[idx]
+        current_spread = dataframe.iat[idx, high_col] - dataframe.iat[idx, low_col]
         avg_spread = (dataframe['high'].iloc[max(0, idx - 10):idx] - dataframe['low'].iloc[max(0, idx - 10):idx]).mean()
         narrow_spread = current_spread < avg_spread * 0.5  # 价差显著收窄
         # 3. 收盘位置良好（买方控制）
         if current_spread > 0:
-            close_position = (dataframe['close'].iloc[idx] - dataframe['low'].iloc[idx]) / current_spread
+            close_position = (dataframe.iat[idx, close_col] - dataframe.iat[idx, low_col]) / current_spread
             good_close = close_position > 0.75  # 收盘在上四分位
         else:
             good_close = True
@@ -3711,7 +3729,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         weak_decline = True
         for i in range(max(0, idx - 3), idx + 1):
             if i < len(dataframe):
-                decline_strength = (dataframe['open'].iloc[i] - dataframe['close'].iloc[i]) / dataframe['open'].iloc[i]
+                decline_strength = (dataframe.iat[i, open_col] - dataframe.iat[i, close_col]) / dataframe.iat[i, open_col]
                 if decline_strength > 0.005:  # 如果有任何一根K线下跌超过0.5%，说明还有供应
                     weak_decline = False
                     break
@@ -3732,18 +3750,25 @@ class WyckoffV7_TrueMethod(IStrategy):
         """
         if idx < 5:  # 需要历史数据
             return False
-        current_bar = dataframe.iloc[idx]
+        high_col = dataframe.columns.get_loc('high')
+        low_col = dataframe.columns.get_loc('low')
+        close_col = dataframe.columns.get_loc('close')
+        volume_col = dataframe.columns.get_loc('volume')
+        current_high = dataframe.iat[idx, high_col]
+        current_low = dataframe.iat[idx, low_col]
+        current_close = dataframe.iat[idx, close_col]
+        current_volume = dataframe.iat[idx, volume_col]
         # 1. 收盘位置在K线高位（显示买盘力量）
-        bar_range = current_bar['high'] - current_bar['low']
+        bar_range = current_high - current_low
         if bar_range < 1e-09:
             return False
-        close_position = (current_bar['close'] - current_bar['low']) / bar_range
+        close_position = (current_close - current_low) / bar_range
         strong_close = close_position > 0.7  # 收盘在高位
         # 2. 成交量特征（不是恐慌性抛售）
         avg_volume = dataframe['volume'].iloc[idx - 5:idx].mean()
-        volume_support = current_bar['volume'] > avg_volume * 0.5  # 有一定成交量但不过度
+        volume_support = current_volume > avg_volume * 0.5  # 有一定成交量但不过度
         # 3. 下影线特征（显示支撑）
-        lower_shadow = (current_bar['close'] - current_bar['low']) / bar_range
+        lower_shadow = (current_close - current_low) / bar_range
         has_support = lower_shadow > 0.3  # 有明显下影线
         return strong_close and volume_support and has_support
 
@@ -3761,7 +3786,8 @@ class WyckoffV7_TrueMethod(IStrategy):
         time_window_ok = 10 <= current_idx - sos_idx <= 30
         # 2. 整体趋势向上
         if current_idx >= 50:
-            long_term_trend = (dataframe['close'].iloc[current_idx] - dataframe['close'].iloc[current_idx - 50]) / dataframe['close'].iloc[current_idx - 50]
+            close_col = dataframe.columns.get_loc('close')
+            long_term_trend = (dataframe.iat[current_idx, close_col] - dataframe.iat[current_idx - 50, close_col]) / dataframe.iat[current_idx - 50, close_col]
             trend_up = long_term_trend > 0.02  # 长期趋势向上
         else:
             trend_up = True
@@ -3776,11 +3802,15 @@ class WyckoffV7_TrueMethod(IStrategy):
         if idx < 5:
             return False
         # 1. 成交量增加但价格上涨（供应被吸收）
-        volume_increase = dataframe['volume'].iloc[idx] > dataframe['volume'].iloc[idx - 5:idx].mean() * 1.3
-        price_advance = dataframe['close'].iloc[idx] > dataframe['close'].iloc[idx - 3]
+        open_col = dataframe.columns.get_loc('open')
+        high_col = dataframe.columns.get_loc('high')
+        close_col = dataframe.columns.get_loc('close')
+        volume_col = dataframe.columns.get_loc('volume')
+        volume_increase = dataframe.iat[idx, volume_col] > dataframe['volume'].iloc[idx - 5:idx].mean() * 1.3
+        price_advance = dataframe.iat[idx, close_col] > dataframe.iat[idx - 3, close_col]
         # 2. 上影线不长（没有遇到强阻力）
-        upper_shadow = dataframe['high'].iloc[idx] - max(dataframe['open'].iloc[idx], dataframe['close'].iloc[idx])
-        body_size = abs(dataframe['close'].iloc[idx] - dataframe['open'].iloc[idx])
+        upper_shadow = dataframe.iat[idx, high_col] - max(dataframe.iat[idx, open_col], dataframe.iat[idx, close_col])
+        body_size = abs(dataframe.iat[idx, close_col] - dataframe.iat[idx, open_col])
         short_upper_shadow = upper_shadow < body_size * 0.5
         return volume_increase and price_advance and short_upper_shadow
     # ============================================================================
@@ -3928,28 +3958,31 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 识别显著的高低点
         lookback = 50
         recent_data = dataframe.tail(lookback)
+        high_col = recent_data.columns.get_loc('high')
+        low_col = recent_data.columns.get_loc('low')
+        volume_col = recent_data.columns.get_loc('volume')
         # 寻找局部高点
         for i in range(5, len(recent_data) - 5):
-            current_high = recent_data.iloc[i]['high']
+            current_high = recent_data.iat[i, high_col]
             # 检查是否为局部高点
             is_local_high = True
             for j in range(i - 5, i + 6):
-                if j != i and recent_data.iloc[j]['high'] >= current_high:
+                if j != i and recent_data.iat[j, high_col] >= current_high:
                     is_local_high = False
                     break
             if is_local_high:
-                levels.append({'price': current_high, 'formation_idx': len(dataframe) - lookback + i, 'last_test_idx': len(dataframe) - lookback + i, 'test_count': 1, 'volume_density': recent_data.iloc[i]['volume'], 'line_type': 'resistance', 'importance': 'minor', 'strength_score': 0.3})
+                levels.append({'price': current_high, 'formation_idx': len(dataframe) - lookback + i, 'last_test_idx': len(dataframe) - lookback + i, 'test_count': 1, 'volume_density': recent_data.iat[i, volume_col], 'line_type': 'resistance', 'importance': 'minor', 'strength_score': 0.3})
         # 寻找局部低点
         for i in range(5, len(recent_data) - 5):
-            current_low = recent_data.iloc[i]['low']
+            current_low = recent_data.iat[i, low_col]
             # 检查是否为局部低点
             is_local_low = True
             for j in range(i - 5, i + 6):
-                if j != i and recent_data.iloc[j]['low'] <= current_low:
+                if j != i and recent_data.iat[j, low_col] <= current_low:
                     is_local_low = False
                     break
             if is_local_low:
-                levels.append({'price': current_low, 'formation_idx': len(dataframe) - lookback + i, 'last_test_idx': len(dataframe) - lookback + i, 'test_count': 1, 'volume_density': recent_data.iloc[i]['volume'], 'line_type': 'support', 'importance': 'minor', 'strength_score': 0.3})
+                levels.append({'price': current_low, 'formation_idx': len(dataframe) - lookback + i, 'last_test_idx': len(dataframe) - lookback + i, 'test_count': 1, 'volume_density': recent_data.iat[i, volume_col], 'line_type': 'support', 'importance': 'minor', 'strength_score': 0.3})
         return levels
 
     def _deduplicate_levels(self, levels: List[Dict]) -> List[Dict]:
@@ -4919,18 +4952,19 @@ class WyckoffV7_TrueMethod(IStrategy):
             structure_deteriorated = False
 
             if dataframe is not None and ci >= 0:
-                if 'wyckoff_climax_exit' in dataframe.columns and bool(dataframe.loc[ci, 'wyckoff_climax_exit']):
+                last_row = dataframe.iloc[ci]
+                if 'wyckoff_climax_exit' in dataframe.columns and bool(last_row.get('wyckoff_climax_exit')):
                     candidates.append('wyckoff_climax')
                     structure_deteriorated = True
-                if 'severe_divergence_exit' in dataframe.columns and bool(dataframe.loc[ci, 'severe_divergence_exit']):
+                if 'severe_divergence_exit' in dataframe.columns and bool(last_row.get('severe_divergence_exit')):
                     candidates.append('wyckoff_divergence')
                     structure_deteriorated = True
                 if ('is_wave_start' in dataframe.columns
                         and 'wave_direction' in dataframe.columns
                         and 'wave_efficiency' in dataframe.columns
-                        and bool(dataframe.loc[ci, 'is_wave_start'])
-                        and dataframe.loc[ci, 'wave_direction'] == 'down'
-                        and float(dataframe.loc[ci, 'wave_efficiency'] or 0) > 0.001):
+                        and bool(last_row.get('is_wave_start'))
+                        and last_row.get('wave_direction') == 'down'
+                        and float(last_row.get('wave_efficiency') or 0) > 0.001):
                     candidates.append('wyckoff_down_wave')
 
             # max_profit_seen（基于 trade.max_rate / min_rate）
@@ -5074,10 +5108,13 @@ class WyckoffV7_TrueMethod(IStrategy):
             return 'sot_exit'
         # 优先级 3.5: SOW 快速平多（仅对亏损多头触发）
         # Task 2.10 Fix: 只在亏损时平多，避免打断盈利仓位
-        if (not trade.is_short
+        sow_fast_exit_enabled = os.getenv('WY_SOW_FAST_EXIT', '0') not in ('0', 'false', 'off', '')
+        if (sow_fast_exit_enabled
+                and not trade.is_short
                 and current_profit < -0.01
                 and 'sow_exit_long_signal' in dataframe.columns
-                and dataframe.loc[current_index, 'sow_exit_long_signal']):
+                and dataframe.loc[current_index, 'sow_exit_long_signal']
+                and float(dataframe.loc[current_index, 'sow_quality_score'] if 'sow_quality_score' in dataframe.columns else 100.0) > 50.0):
             logger.info(f'SOW 快速平多（亏损触发）: {pair}, 收益={current_profit:.2%}, 价格={current_rate}')
             return 'sow_fast_exit'
         # ===== 优先级 3.6: 浮盈弱势退出（方案B）=====
