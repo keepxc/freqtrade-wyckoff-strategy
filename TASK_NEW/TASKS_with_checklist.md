@@ -607,6 +607,80 @@ RP-V（门禁验证） → 通过后升级基线
 
 > **触发 P2 的数据门槛**：同一 regime 连续 30 笔 + 胜率 < 50% + AI 归因完成。在此之前不启动任何参数调优。
 
+### P7-2：Axis Shadow Profit Protect 观察（2026-04-29）
+
+> **背景**：`wyckoff_axis_support` 与 `wyckoff_wave_start` 的物理预期不同。  
+> `wave_start` 更接近 Phase E 趋势启动，适合维持 8% ROI；`axis_support` 更像 BUEC/LPS 回踩承接，剩余因果动能更弱，统一等待 8% 容易发生利润回吐。
+
+#### 触发样本
+
+Dry Run Trade ID 9：
+- Pair: `BTC/USDT:USDT`
+- Direction: Long
+- Enter tag: `wyckoff_axis_support`
+- Open rate: `74778.9`
+- 曾到达约 `79600`，最大浮盈约 `+6.45%`
+- 回落至约 `77224`，浮盈约 `+3.27%`
+- 8% ROI 触发价约 `80761.2`，因此未触发 ROI 属于策略规则内行为
+
+#### 诊断结论
+
+- 当前行为在程序上合理：最高价未达到 8% ROI。
+- 交易管理上暴露失配：`axis_support` 已产生足够“果”，但供应在 79k 上方重新压制，统一 8% ROI 可能过宽。
+- 不直接修改退出逻辑，先加入 shadow forensic 字段，遵守 30 笔稳定观测纪律。
+
+#### Shadow 规则（只记录，不退出）
+
+`wyckoff_axis_support` 多头满足以下条件时，标记 `shadow_protect_triggered=True`：
+
+```text
+max_profit >= 0.06
+profit_giveback >= 0.025
+current_profit >= 0.03
+```
+
+写入 `exit_decision_event.metadata`：
+- `max_profit`
+- `profit_giveback`
+- `shadow_protect_triggered`
+- `shadow_protect_rule`
+
+#### 已完成工程改动
+
+- [x] 在 `WyckoffV7_TrueMethod.py` 新增 `_build_axis_shadow_profit_protect_metadata()`
+- [x] 接入 `custom_exit` 每轮评估事件
+- [x] 接入 `confirm_trade_exit_tsl` 事件
+- [x] 接入 `confirm_trade_exit_vectorized` 事件（ROI / down_wave / force_exit 等）
+- [x] `WY_EXIT_TRACE` 默认改为 `1`，Dry Run 默认采集 `exit_decision_event`
+- [x] 可通过 `WY_EXIT_TRACE=0` 临时关闭
+- [x] `python -m py_compile user_data\strategies\WyckoffV7_TrueMethod.py` 通过
+
+#### 最近回测闸门（2026-04-29）
+
+命令：
+
+```bash
+docker compose run --rm freqtrade backtesting --config user_data/config_backtest.json --strategy WyckoffV7_TrueMethod --timerange 20230101-20260330 --cache none
+```
+
+结果：
+- Trades: `508`
+- Total profit: `+1503.15%`
+- Win rate: `71.5%`
+- Max drawdown: `7.13%`
+- `wyckoff_axis_support`: `382` 笔，平均 `+1.06%`，胜率 `65.2%`
+- `wyckoff_down_wave`: `440` 笔，平均 `+1.20%`
+- `roi`: `35` 笔，平均 `+8.03%`
+- `trailing_stop_loss`: `5` 笔，平均 `-12.00%`
+
+#### 30 笔后必答问题
+
+- [ ] 如果 `shadow_protect_triggered=True` 时实装退出，总利润是否提升？
+- [ ] 是否误杀“回撤后继续冲到 8% / 10%”的优质 axis 单？
+- [ ] 触发样本集中在哪些环境：`market_env` / `macro_phase` / `phase_context_tag`？
+- [ ] 是否只对 `wyckoff_axis_support` 生效，继续排除 `wyckoff_wave_start`？
+- [ ] 若通过，再设计默认 off 的真实退出开关：`WY_AXIS_PROFIT_PROTECT=1`
+
 ### 最终验收
 - [x] Dry Run 已在另一台服务器恢复并运行
 - [x] 四本账工程已建立（schema + ingest + reports 就绪）
