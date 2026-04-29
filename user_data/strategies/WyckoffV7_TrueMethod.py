@@ -4932,8 +4932,8 @@ class WyckoffV7_TrueMethod(IStrategy):
                 current_time=current_time,
             )
         
-        # P7-2: exit_decision_event 退出决策跟踪（WY_EXIT_TRACE=1 启用）
-        if self.event_bridge is not None and os.getenv('WY_EXIT_TRACE', '0') not in ('0', 'false', 'off', ''):
+        # P7-2: exit_decision_event 退出决策跟踪（默认启用；WY_EXIT_TRACE=0 可关闭）
+        if self.event_bridge is not None and os.getenv('WY_EXIT_TRACE', '1') not in ('0', 'false', 'off', ''):
             self._emit_exit_trace(pair, trade, current_time, current_rate, current_profit, exit_reason, kwargs.get('dataframe'))
 
         return exit_reason
@@ -4941,7 +4941,7 @@ class WyckoffV7_TrueMethod(IStrategy):
     def _emit_exit_trace(self, pair: str, trade: 'Trade', current_time: datetime,
                          current_rate: float, current_profit: float,
                          exit_reason: Optional[str], dataframe) -> None:
-        """P7-2: 发射退出决策跟踪事件（仅当 WY_EXIT_TRACE=1 时调用）
+        """P7-2: 发射退出决策跟踪事件（默认启用；WY_EXIT_TRACE=0 可关闭）
 
         每次 custom_exit 被调用时均记录一条事件，无论是否触发退出。
         包含当前 bar 所有活跃的退出候选信号，方便事后分析退出竞争关系。
@@ -4997,6 +4997,10 @@ class WyckoffV7_TrueMethod(IStrategy):
                     _v = _last.get('market_env')
                     market_env = str(_v) if _v is not None else None
 
+            shadow_axis_profit_protect = self._build_axis_shadow_profit_protect_metadata(
+                trade, current_profit, max_profit_seen
+            )
+
             self.event_bridge.emit_exit_decision(
                 trade_id=str(trade.id),
                 pair=pair,
@@ -5009,6 +5013,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                     'enter_tag': trade.enter_tag,
                     'float_profit': round(current_profit, 6),
                     'max_profit_seen': max_profit_seen,
+                    **shadow_axis_profit_protect,
                     'hold_hours': hold_hours,
                     'exit_candidates': candidates,
                     'structure_deteriorated': structure_deteriorated,
@@ -5019,6 +5024,36 @@ class WyckoffV7_TrueMethod(IStrategy):
             )
         except Exception as e:
             logger.debug(f'P7-2 _emit_exit_trace failed [{pair}]: {e}')
+
+    def _build_axis_shadow_profit_protect_metadata(
+        self,
+        trade: 'Trade',
+        current_profit: float,
+        max_profit_seen: Optional[float],
+    ) -> dict:
+        """Shadow-only axis profit protection forensic fields."""
+        activation_profit = 0.06
+        giveback_threshold = 0.025
+        min_current_profit = 0.03
+
+        profit_giveback = None
+        triggered = False
+        if max_profit_seen is not None:
+            profit_giveback = max_profit_seen - current_profit
+            triggered = (
+                not trade.is_short
+                and trade.enter_tag == 'wyckoff_axis_support'
+                and max_profit_seen >= activation_profit
+                and profit_giveback >= giveback_threshold
+                and current_profit >= min_current_profit
+            )
+
+        return {
+            'max_profit': max_profit_seen,
+            'profit_giveback': round(profit_giveback, 6) if profit_giveback is not None else None,
+            'shadow_protect_triggered': triggered,
+            'shadow_protect_rule': 'axis_support:max>=0.06,giveback>=0.025,current>=0.03',
+        }
 
     def _custom_exit_impl(self, pair: str, trade: 'Trade', current_time: datetime, current_rate: float, current_profit: float, **kwargs) -> Optional[str]:
         """
@@ -5376,7 +5411,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         """
         _trace_enabled = (
             self.event_bridge is not None
-            and os.getenv('WY_EXIT_TRACE', '0') not in ('0', 'false', 'off', '')
+            and os.getenv('WY_EXIT_TRACE', '1') not in ('0', 'false', 'off', '')
         )
 
         # C-4-v2: axis_support 禁用 down_wave（默认 off）
@@ -5388,6 +5423,14 @@ class WyckoffV7_TrueMethod(IStrategy):
             if _trace_enabled:
                 try:
                     _p = trade.calc_profit_ratio(rate)
+                    try:
+                        _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if not trade.is_short and trade.open_rate > 0 else None
+                        _max_profit_seen = round(_max_p, 6) if _max_p is not None else None
+                    except Exception:
+                        _max_profit_seen = None
+                    _shadow_axis_profit_protect = self._build_axis_shadow_profit_protect_metadata(
+                        trade, _p, _max_profit_seen
+                    )
                     self.event_bridge.emit_exit_decision(
                         trade_id=str(trade.id), pair=pair,
                         exit_logic_module='confirm_trade_exit',
@@ -5398,6 +5441,8 @@ class WyckoffV7_TrueMethod(IStrategy):
                         metadata={
                             'enter_tag': trade.enter_tag,
                             'float_profit': round(_p, 6),
+                            'max_profit_seen': _max_profit_seen,
+                            **_shadow_axis_profit_protect,
                         },
                     )
                 except Exception as e:
@@ -5417,6 +5462,9 @@ class WyckoffV7_TrueMethod(IStrategy):
                     _max_profit_seen = round(_max_p, 6) if _max_p is not None else None
                 except Exception:
                     _max_profit_seen = None
+                _shadow_axis_profit_protect = self._build_axis_shadow_profit_protect_metadata(
+                    trade, _p, _max_profit_seen
+                )
                 self.event_bridge.emit_exit_decision(
                     trade_id=str(trade.id), pair=pair,
                     exit_logic_module='confirm_trade_exit_tsl',
@@ -5427,6 +5475,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                         'enter_tag': trade.enter_tag,
                         'float_profit': round(_p, 6),
                         'max_profit_seen': _max_profit_seen,
+                        **_shadow_axis_profit_protect,
                         'hold_hours': _hold_hours,
                         'current_rate': round(rate, 4),
                     },
@@ -5449,6 +5498,9 @@ class WyckoffV7_TrueMethod(IStrategy):
                     _max_profit_seen = round(_max_p, 6) if _max_p is not None else None
                 except Exception:
                     _max_profit_seen = None
+                _shadow_axis_profit_protect = self._build_axis_shadow_profit_protect_metadata(
+                    trade, _p, _max_profit_seen
+                )
                 self.event_bridge.emit_exit_decision(
                     trade_id=str(trade.id), pair=pair,
                     exit_logic_module='confirm_trade_exit_vectorized',
@@ -5459,6 +5511,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                         'enter_tag': trade.enter_tag,
                         'float_profit': round(_p, 6),
                         'max_profit_seen': _max_profit_seen,
+                        **_shadow_axis_profit_protect,
                         'hold_hours': _hold_hours,
                         'current_rate': round(rate, 4),
                     },
