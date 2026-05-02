@@ -2890,6 +2890,34 @@ class WyckoffV7_TrueMethod(IStrategy):
                 axis_support_entry = axis_support_entry & ~conflict_mask
                 logger.info(f'T-3 wave_start 优先: 清除 {int(conflict_mask.sum())} 个冲突 K 线的 axis_support 信号')
 
+        # === P0 Fix (2026-05-02): P&F 目标位验证（回测模式专用）===
+        # 问题：confirm_trade_entry 在回测模式下不被调用，导致无效目标的交易仍然执行
+        # 解决：在 populate_entry_trend 中添加验证，确保回测和实盘都能生效
+        # 
+        # 验证逻辑：
+        # - 多头：target_conservative > 0
+        # - 空头：target_short_conservative > 0
+        # - 无效目标的信号将被过滤掉
+        pnf_target_valid_long = (
+            (dataframe.get('target_conservative', pd.Series(0.0, index=dataframe.index)) > 0)
+        )
+        pnf_target_valid_short = (
+            (dataframe.get('target_short_conservative', pd.Series(0.0, index=dataframe.index)) > 0)
+        )
+        
+        # 统计被过滤的信号数量（仅在有信号被阻止时记录）
+        _all_long_signals = (
+            lps_pullback_entry | sos_entry | wave_start_entry | efficiency_entry |
+            axis_support_entry | spring_recovery_entry | spring_2_entry | spring_1_entry |
+            spring_3_entry | spring_test_sig_bar_entry | phase_d_entry | phase_d_high_quality
+        )
+        _blocked_by_pnf = _all_long_signals & ~pnf_target_valid_long
+        if _blocked_by_pnf.any():
+            blocked_count = int(_blocked_by_pnf.sum())
+            logger.warning(
+                f'❌ P&F 目标位验证: {blocked_count} 个多头信号被阻止（target_conservative <= 0）'
+            )
+
         final_entry = (
             composite_intent_ok & (
                 dataframe['trading_allowed'] & (lps_pullback_entry | sos_entry | wave_start_entry | efficiency_entry) |
@@ -2903,6 +2931,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             ) & rr_long_ok
             & ~bear_market_block_long        # Task 3.5: 熊市 markdown 禁止开多
             & ~daily_gate_hard_block         # P1: daily gate hard 模式阻断
+            & pnf_target_valid_long          # P0 Fix: P&F 目标位验证（回测模式）
         )
 
         # P2-followup: RS 熊市软门控（非全局硬阻断）
@@ -3260,7 +3289,22 @@ class WyckoffV7_TrueMethod(IStrategy):
         _short_bear_gate = _bear_gate | _sm_gate
 
         # ── 最终做空入场 ─────────────────────────────────────────────────────────
-        final_short_entry = short_intent_ok & (sow_entry | utad_entry | lpsy_entry) & rr_short_ok & _short_bear_gate
+        # P0 Fix (2026-05-02): P&F 目标位验证（空头）
+        _all_short_signals = sow_entry | utad_entry | lpsy_entry
+        _blocked_short_by_pnf = _all_short_signals & ~pnf_target_valid_short
+        if _blocked_short_by_pnf.any():
+            blocked_short_count = int(_blocked_short_by_pnf.sum())
+            logger.warning(
+                f'❌ P&F 目标位验证: {blocked_short_count} 个空头信号被阻止（target_short_conservative <= 0）'
+            )
+        
+        final_short_entry = (
+            short_intent_ok & 
+            (sow_entry | utad_entry | lpsy_entry) & 
+            rr_short_ok & 
+            _short_bear_gate &
+            pnf_target_valid_short  # P0 Fix: P&F 目标位验证（回测模式）
+        )
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
         # 入场标签
@@ -5221,34 +5265,39 @@ class WyckoffV7_TrueMethod(IStrategy):
                 return 'timeout_loss_exit'
 
         # ===== 优先级 3.8: Task 4.2 — P&F 目标位退出（威科夫因果律，盈利达到目标位时退出）=====
-        # P&F 目标位直接从 dataframe 当前 bar 读取（比元数据链更可靠，回测/实盘均有效）
-        # target_conservative/standard 由 SC/BC 锚点 ffill，入场后不会变更，直接读取等效于入场时的值
+        # 🔧 P0 补丁（2026-05-02）：从元数据链读取目标位，而非 live DataFrame
+        # 根因：PhaseContextDetector 会重算 TR 边界，导致 target_conservative 从 ~$79k 缩至 ~$77.9k
+        # 修复：读取入场时锁定的元数据链值（_pnf_trades_metadata），确保目标位不变
         if current_profit >= 0.01:
+            # 从元数据链获取 P&F 目标位（入场时保存）
+            metadata_key = (pair, str(trade.open_date_utc))
+            pnf_metadata = self._pnf_trades_metadata.get(metadata_key, {})
+            
             if not trade.is_short:
-                _tgt_std  = float(dataframe.loc[current_index, 'target_standard']   if 'target_standard'   in dataframe.columns else 0.0) or 0.0
-                _tgt_cons = float(dataframe.loc[current_index, 'target_conservative'] if 'target_conservative' in dataframe.columns else 0.0) or 0.0
+                _tgt_std  = float(pnf_metadata.get('target_standard', 0.0) or 0.0)
+                _tgt_cons = float(pnf_metadata.get('target_conservative', 0.0) or 0.0)
                 if _tgt_std > 0 and current_rate >= _tgt_std:
                     logger.info(f'P&F 目标位2(多头标准): {pair}, '
                                 f'current={current_rate:.2f} >= target_std={_tgt_std:.2f}, '
-                                f'收益={current_profit:.2%}')
+                                f'收益={current_profit:.2%} [元数据链]')
                     return 'pnf_target_2'
                 elif _tgt_cons > 0 and current_rate >= _tgt_cons:
                     logger.info(f'P&F 目标位1(多头保守): {pair}, '
                                 f'current={current_rate:.2f} >= target_cons={_tgt_cons:.2f}, '
-                                f'收益={current_profit:.2%}')
+                                f'收益={current_profit:.2%} [元数据链]')
                     return 'pnf_target_1'
             else:
-                _tgt_short_std  = float(dataframe.loc[current_index, 'target_short_standard']   if 'target_short_standard'   in dataframe.columns else 0.0) or 0.0
-                _tgt_short_cons = float(dataframe.loc[current_index, 'target_short_conservative'] if 'target_short_conservative' in dataframe.columns else 0.0) or 0.0
+                _tgt_short_std  = float(pnf_metadata.get('target_short_standard', 0.0) or 0.0)
+                _tgt_short_cons = float(pnf_metadata.get('target_short_conservative', 0.0) or 0.0)
                 if _tgt_short_std > 0 and current_rate <= _tgt_short_std:
                     logger.info(f'P&F 目标位2(空头标准): {pair}, '
                                 f'current={current_rate:.2f} <= target_short_std={_tgt_short_std:.2f}, '
-                                f'收益={current_profit:.2%}')
+                                f'收益={current_profit:.2%} [元数据链]')
                     return 'pnf_target_short_2'
                 elif _tgt_short_cons > 0 and current_rate <= _tgt_short_cons:
                     logger.info(f'P&F 目标位1(空头保守): {pair}, '
                                 f'current={current_rate:.2f} <= target_short_cons={_tgt_short_cons:.2f}, '
-                                f'收益={current_profit:.2%}')
+                                f'收益={current_profit:.2%} [元数据链]')
                     return 'pnf_target_short_1'
         # ===== 4. 优先级 4: 下降波段退出（SOS 专用逻辑）=====
         # 检查是否为 SOS 交易
@@ -5357,24 +5406,74 @@ class WyckoffV7_TrueMethod(IStrategy):
                 else:
                     logger.warning(f'SOS 交易入场: {pair}, 但 sos_metadata 不可用，将使用默认值（质量评分=0）')
         # Task 4.2: 所有交易均提取 P&F 目标位，存入 _pending_pnf_metadata
+        # P0 Fix (2026-05-02): 添加目标位验证，阻止无效目标位的入场
         dataframe_pnf = kwargs.get('dataframe')
         if dataframe_pnf is not None and len(dataframe_pnf) > 0:
             last = dataframe_pnf.iloc[-1]
+            
+            # 提取目标位值
+            target_cons = float(last.get('target_conservative', 0.0) or 0.0)
+            target_std = float(last.get('target_standard', 0.0) or 0.0)
+            target_short_cons = float(last.get('target_short_conservative', 0.0) or 0.0)
+            target_short_std = float(last.get('target_short_standard', 0.0) or 0.0)
+            
+            # ✅ 验证目标位有效性（多头需要多头目标位，空头需要空头目标位）
+            if side == 'long' and target_cons <= 0:
+                # 获取诊断信息
+                tr_low = float(last.get('tr_low', 0.0))
+                tr_high = float(last.get('tr_high', 0.0))
+                tr_height = float(last.get('tr_height', 0.0))
+                phase_tr_valid = bool(last.get('phase_tr_valid', False))
+                climatic_type = str(last.get('climatic_type', 'none'))
+                
+                logger.warning(
+                    f'❌ Entry blocked: Invalid P&F target for {pair} (long) | '
+                    f'target_conservative={target_cons:.2f}, target_standard={target_std:.2f} | '
+                    f'TR: low={tr_low:.2f}, high={tr_high:.2f}, height={tr_height:.2f} | '
+                    f'phase_tr_valid={phase_tr_valid}, climatic_type={climatic_type} | '
+                    f'Reason: TR boundaries not established (no SC anchor, phase_tr_valid=False, or insufficient price movement)'
+                )
+                return False  # 阻止入场
+            
+            if side == 'short' and target_short_cons <= 0:
+                # 获取诊断信息
+                dist_low = float(last.get('dist_low', 0.0))
+                dist_high = float(last.get('dist_high', 0.0))
+                dist_height = float(last.get('dist_height', 0.0))
+                phase_dist_valid = bool(last.get('phase_dist_valid', False))
+                climatic_type = str(last.get('climatic_type', 'none'))
+                
+                logger.warning(
+                    f'❌ Entry blocked: Invalid P&F target for {pair} (short) | '
+                    f'target_short_conservative={target_short_cons:.2f}, target_short_standard={target_short_std:.2f} | '
+                    f'Dist: low={dist_low:.2f}, high={dist_high:.2f}, height={dist_height:.2f} | '
+                    f'phase_dist_valid={phase_dist_valid}, climatic_type={climatic_type} | '
+                    f'Reason: Distribution TR boundaries not established (no BC anchor, phase_dist_valid=False, or insufficient price movement)'
+                )
+                return False  # 阻止入场
+            
+            # 目标位有效，保存到元数据
             pnf_meta = {
-                'target_conservative':       float(last.get('target_conservative',       0.0) or 0.0),
-                'target_standard':           float(last.get('target_standard',           0.0) or 0.0),
+                'target_conservative':       target_cons,
+                'target_standard':           target_std,
                 'target_aggressive':         float(last.get('target_aggressive',         0.0) or 0.0),
-                'target_short_conservative': float(last.get('target_short_conservative', 0.0) or 0.0),
-                'target_short_standard':     float(last.get('target_short_standard',     0.0) or 0.0),
+                'target_short_conservative': target_short_cons,
+                'target_short_standard':     target_short_std,
                 'entry_side':                side,
             }
             self._pending_pnf_metadata[pair] = pnf_meta
-            logger.debug(
-                f'PnF 目标位已缓存 [{pair} {side}]: '
-                f'cons={pnf_meta["target_conservative"]:.2f}  '
-                f'std={pnf_meta["target_standard"]:.2f}  '
-                f'short_cons={pnf_meta["target_short_conservative"]:.2f}'
-            )
+            
+            # 记录验证成功的日志
+            if side == 'long':
+                logger.info(
+                    f'✅ P&F targets validated for {pair} (long): '
+                    f'conservative={target_cons:.2f}, standard={target_std:.2f}'
+                )
+            else:
+                logger.info(
+                    f'✅ P&F targets validated for {pair} (short): '
+                    f'conservative={target_short_cons:.2f}, standard={target_short_std:.2f}'
+                )
         
         # P5: 发射交易开仓事件
         if self.event_bridge is not None:
