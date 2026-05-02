@@ -807,6 +807,12 @@ docker compose run --rm freqtrade backtesting \
 - 回测日志：`backtest_pnf_fix_validation.log`
 - 设计文档：`.kiro/specs/pnf-target-bug-fix.md`
 
+#### Dry Run 验证标准（3-5 笔即可验证）
+
+- [ ] P&F exit 日志包含 `[元数据链]` 标记，证明走锁定值而非 live DataFrame
+- [ ] 入场时 `confirm_trade_entry` 输出 `✅ P&F targets validated`，记录 target_cons/target_std 具体值
+- [ ] 退出时刻 target_cons = 入场时 target_cons（没有缩水）
+- [ ] 如有 P&F exit，退出利润高于修复前 Trade #9 的 +4.15%
 
 #### 30 笔后必答问题
 
