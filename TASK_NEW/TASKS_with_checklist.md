@@ -824,8 +824,11 @@ docker compose run --rm freqtrade backtesting \
 
 ### 最终验收
 - [x] Dry Run 已在另一台服务器恢复并运行
-- [x] 四本账工程已建立（schema + ingest + reports 就绪）
-- [ ] AI 可输出周报 + 漂移诊断 + 归因分析（**等待样本**）
+- [x] P5 Schema 创建（`P5/db/schema.sql` — 9 表 + 索引）
+- [x] P5 Views 创建（`P5/db/views.sql` — 12 视图，含 shadow_forensic + phase_exit_diagnostics）
+- [x] P5 数据库初始化（`P5/p5.db` — 21 objects 就绪）
+- [ ] JSONL → SQLite ingest 管道接线（`ingest_jsonl.py` 已有，待改接入点）
+- [ ] AI 可输出周报 + 漂移诊断 + 归因分析（**等待样本 → 先通 ingest**）
 - [ ] AI 可输出候选提案 + 实验矩阵（**等待样本**）
 - [ ] 自动实验具备闸门 + 审计 + 回滚（**等待样本**）
 - [ ] baseline / candidate / rollback 制度已建立（**等待样本**）

@@ -73,3 +73,4 @@ user_data/events/backtest/
 user_data/backtest_*.txt
 temp_extract_ca/
 temp_extract_fixpack/
+P5/p5.db
