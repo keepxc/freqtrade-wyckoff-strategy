@@ -20,7 +20,7 @@ TABLE_BY_EVENT = {
     "trade_event": "trades",
     "detector_event": "detector_events",
     "regime_snapshot": "regime_snapshots",
-    "exit_decision_event": "exit_decision_events",
+    "exit_decision_event": "exit_decisions",
 }
 
 
@@ -148,6 +148,19 @@ def upsert_trade(conn: sqlite3.Connection, record: Dict[str, Any]) -> None:
         )
     elif subtype == "trade_close":
         trade_id = record["trade_id"]
+        # 如果 trade_open 未入库（历史数据只有 close），先创建占位行
+        existing = conn.execute("SELECT 1 FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
+        if not existing:
+            placeholder = {
+                "trade_id": trade_id,
+                "run_id": record.get("run_id", ""),
+                "pair": record.get("pair"),
+                "side": record.get("side"),
+                "enter_time": None,
+            }
+            cols = ", ".join(placeholder.keys())
+            ph = ", ".join([":" + k for k in placeholder.keys()])
+            conn.execute(f"INSERT INTO trades ({cols}) VALUES ({ph})", placeholder)
         sets = ", ".join([f"{dst}=?" for dst in TRADE_CLOSE_MAP.values()])
         values = [normalize_bool(record.get(src)) for src in TRADE_CLOSE_MAP.keys()]
         conn.execute(f"UPDATE trades SET {sets} WHERE trade_id=?", values + [trade_id])
@@ -173,10 +186,10 @@ INSERT_DIRECT_TABLES = {
         "macro_phase", "bear_market_mode", "phase_context_tag", "daily_choch_confirmed",
         "dist_cause_sufficient", "daily_tr_exists", "daily_gate_score",
     ],
-    "exit_decision_events": [
-        "event_id", "run_id", "ts", "trade_id", "pair", "phase_context_tag",
-        "exit_logic_module", "candidate_reason", "triggered", "blocked_reason",
-        "confidence", "metadata_json",
+    "exit_decisions": [
+        "decision_id", "run_id", "trade_id", "ts", "pair", "timeframe",
+        "phase_context_tag", "exit_logic_module", "candidate_reason",
+        "triggered", "blocked_reason", "expected_effect", "metadata_json",
     ],
 }
 
@@ -208,9 +221,11 @@ def ingest_record(conn: sqlite3.Connection, record: Dict[str, Any]) -> None:
         # metadata 字段处理
         if "metadata_json" not in normalized and "metadata" in record:
             normalized["metadata_json"] = json.dumps(record["metadata"], ensure_ascii=False, sort_keys=True)
-        # exit_decision_event: event_id 映射
-        if event_type == "exit_decision_event" and "event_id" not in normalized:
-            normalized["event_id"] = normalized.get("event_id") or record.get("event_id")
+        # exit_decision_event: event_id → decision_id 映射
+        if event_type == "exit_decision_event":
+            normalized["decision_id"] = record.get("event_id", "")
+            if "metadata" in record and isinstance(record["metadata"], dict):
+                normalized["metadata_json"] = json.dumps(record["metadata"], ensure_ascii=False, sort_keys=True)
         insert_direct(conn, table, normalized)
     else:
         raise ValueError(f"Unsupported event_type: {event_type}")
