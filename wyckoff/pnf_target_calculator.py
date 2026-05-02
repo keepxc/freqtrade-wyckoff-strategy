@@ -14,9 +14,14 @@ Task 3.3 更新：
   用 phase_tr_low / phase_tr_high 替换 60-bar 滚动 fallback，提升目标位精度。
   Phase 精确 TR 边界的优先级：
     climatic_type=='SC' 锚点（最高）> phase_tr_valid 边界（次高）> 60-bar fallback（保底）
+
+P0 Fix (2026-05-02): 增强 fallback 逻辑
+  - 扩大滚动窗口从60到120根K线
+  - 添加 swing high/low fallback（当滚动窗口TR height < ATR × 2.0时）
 """
 
 import numpy as np
+import pandas as pd
 from pandas import DataFrame
 
 
@@ -25,7 +30,7 @@ class PNFTargetCalculator:
 
     def __init__(self, strategy=None):
         self.strategy = strategy
-        self.lookback_fallback = 60
+        self.lookback_fallback = 120  # P0 Fix: 从60增加到120，提供更大的TR识别窗口
         self.utad_pre_high_lookback = 20
 
     def calculate_targets(self, dataframe: DataFrame) -> DataFrame:
@@ -93,8 +98,24 @@ class PNFTargetCalculator:
                 tr_low[i] = float(phase_tr_low_vals[i])
                 tr_high[i] = float(phase_tr_high_vals[i])
             else:
+                # Fallback 1: 滚动窗口（120根K线）
                 tr_low[i] = float(fallback_low[i])
                 tr_high[i] = float(fallback_high[i])
+                
+                # P0 Fix: Fallback 2 - 如果滚动窗口 TR height 太小，使用 swing high/low
+                # 判断标准：TR height < ATR × 2.0（说明窗口内价格波动不足）
+                atr_val = dataframe.get('atr_20', dataframe.get('atr', pd.Series(0, index=dataframe.index))).iloc[i]
+                if atr_val > 0 and (tr_high[i] - tr_low[i]) < (atr_val * 2.0):
+                    # 使用最近的 swing high/low（最近20根K线的极值）
+                    swing_window = 20
+                    start_idx = max(0, i - swing_window)
+                    swing_low = float(dataframe['low'].iloc[start_idx:i+1].min())
+                    swing_high = float(dataframe['high'].iloc[start_idx:i+1].max())
+                    
+                    # 只有当swing范围更大时才使用（避免用更小的范围替换）
+                    if (swing_high - swing_low) > (tr_high[i] - tr_low[i]):
+                        tr_low[i] = swing_low
+                        tr_high[i] = swing_high
 
             tr_height[i] = max(0.0, tr_high[i] - tr_low[i])
 
@@ -156,8 +177,23 @@ class PNFTargetCalculator:
                 dist_high[i] = float(phase_dist_high_vals[i])
                 dist_low[i] = float(phase_dist_low_vals[i])
             else:
+                # Fallback 1: 滚动窗口（120根K线）
                 dist_high[i] = float(fallback_high[i])
                 dist_low[i] = float(fallback_low[i])
+                
+                # P0 Fix: Fallback 2 - 如果滚动窗口 Dist height 太小，使用 swing high/low
+                atr_val = dataframe.get('atr_20', dataframe.get('atr', pd.Series(0, index=dataframe.index))).iloc[i]
+                if atr_val > 0 and (dist_high[i] - dist_low[i]) < (atr_val * 2.0):
+                    # 使用最近的 swing high/low（最近20根K线的极值）
+                    swing_window = 20
+                    start_idx = max(0, i - swing_window)
+                    swing_low = float(dataframe['low'].iloc[start_idx:i+1].min())
+                    swing_high = float(dataframe['high'].iloc[start_idx:i+1].max())
+                    
+                    # 只有当swing范围更大时才使用
+                    if (swing_high - swing_low) > (dist_high[i] - dist_low[i]):
+                        dist_high[i] = swing_high
+                        dist_low[i] = swing_low
 
             if bool(utad_mask.iloc[i]):
                 utad_adjusted_dist_high[i] = min(dist_high[i], float(pre_utad_high[i]))
