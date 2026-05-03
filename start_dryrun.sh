@@ -13,10 +13,6 @@ find "$FREQTRADE_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null 
 find "$FREQTRADE_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
 echo "[cache] Bytecode cleared"
 
-echo "[cache] Clearing freqtrade OHLCV data cache..."
-rm -rf "$FREQTRADE_DIR/user_data/data/"* 2>/dev/null || true
-echo "[cache] OHLCV cache cleared"
-
 # Ensure service file exists
 if [ ! -f "$SERVICE_FILE" ]; then
   echo "[ERROR] Service file not found: $SERVICE_FILE"
