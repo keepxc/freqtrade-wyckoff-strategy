@@ -703,6 +703,30 @@ class WyckoffV7_TrueMethod(IStrategy):
         self._pending_pnf_metadata: Dict[str, Dict] = {}
         # Task 4.2: P&F 目标位存储（key: (pair, open_date_str), value: targets dict）
         self._pnf_trades_metadata: Dict[tuple, Dict] = {}
+        
+        # PNF Shadow Protect Integration: 实例变量初始化（全部通过环境变量控制）
+        self.pnf_shadow_protect_enabled = os.getenv('WY_PNF_SHADOW_PROTECT', '0') == '1'
+        self.pnf_timeout_hours = float(os.getenv('WY_PNF_TIMEOUT_HOURS', '48'))
+        # 🆕 超参测试用：PNF目标乘数（axis_support默认0.2, sos默认0.35）
+        self.pnf_axis_mult = float(os.getenv('WY_PNF_AXIS_MULT', '1.0'))
+        self.pnf_sos_mult = float(os.getenv('WY_PNF_SOS_MULT', '0.35'))
+        # 🆕 超参测试用：PNF激活最小盈利门槛（默认3%）
+        self.pnf_min_profit = float(os.getenv('WY_PNF_MIN_PROFIT', '0.03'))
+        # 🆕 超参测试用：Shadow Protect PNF模式阈值（默认4%/2%/2%）
+        self.pnf_sp_max_profit = float(os.getenv('WY_PNF_SP_MAX_PROFIT', '0.04'))
+        self.pnf_sp_giveback = float(os.getenv('WY_PNF_SP_GIVEBACK', '0.02'))
+        self.pnf_sp_min_current = float(os.getenv('WY_PNF_SP_MIN_CURRENT', '0.02'))
+        # 🆕 Test 1: SOS 早期激活乘数（1.0=标准, 0.7=提前30%激活警告区）
+        self.pnf_sos_early_mult = float(os.getenv('WY_PNF_SOS_EARLY_MULT', '1.0'))
+        # 🆕 Test 2: wave_start 纳入 Shadow Protect（默认 0=不启用）
+        self.pnf_wave_start_enable = os.getenv('WY_PNF_WAVE_START_ENABLE', '0') == '1'
+        logger.info(f'PNF Shadow Protect: {"启用" if self.pnf_shadow_protect_enabled else "禁用"} '
+                    f'(WY_PNF_SHADOW_PROTECT={os.getenv("WY_PNF_SHADOW_PROTECT", "1")}), '
+                    f'超时={self.pnf_timeout_hours}h, axis_mult={self.pnf_axis_mult}, '
+                    f'sos_mult={self.pnf_sos_mult}, min_profit={self.pnf_min_profit}, '
+                    f'SP阈值={self.pnf_sp_max_profit}/{self.pnf_sp_giveback}/{self.pnf_sp_min_current}, '
+                    f'sos_early_mult={self.pnf_sos_early_mult}, wave_start_enable={self.pnf_wave_start_enable}')
+        
         # 开发状态标记
         self.phase_1_active = True  # Weis Wave Foundation ✓ 完成
         self.phase_2_active = True  # Axis Line System ✓ 完成
@@ -2898,25 +2922,34 @@ class WyckoffV7_TrueMethod(IStrategy):
         # - 多头：target_conservative > 0
         # - 空头：target_short_conservative > 0
         # - 无效目标的信号将被过滤掉
-        pnf_target_valid_long = (
-            (dataframe.get('target_conservative', pd.Series(0.0, index=dataframe.index)) > 0)
-        )
-        pnf_target_valid_short = (
-            (dataframe.get('target_short_conservative', pd.Series(0.0, index=dataframe.index)) > 0)
-        )
+        #
+        # 环境变量控制：WY_SKIP_PNF_VALIDATION=1 可以跳过验证（用于测试）
+        skip_pnf_validation = os.getenv('WY_SKIP_PNF_VALIDATION', '0') == '1'
         
-        # 统计被过滤的信号数量（仅在有信号被阻止时记录）
-        _all_long_signals = (
-            lps_pullback_entry | sos_entry | wave_start_entry | efficiency_entry |
-            axis_support_entry | spring_recovery_entry | spring_2_entry | spring_1_entry |
-            spring_3_entry | spring_test_sig_bar_entry | phase_d_entry | phase_d_high_quality
-        )
-        _blocked_by_pnf = _all_long_signals & ~pnf_target_valid_long
-        if _blocked_by_pnf.any():
-            blocked_count = int(_blocked_by_pnf.sum())
-            logger.warning(
-                f'❌ P&F 目标位验证: {blocked_count} 个多头信号被阻止（target_conservative <= 0）'
+        if skip_pnf_validation:
+            pnf_target_valid_long = pd.Series(True, index=dataframe.index)
+            pnf_target_valid_short = pd.Series(True, index=dataframe.index)
+            logger.warning('⚠️  P&F 目标位验证已跳过（WY_SKIP_PNF_VALIDATION=1）')
+        else:
+            pnf_target_valid_long = (
+                (dataframe.get('target_conservative', pd.Series(0.0, index=dataframe.index)) > 0)
             )
+            pnf_target_valid_short = (
+                (dataframe.get('target_short_conservative', pd.Series(0.0, index=dataframe.index)) > 0)
+            )
+            
+            # 统计被过滤的信号数量（仅在有信号被阻止时记录）
+            _all_long_signals = (
+                lps_pullback_entry | sos_entry | wave_start_entry | efficiency_entry |
+                axis_support_entry | spring_recovery_entry | spring_2_entry | spring_1_entry |
+                spring_3_entry | spring_test_sig_bar_entry | phase_d_entry | phase_d_high_quality
+            )
+            _blocked_by_pnf = _all_long_signals & ~pnf_target_valid_long
+            if _blocked_by_pnf.any():
+                blocked_count = int(_blocked_by_pnf.sum())
+                logger.warning(
+                    f'❌ P&F 目标位验证: {blocked_count} 个多头信号被阻止（target_conservative <= 0）'
+                )
 
         final_entry = (
             composite_intent_ok & (
@@ -5074,11 +5107,31 @@ class WyckoffV7_TrueMethod(IStrategy):
         trade: 'Trade',
         current_profit: float,
         max_profit_seen: Optional[float],
+        pnf_mode: bool = False
     ) -> dict:
-        """Shadow-only axis profit protection forensic fields."""
-        activation_profit = 0.06
-        giveback_threshold = 0.025
-        min_current_profit = 0.03
+        """Shadow-only axis profit protection forensic fields.
+        
+        Args:
+            trade: Freqtrade Trade 对象
+            current_profit: 当前收益率
+            max_profit_seen: 最大利润
+            pnf_mode: 如果为 True，使用 PNF 激活阈值 (4%/2%/2%)
+                     如果为 False，使用原始阈值 (6%/2.5%/3%)
+        
+        Returns:
+            dict: Shadow Protect 元数据
+        """
+        # 根据 pnf_mode 选择阈值
+        if pnf_mode:
+            activation_profit = 0.04    # 4%
+            giveback_threshold = 0.02   # 2%
+            min_current_profit = 0.02   # 2%
+            shadow_protect_mode = 'pnf'
+        else:
+            activation_profit = 0.06    # 6%
+            giveback_threshold = 0.025  # 2.5%
+            min_current_profit = 0.03   # 3%
+            shadow_protect_mode = 'original'
 
         profit_giveback = None
         triggered = False
@@ -5096,8 +5149,300 @@ class WyckoffV7_TrueMethod(IStrategy):
             'max_profit': max_profit_seen,
             'profit_giveback': round(profit_giveback, 6) if profit_giveback is not None else None,
             'shadow_protect_triggered': triggered,
-            'shadow_protect_rule': 'axis_support:max>=0.06,giveback>=0.025,current>=0.03',
+            'shadow_protect_mode': shadow_protect_mode,
+            'shadow_protect_rule': f'axis_support:max>={activation_profit},giveback>={giveback_threshold},current>={min_current_profit}',
         }
+
+    # ============================================================================
+    # PNF Shadow Protect Integration - Helper Methods
+    # ============================================================================
+
+    def _get_adjusted_pnf_target(
+        self,
+        entry_tag: Optional[str],
+        pnf_metadata: dict,
+        is_short: bool
+    ) -> float:
+        """
+        🆕 根据入场类型返回调整后的 PNF 保守目标位。
+        
+        威科夫因果定律：不同入场信号蕴含的"因"不同。
+        - axis_support (BUEC/LPS)：次级动能，使用 0.5x TR Height（TR 中位）
+        - sos_entry：主趋势确认，使用 1.0x TR Height（TR 顶部）
+        - 其他：保持原始 target_conservative
+        
+        Args:
+            entry_tag: 入场标签
+            pnf_metadata: PNF 元数据字典（包含 tr_low, tr_high, tr_height）
+            is_short: 是否空头
+            
+        Returns:
+            float: 调整后的保守目标位价格
+        """
+        if not is_short:
+            target_cons = float(pnf_metadata.get('target_conservative', 0.0) or 0.0)
+            tr_low = float(pnf_metadata.get('tr_low', 0.0) or 0.0)
+            tr_high = float(pnf_metadata.get('tr_high', 0.0) or 0.0)
+            tr_height = float(pnf_metadata.get('tr_height', 0.0) or 0.0)
+            
+            if entry_tag == 'wyckoff_axis_support' and tr_low > 0 and tr_height > 0:
+                # axis_support (BUEC/LPS): 可配置乘数（WY_PNF_AXIS_MULT，默认0.2）
+                adjusted = tr_low + tr_height * self.pnf_axis_mult
+                if adjusted < target_cons:
+                    profit_needed = (adjusted - tr_low) / tr_low * 100 if tr_low > 0 else 0
+                    logger.info(
+                        f'📐 PNF 目标调整 (axis_support {self.pnf_axis_mult}x): '
+                        f'target={target_cons:.2f} → adjusted={adjusted:.2f} '
+                        f'(TR: {tr_low:.0f}-{tr_high:.0f}, h={tr_height:.0f}, '
+                        f'need ~{profit_needed:.1f}% from TR bottom)'
+                    )
+                    return adjusted
+            elif entry_tag == 'wyckoff_sos_entry' and tr_low > 0 and tr_height > 0:
+                # sos_entry: 可配置乘数（WY_PNF_SOS_MULT，默认0.35）
+                adjusted = tr_low + tr_height * self.pnf_sos_mult
+                if adjusted < target_cons:
+                    return adjusted
+            return target_cons
+        else:
+            target_short_cons = float(pnf_metadata.get('target_short_conservative', 0.0) or 0.0)
+            dist_high = float(pnf_metadata.get('dist_high', 0.0) or 0.0)
+            dist_low = float(pnf_metadata.get('dist_low', 0.0) or 0.0)
+            dist_height = float(pnf_metadata.get('dist_height', 0.0) or 0.0)
+            
+            if entry_tag == 'wyckoff_axis_support' and dist_high > 0 and dist_height > 0:
+                # axis_support short: 0.5x Dist Height（Distribution 中位）
+                adjusted = dist_high - dist_height * 0.5
+                if adjusted > target_short_cons:  # 空头目标向下调整（价格更低）
+                    logger.debug(
+                        f'PNF 目标调整 (axis_support short): {target_short_cons:.2f} → {adjusted:.2f} '
+                        f'(0.5x Dist Height)'
+                    )
+                    return adjusted
+            return target_short_cons
+
+    def _check_pnf_warning_zone_activation(
+        self,
+        pair: str,
+        trade: 'Trade',
+        current_rate: float,
+        current_profit: float,
+        current_time: datetime,  # 🔧 需要用于记录激活时间戳
+        pnf_metadata: dict
+    ) -> bool:
+        """
+        检查 PNF 目标是否达到并激活警告区（如果符合条件）。
+        
+        Args:
+            pair: 交易对
+            trade: Freqtrade Trade 对象
+            current_rate: 当前价格
+            current_profit: 当前收益率
+            pnf_metadata: PNF 元数据字典
+            
+        Returns:
+            'activated': 警告区已激活，继续到下一优先级
+            'hard_exit': 应执行硬退出（功能禁用或entry_tag不符合条件）
+            'continue': 目标达到但不满足激活条件（如利润为负），继续持仓
+        """
+        # 检查功能是否启用
+        if not self.pnf_shadow_protect_enabled:
+            return 'hard_exit'
+        
+        # 检查 entry_tag 是否符合条件
+        # 🔧 P0 修正（2026-05-03）：axis_support 是弱因信号（BUEC/LPS），PnF 目标为"绝对结利线"
+        # 仅 sos_entry（强趋势确认）+ wave_start（测试中）激活 Shadow Protect 博弈超额利润
+        eligible_tags = ['wyckoff_sos_entry']
+        if self.pnf_wave_start_enable:
+            eligible_tags.append('wyckoff_wave_start')
+        if trade.enter_tag not in eligible_tags:
+            return 'hard_exit'
+        
+        # 🔧 最小盈利门控（WY_PNF_MIN_PROFIT 控制，默认 3%）
+        if current_profit < self.pnf_min_profit:
+            return 'continue'
+        
+        # 🆕 Test 1: SOS 早期激活乘数
+        # sos_entry 使用 sos_early_mult 提前激活警告区（默认 1.0=标准目标位）
+        _sos_early = (trade.enter_tag == 'wyckoff_sos_entry' and self.pnf_sos_early_mult < 1.0)
+        
+        # 检查 PNF 目标是否达到（使用调整后的目标位）
+        if not trade.is_short:
+            target_conservative = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, False)
+            if _sos_early and target_conservative > 0:
+                target_conservative = target_conservative * self.pnf_sos_early_mult
+            if target_conservative <= 0 or current_rate < target_conservative:
+                return 'continue'
+            target_reached = 'conservative'
+        else:
+            target_short_conservative = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, True)
+            if _sos_early and target_short_conservative > 0:
+                target_short_conservative = target_short_conservative * self.pnf_sos_early_mult
+            if target_short_conservative <= 0 or current_rate > target_short_conservative:
+                return 'continue'
+            target_reached = 'conservative'
+        
+        # 激活警告区 - 存储元数据
+        metadata_key = (pair, str(trade.open_date_utc))
+        self._pnf_trades_metadata[metadata_key] = {
+            **pnf_metadata,
+            'pnf_warning_zone_activated': True,
+            'pnf_activation_timestamp': current_time,  # 🔧 使用 current_time 而非 datetime.now()
+            'pnf_activation_profit': current_profit,
+            'pnf_activation_price': current_rate,
+            'pnf_target_reached': target_reached,
+        }
+        
+        # 记录激活日志
+        target_price = target_conservative if not trade.is_short else target_short_conservative
+        logger.info(
+            f'PNF 警告区激活: {pair}, '
+            f'target={target_price:.2f}, current={current_rate:.2f}, '
+            f'profit={current_profit:.2%}, entry_tag={trade.enter_tag}'
+        )
+        
+        return 'activated'
+
+    def _check_pnf_timeout(
+        self,
+        pair: str,
+        trade: 'Trade',
+        current_time: datetime,
+        current_profit: float,
+        pnf_metadata: dict
+    ) -> Optional[str]:
+        """
+        检查 PNF 警告区激活后是否超时（48小时）。
+        
+        Args:
+            pair: 交易对
+            trade: Freqtrade Trade 对象
+            current_time: 当前时间
+            current_profit: 当前收益率
+            pnf_metadata: PNF 元数据字典
+            
+        Returns:
+            'pnf_timeout_exit': 超时触发退出
+            None: 未超时，继续到下一优先级
+        """
+        # 检查警告区是否已激活
+        if not pnf_metadata.get('pnf_warning_zone_activated'):
+            return None
+        
+        # 获取激活时间戳
+        activation_timestamp = pnf_metadata.get('pnf_activation_timestamp')
+        if activation_timestamp is None:
+            logger.warning(f'PNF 激活时间戳无效: {pair}，跳过超时检查')
+            return None
+        
+        # 计算经过时间
+        try:
+            elapsed_hours = (current_time - activation_timestamp).total_seconds() / 3600.0
+        except Exception as e:
+            logger.warning(f'PNF 超时计算失败: {pair}, 错误={e}')
+            return None
+        
+        # 检查是否超时
+        if elapsed_hours >= self.pnf_timeout_hours:
+            # 计算最大利润
+            max_profit_after_pnf = 0.0
+            if trade.max_rate is not None:
+                if not trade.is_short:
+                    max_profit_after_pnf = (trade.max_rate - trade.open_rate) / trade.open_rate
+                else:
+                    max_profit_after_pnf = (trade.open_rate - trade.max_rate) / trade.open_rate
+            
+            # 更新元数据（如果存在）
+            metadata_key = (pair, str(trade.open_date_utc))
+            if metadata_key in self._pnf_trades_metadata:
+                self._pnf_trades_metadata[metadata_key]['max_profit_after_pnf'] = max_profit_after_pnf
+            
+            # 记录超时日志
+            activation_profit = pnf_metadata.get('pnf_activation_profit', 0.0)
+            logger.info(
+                f'PNF 超时退出: {pair}, '
+                f'持仓={elapsed_hours:.1f}h, '
+                f'激活利润={activation_profit:.2%}, '
+                f'当前利润={current_profit:.2%}, '
+                f'最高利润={max_profit_after_pnf:.2%}'
+            )
+            
+            return 'pnf_timeout_exit'
+        
+        return None
+
+    def _check_shadow_protect_pnf_mode(
+        self,
+        pair: str,
+        trade: 'Trade',
+        current_profit: float,
+        pnf_metadata: dict
+    ) -> Optional[str]:
+        """
+        检查 Shadow Protect 条件（PNF 模式：4%/2%/2% 阈值）。
+        
+        Args:
+            pair: 交易对
+            trade: Freqtrade Trade 对象
+            current_profit: 当前收益率
+            pnf_metadata: PNF 元数据字典
+            
+        Returns:
+            'shadow_protect_exit': Shadow Protect 触发退出
+            None: 未触发，继续到下一优先级
+        """
+        # 检查警告区是否已激活
+        if not pnf_metadata.get('pnf_warning_zone_activated'):
+            return None
+        
+        # 获取最大利润
+        if trade.max_rate is None:
+            logger.warning(f'trade.max_rate 为 None: {pair}，跳过 Shadow Protect 检查')
+            return None
+        
+        # 计算最大利润率
+        if not trade.is_short:
+            max_profit = (trade.max_rate - trade.open_rate) / trade.open_rate
+        else:
+            max_profit = (trade.open_rate - trade.max_rate) / trade.open_rate
+        
+        # 计算回撤
+        giveback = max_profit - current_profit
+        
+        # PNF 模式阈值（通过环境变量控制）
+        pnf_max_profit_threshold = self.pnf_sp_max_profit
+        pnf_giveback_threshold = self.pnf_sp_giveback
+        pnf_min_current_profit = self.pnf_sp_min_current
+        
+        # 记录评估日志（DEBUG）
+        logger.debug(
+            f'Shadow Protect 评估 (PNF模式): {pair}, '
+            f'max_profit={max_profit:.2%}, giveback={giveback:.2%}, '
+            f'current_profit={current_profit:.2%}, '
+            f'阈值={pnf_max_profit_threshold:.0%}/{pnf_giveback_threshold:.0%}/{pnf_min_current_profit:.0%}'
+            f'current_profit={current_profit:.2%}, 阈值=4%/2%/2%'
+        )
+        
+        # 检查所有条件
+        if (max_profit >= pnf_max_profit_threshold and
+            giveback >= pnf_giveback_threshold and
+            current_profit >= pnf_min_current_profit):
+            
+            # 更新元数据（如果存在）
+            metadata_key = (pair, str(trade.open_date_utc))
+            if metadata_key in self._pnf_trades_metadata:
+                self._pnf_trades_metadata[metadata_key]['max_profit_after_pnf'] = max_profit
+                self._pnf_trades_metadata[metadata_key]['shadow_protect_pnf_mode'] = True
+            
+            # 记录触发日志（INFO）
+            logger.info(
+                f'Shadow Protect 退出 (PNF模式): {pair}, '
+                f'max_profit={max_profit:.2%}, giveback={giveback:.2%}, '
+                f'current_profit={current_profit:.2%}, 阈值=4%/2%/2%'
+            )
+            
+            return 'shadow_protect_exit'
+        
+        return None
 
     def _custom_exit_impl(self, pair: str, trade: 'Trade', current_time: datetime, current_rate: float, current_profit: float, **kwargs) -> Optional[str]:
         """
@@ -5268,37 +5613,113 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 🔧 P0 补丁（2026-05-02）：从元数据链读取目标位，而非 live DataFrame
         # 根因：PhaseContextDetector 会重算 TR 边界，导致 target_conservative 从 ~$79k 缩至 ~$77.9k
         # 修复：读取入场时锁定的元数据链值（_pnf_trades_metadata），确保目标位不变
-        if current_profit >= 0.01:
+        # 🆕 PNF Shadow Protect Integration: 警告区激活逻辑（优先级 3.8）
+        # 🔧 回测模式修复：如果元数据链为空，回退到 dataframe 读取
+        # 🔧 PNF Shadow Protect 修复：移除 current_profit >= 0.01 的限制，允许检查所有交易
+        if True:  # 移除盈利限制，允许检查所有交易
             # 从元数据链获取 P&F 目标位（入场时保存）
             metadata_key = (pair, str(trade.open_date_utc))
             pnf_metadata = self._pnf_trades_metadata.get(metadata_key, {})
             
+            # 🔧 P0 Fix: 如果 (pair, open_date) key 为空，回退到 pair key（回测模式兼容）
+            if not pnf_metadata:
+                pnf_metadata = self._pnf_trades_metadata.get(pair, {})
+            
+            # 🔧 回测模式回退：如果元数据链仍为空，从 dataframe 读取（最后防线）
+            if not pnf_metadata:
+                try:
+                    pnf_metadata = {
+                        'target_conservative': dataframe.iloc[current_index].get('target_conservative', 0.0),
+                        'target_standard': dataframe.iloc[current_index].get('target_standard', 0.0),
+                        'target_short_conservative': dataframe.iloc[current_index].get('target_short_conservative', 0.0),
+                        'target_short_standard': dataframe.iloc[current_index].get('target_short_standard', 0.0),
+                        # 🔧 P0 Fix: 同时读取 TR 边界数据，确保 _get_adjusted_pnf_target 可用
+                        'tr_low': dataframe.iloc[current_index].get('tr_low', 0.0),
+                        'tr_high': dataframe.iloc[current_index].get('tr_high', 0.0),
+                        'tr_height': dataframe.iloc[current_index].get('tr_height', 0.0),
+                        'dist_low': dataframe.iloc[current_index].get('dist_low', 0.0),
+                        'dist_high': dataframe.iloc[current_index].get('dist_high', 0.0),
+                        'dist_height': dataframe.iloc[current_index].get('dist_height', 0.0),
+                    }
+                except Exception as e:
+                    logger.warning(f'无法从 dataframe 读取 PNF 目标: {pair}, 错误={e}')
+                    pnf_metadata = {}
+            
             if not trade.is_short:
                 _tgt_std  = float(pnf_metadata.get('target_standard', 0.0) or 0.0)
-                _tgt_cons = float(pnf_metadata.get('target_conservative', 0.0) or 0.0)
+                # 🆕 axis_support 使用 0.5x TR Height 调整目标
+                _tgt_cons = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, False)
                 if _tgt_std > 0 and current_rate >= _tgt_std:
                     logger.info(f'P&F 目标位2(多头标准): {pair}, '
                                 f'current={current_rate:.2f} >= target_std={_tgt_std:.2f}, '
                                 f'收益={current_profit:.2%} [元数据链]')
                     return 'pnf_target_2'
                 elif _tgt_cons > 0 and current_rate >= _tgt_cons:
-                    logger.info(f'P&F 目标位1(多头保守): {pair}, '
-                                f'current={current_rate:.2f} >= target_cons={_tgt_cons:.2f}, '
-                                f'收益={current_profit:.2%} [元数据链]')
-                    return 'pnf_target_1'
+                    # 🆕 检查是否应激活警告区
+                    try:
+                        activation_result = self._check_pnf_warning_zone_activation(pair, trade, current_rate, current_profit, current_time, pnf_metadata)
+                        if activation_result == 'hard_exit':
+                            # 硬退出（功能禁用或不符合条件类型）
+                            logger.info(f'P&F 目标位1(多头保守): {pair}, '
+                                        f'current={current_rate:.2f} >= target_cons={_tgt_cons:.2f}, '
+                                        f'收益={current_profit:.2%} [硬退出: 不符合条件或功能禁用]')
+                            return 'pnf_target_1'
+                        elif activation_result == 'continue':
+                            # 警告区未激活但也不硬退出（如利润为负），继续到下一优先级
+                            pass
+                        else:
+                            # 警告区已激活，继续到下一优先级（不退出）
+                            pass
+                    except Exception as e:
+                        # 异常时回退到硬退出（fail-safe）
+                        logger.warning(f'PNF 警告区检查失败: {pair}, 错误={str(e)}, 回退到硬退出')
+                        return 'pnf_target_1'
             else:
                 _tgt_short_std  = float(pnf_metadata.get('target_short_standard', 0.0) or 0.0)
-                _tgt_short_cons = float(pnf_metadata.get('target_short_conservative', 0.0) or 0.0)
+                # 🆕 axis_support 使用 0.5x Dist Height 调整目标
+                _tgt_short_cons = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, True)
                 if _tgt_short_std > 0 and current_rate <= _tgt_short_std:
                     logger.info(f'P&F 目标位2(空头标准): {pair}, '
                                 f'current={current_rate:.2f} <= target_short_std={_tgt_short_std:.2f}, '
                                 f'收益={current_profit:.2%} [元数据链]')
                     return 'pnf_target_short_2'
                 elif _tgt_short_cons > 0 and current_rate <= _tgt_short_cons:
-                    logger.info(f'P&F 目标位1(空头保守): {pair}, '
-                                f'current={current_rate:.2f} <= target_short_cons={_tgt_short_cons:.2f}, '
-                                f'收益={current_profit:.2%} [元数据链]')
-                    return 'pnf_target_short_1'
+                    # 🆕 检查是否应激活警告区
+                    try:
+                        activation_result = self._check_pnf_warning_zone_activation(pair, trade, current_rate, current_profit, current_time, pnf_metadata)
+                        if activation_result == 'hard_exit':
+                            # 硬退出（功能禁用或不符合条件类型）
+                            logger.info(f'P&F 目标位1(空头保守): {pair}, '
+                                        f'current={current_rate:.2f} <= target_short_cons={_tgt_short_cons:.2f}, '
+                                        f'收益={current_profit:.2%} [硬退出: 不符合条件或功能禁用]')
+                            return 'pnf_target_short_1'
+                        elif activation_result == 'continue':
+                            pass
+                        else:
+                            pass
+                    except Exception as e:
+                        logger.warning(f'PNF 警告区检查失败: {pair}, 错误={str(e)}, 回退到硬退出')
+                        return 'pnf_target_short_1'
+        
+        # ===== 优先级 3.85: PNF 超时检查（48小时）=====
+        # 🆕 PNF Shadow Protect Integration: 超时退出逻辑
+        metadata_key = (pair, str(trade.open_date_utc))
+        pnf_metadata = self._pnf_trades_metadata.get(metadata_key, {})
+        # 🔧 P0 Fix: 回退到 pair key（回测模式兼容）
+        if not pnf_metadata:
+            pnf_metadata = self._pnf_trades_metadata.get(pair, {})
+        if pnf_metadata.get('pnf_warning_zone_activated'):
+            timeout_exit = self._check_pnf_timeout(pair, trade, current_time, current_profit, pnf_metadata)
+            if timeout_exit:
+                return timeout_exit
+        
+        # ===== 优先级 3.9: Shadow Protect PNF 模式（4%/2%/2% 阈值）=====
+        # 🆕 PNF Shadow Protect Integration: Shadow Protect 退出逻辑
+        if pnf_metadata.get('pnf_warning_zone_activated'):
+            shadow_exit = self._check_shadow_protect_pnf_mode(pair, trade, current_profit, pnf_metadata)
+            if shadow_exit:
+                return shadow_exit
+        
         # ===== 4. 优先级 4: 下降波段退出（SOS 专用逻辑）=====
         # 检查是否为 SOS 交易
         is_sos = self._is_sos_trade(trade)
@@ -5453,6 +5874,8 @@ class WyckoffV7_TrueMethod(IStrategy):
                 return False  # 阻止入场
             
             # 目标位有效，保存到元数据
+            # 🆕 P0 Fix (2026-05-03): 同时保存 tr_low/tr_high/tr_height 和 entry_tag，
+            # 用于 axis_support 目标乘数调整（0.5x TR Height）
             pnf_meta = {
                 'target_conservative':       target_cons,
                 'target_standard':           target_std,
@@ -5460,8 +5883,19 @@ class WyckoffV7_TrueMethod(IStrategy):
                 'target_short_conservative': target_short_cons,
                 'target_short_standard':     target_short_std,
                 'entry_side':                side,
+                'tr_low':                    float(last.get('tr_low',                    0.0) or 0.0),
+                'tr_high':                   float(last.get('tr_high',                   0.0) or 0.0),
+                'tr_height':                 float(last.get('tr_height',                 0.0) or 0.0),
+                'dist_low':                  float(last.get('dist_low',                  0.0) or 0.0),
+                'dist_high':                 float(last.get('dist_high',                 0.0) or 0.0),
+                'dist_height':               float(last.get('dist_height',               0.0) or 0.0),
+                'entry_tag':                 entry_tag or 'unknown',
             }
             self._pending_pnf_metadata[pair] = pnf_meta
+            
+            # 🆕 P0 Fix: 同时以 pair 为 key 存入 _pnf_trades_metadata 作为回退快照
+            # leverage() 会将其迁移到 (pair, open_date_str) 精确 key
+            self._pnf_trades_metadata[pair] = pnf_meta
             
             # 记录验证成功的日志
             if side == 'long':
@@ -5618,6 +6052,78 @@ class WyckoffV7_TrueMethod(IStrategy):
             except Exception as e:
                 logger.debug(f'P7-2 vectorized exit trace failed [{pair}]: {e}')
 
+        # ============================================================================
+        # 🆕 20% ROI 极值法医追踪（2026-05-03）
+        # 记录触及 ROI 20% 上限的交易，分析"强因特征"
+        # 核心指纹：Effort vs Result (1D) — 入场前3天日线量价是否和谐
+        # ============================================================================
+        if exit_reason == 'roi':
+            try:
+                _profit = trade.calc_profit_ratio(rate)
+                _hold_h = round((current_time - trade.open_date_utc).total_seconds() / 3600, 2)
+                
+                # 最大利润与回吐
+                if not trade.is_short and trade.open_rate > 0:
+                    _max_p = (trade.max_rate - trade.open_rate) / trade.open_rate if trade.max_rate else None
+                elif trade.is_short and trade.open_rate > 0:
+                    _max_p = (trade.open_rate - trade.min_rate) / trade.open_rate if trade.min_rate else None
+                else:
+                    _max_p = None
+                _giveback = round(_max_p - _profit, 4) if _max_p is not None else None
+                
+                # PNF 目标位
+                _pnf_meta = self._pnf_trades_metadata.get((pair, str(trade.open_date_utc)), {})
+                if not _pnf_meta:
+                    _pnf_meta = self._pnf_trades_metadata.get(pair, {})
+                _pnf_target = _pnf_meta.get('target_conservative', 0) or 0
+                _pnf_reached = rate >= _pnf_target if _pnf_target > 0 and not trade.is_short else False
+                
+                # Effort vs Result (1D): 入场前3天日线量价和谐度
+                _evr_days = []
+                try:
+                    _df_1d, _ = self.dp.get_analyzed_dataframe(pair, '1d')
+                    if _df_1d is not None and not _df_1d.empty and 'volume' in _df_1d.columns:
+                        _entry_date = pd.Timestamp(trade.open_date_utc).tz_convert(None)
+                        _df_1d_idx = _df_1d.index.tz_localize(None) if _df_1d.index.tz is not None else _df_1d.index
+                        _entry_pos = _df_1d_idx.get_indexer([_entry_date], method='ffill')[0]
+                        _lookback = min(3, max(0, _entry_pos))
+                        _vol_avg = _df_1d['volume'].iloc[max(0, _entry_pos - 20):_entry_pos].mean()
+                        for _i in range(max(0, _entry_pos - _lookback), _entry_pos):
+                            _row = _df_1d.iloc[_i]
+                            _vol_ratio = _row['volume'] / _vol_avg if _vol_avg > 0 else 1.0
+                            _spread_pct = (_row['close'] - _row['open']) / _row['open'] if _row['open'] > 0 else 0
+                            # 和谐：放量+正向价差；背离：放量+窄价差；静默：缩量
+                            if not trade.is_short:
+                                _harmony = 'harmony' if _vol_ratio >= 1.2 and _spread_pct > 0.01 else ('divergence' if _vol_ratio >= 1.2 else 'quiet')
+                            else:
+                                _harmony = 'harmony' if _vol_ratio >= 1.2 and _spread_pct < -0.01 else ('divergence' if _vol_ratio >= 1.2 else 'quiet')
+                            _evr_days.append({
+                                'date': str(_row.name), 'vol_ratio': round(_vol_ratio, 2),
+                                'spread_pct': round(_spread_pct * 100, 2), 'state': _harmony
+                            })
+                except Exception as _evr_e:
+                    _evr_days = [{'state': 'unavailable', 'reason': str(_evr_e)[:80]}]
+                
+                # 和谐计数
+                _harmony_days = sum(1 for d in _evr_days if d.get('state') == 'harmony')
+                _divergence_days = sum(1 for d in _evr_days if d.get('state') == 'divergence')
+                _evr_status = 'unavailable' if any(d.get('state') == 'unavailable' for d in _evr_days) else 'ok'
+                
+                logger.info(
+                    f'🔬 ROI极值法医 [{pair}] '
+                    f'tag={trade.enter_tag} | '
+                    f'profit={_profit:.2%} | '
+                    f'max_profit={_max_p:.2%} | '
+                    f'giveback={_giveback} | '
+                    f'hold={_hold_h}h | '
+                    f'pnf_target={_pnf_target:.0f} | '
+                    f'pnf_reached={_pnf_reached} | '
+                    f'evr_1d({_evr_status} harmony={_harmony_days}/div={_divergence_days}) | '
+                    f'evr_detail={_evr_days}'
+                )
+            except Exception as _fe:
+                logger.debug(f'ROI法医追踪失败 [{pair}]: {_fe}')
+
         return True
 
     def leverage(self, pair: str, current_time: datetime, current_rate: float, proposed_leverage: float, max_leverage: float, entry_tag: Optional[str], side: str, **kwargs) -> float:
@@ -5669,12 +6175,22 @@ class WyckoffV7_TrueMethod(IStrategy):
             if _trade_pnf is not None:
                 try:
                     metadata_key = (pair, str(_trade_pnf.open_date_utc))
+                    # 🆕 P0 Fix: 从 pair 临时 key 迁移到 (pair, open_date_str) 精确 key
                     self._pnf_trades_metadata[metadata_key] = pnf_meta
+                    # 清理 pair 临时 key（如果存在）
+                    if pair in self._pnf_trades_metadata:
+                        del self._pnf_trades_metadata[pair]
                     logger.debug(f"PnF 目标位已存储: {pair}, open_date={_trade_pnf.open_date_utc}, "
                                  f"cons={pnf_meta['target_conservative']:.2f}, "
                                  f"std={pnf_meta['target_standard']:.2f}")
                 except Exception as e:
                     logger.warning(f'Failed to store PnF metadata: {e}')
+            else:
+                # 🆕 P0 Fix: 回测模式下 trade 可能不在 kwargs 中，
+                # 元数据已通过 pair key 存入 _pnf_trades_metadata（在 confirm_trade_entry 中），
+                # 此处无需额外处理
+                logger.debug(f"PnF 目标位已暂存(pair key): {pair}, "
+                             f"cons={pnf_meta['target_conservative']:.2f}")
         # 本策略不使用杠杆
         return 1.0
 

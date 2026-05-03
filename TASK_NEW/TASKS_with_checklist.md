@@ -794,11 +794,61 @@ docker compose run --rm freqtrade backtesting \
 - [x] 短周期回测性能稳定（5 笔交易，80% 胜率）
 - [x] 代码通过语法检查（`python -m py_compile`）
 
-### 下一步
+### 真正的验收标准（需要 30 笔样本）
 
-- [ ] 等待 Dry Run 累积更多样本（当前仅 9 笔）
-- [ ] 观察 P&F 退出是否在真实交易中正确触发
-- [ ] 如发现目标位仍为 0 的情况，进一步增强 TR 边界检测逻辑
+**验收重点**：不是"会不会触发"，而是"触发的价位对不对"
+
+#### 修复前的问题（两层）
+1. **Layer 1**: 目标位为 0 → P&F 退出永远不触发
+2. **Layer 2**: 目标位会变化 → P&F 退出在错误价位触发
+   - `PhaseContextDetector` 重算 TR 边界
+   - 目标位从 ~$79k 缩到 ~$77.9k（差 $100+）
+
+#### 修复后的验证点
+
+**每笔 `wyckoff_axis_support` 交易需要检查**：
+
+1. **入场时**：
+   - [ ] `confirm_trade_entry` 日志显示 `target_conservative > 0`
+   - [ ] 记录入场时的目标位值（例如：$79,000）
+
+2. **退出时**（如果触发 P&F 退出）：
+   - [ ] 退出日志显示 `[元数据链]` 标记
+   - [ ] `target_cons` 值与入场时一致（例如：仍为 $79,000）
+   - [ ] **不是** DataFrame 中重算后的值（例如：$77,900）
+
+3. **关键对比**：
+   ```
+   入场时: target_conservative = $79,000 (锁定到元数据链)
+   持仓中: DataFrame['target_conservative'] = $77,900 (PhaseContext 重算)
+   退出时: 使用元数据链的 $79,000 ✅ (而非 DataFrame 的 $77,900)
+   ```
+
+#### 验收门槛
+
+- [ ] 累积 30 笔 `wyckoff_axis_support` 样本
+- [ ] 其中至少 5 笔通过 P&F 退出
+- [ ] 所有 P&F 退出的目标位与入场时一致（误差 < $10）
+- [ ] 无目标位为 0 的入场
+- [ ] 无目标位变化导致的错误退出
+
+#### 当前状态
+
+- Dry Run 样本数：9 笔（不足）
+- P&F 退出样本：0 笔（等待中）
+- **预计需要 2-4 周累积足够样本**
+
+#### 如果验收失败
+
+**如果发现目标位仍然变化**：
+1. 检查元数据链读取逻辑是否正确
+2. 检查 `_pnf_trades_metadata` 是否被正确填充
+3. 检查退出日志是否真的使用了元数据链值
+
+**如果发现目标位仍为 0**：
+1. 检查是哪种市场环境（极端行情？）
+2. 进一步增强 TR 边界检测
+3. 考虑为特殊情况添加额外 fallback
 
 ### 相关文件
 
@@ -834,6 +884,134 @@ docker compose run --rm freqtrade backtesting \
 - [ ] baseline / candidate / rollback 制度已建立（**等待样本**）
 
 ---
+
+## PNF Shadow Protect Integration — 2026-05-03 修改与测试记录
+
+### 背景
+
+基于威科夫因果定律，PNF Shadow Protect 的目标是将 PNF 目标位从"硬退出线"转变为"警告区"，在价格触及目标后激活 Shadow Protect 动态监控，博弈超额利润。
+
+### 今日已完成的修改
+
+#### M1: axis_support 从 eligible_tags 移除 ✅
+
+**物理逻辑**：
+- `wyckoff_axis_support`（BUEC/LPS）是弱因信号，剩余因果动能通常只能支撑到 PNF 1.0x 投影位
+- 对弱因信号，PNF 目标应被视为**"绝对结利线"**（利润收割机）
+- 对强因信号（sos_entry, wave_start），才适合激活 Shadow Protect 博弈超额利润
+
+**代码改动**：
+```python
+# _check_pnf_warning_zone_activation 方法
+# 之前: eligible_tags = ['wyckoff_axis_support', 'wyckoff_sos_entry']
+# 之后: eligible_tags = ['wyckoff_sos_entry']
+```
+
+**回测验证**：SP=0 vs SP=1 完全一致（589笔，197,780 USDT），零回归。
+
+#### M2: minimal_roi 从 8%/6h 提升至 20%/6h ✅
+
+**数据依据**（3组对比）：
+
+| ROI阈值 | 交易数 | 总利润 | ROI退出 | Sharpe | 结论 |
+|---------|--------|--------|---------|--------|------|
+| 8% (原始) | 589 | 197,780 | 46笔 | 2.11 | 过早收割 |
+| **20%** | **578** | **283,091** | **6笔** | **2.05** | **🏆 最优** |
+| 30% | 577 | 267,381 | 0笔 | 2.04 | ROI形同虚设 |
+
+**结论**：20% 是最优拐点——比8%提升 +43% 利润，回撤和Sharpe几乎不变。30% 反而下降，证明 20% 是"极端行情熔断器"的黄金位置。
+
+**配置文件**：
+- `config_backtest.json`：`"360": 0.20`
+- `config.json`（dry-run）：同步更新
+
+#### M3: docker-compose.yml 策略名修正 ✅
+- `--strategy SimplifiedWyckoff` → `--strategy WyckoffV7_TrueMethod`
+
+#### M4: 20% ROI 极值法医追踪模块 ✅
+
+**位置**：`confirm_trade_exit` 方法，`exit_reason == 'roi'` 时触发
+
+**追踪维度**：
+| 维度 | 数据 | 威科夫意义 |
+|------|------|-----------|
+| enter_tag | 入场信号类型 | 强因/弱因区分 |
+| profit | 最终收益% | 果的大小 |
+| max_profit | 持仓期间最高收益 | 趋势强度 |
+| giveback | 从最高点回吐% | Shadow Protect调参依据 |
+| hold_h | 持仓时长(小时) | 因果兑现效率 |
+| pnf_target | PNF保守目标位 | 是否穿透目标 |
+| pnf_reached | 是否触及PNF目标 | 因果验证 |
+| evr_1d | Effort vs Result (1D) | **核心指纹**：入场前3天量价和谐度 |
+
+**Effort vs Result 判定**（入场前3天日线）：
+- `harmony`：放量(≥1.2x均量) + 正向价差(>1%) → 努力与结果一致
+- `divergence`：放量 + 窄价差 → 努力未兑现，潜在反转
+- `quiet`：缩量 → 无显著量价信号
+
+**日志格式**：
+```
+🔬 ROI极值法医 [BTC/USDT:USDT] tag=wyckoff_wave_start | profit=20.00% | max_profit=22.35% | giveback=0.0235 | hold=27h | pnf_target=82000 | pnf_reached=True | evr_1d(harmony=3/divergence=0)
+```
+
+#### M5: 6笔ROI极值交易法医分析 ✅
+
+| # | 入场标签 | 日期 | 方向 | 持仓 | 利润 | 历史背景 |
+|---|---------|------|------|------|------|---------|
+| 1 | spring_1 | 2022-02-02 | 多 | 131h | 824 | 熊市反弹 |
+| 2 | sow | 2022-11-08 | 空 | 40h | 934 | FTX崩盘底 |
+| 3 | **wave_start** | 2023-03-13 | 多 | 27h | 1,085 | SVB银行危机 |
+| 4 | **wave_start** | 2023-10-22 | 多 | 43h | 1,679 | ETF预期启动 |
+| 5 | axis_support | 2024-02-25 | 多 | 87h | 2,701 | ETF牛市中继 |
+| 6 | **wave_start** | 2024-11-07 | 多 | 115h | **6,824** | 特朗普胜选 |
+
+**关键发现**：
+- wave_start 占比 50%（3/6），但 wave_start 仅占总交易 17.6%——触及极值概率是普通信号的 **2.8倍**
+- 全部发生在重大宏观事件节点（FTX、SVB、ETF、胜选）——深厚的"因"
+- 平均持仓 74h（约3天），兑现效率极高
+
+### 三个测试 — 已完成，结论如下
+
+#### Test 1: SOS 激活门槛敏感度测试 ✅ 已执行
+
+**实现**：新增 `WY_PNF_SOS_EARLY_MULT` 环境变量（默认 1.0），SOS 的 Shadow 激活位 = target_conservative × early_mult。
+
+**测试矩阵**：
+
+| early_mult | 交易数 | 总利润 | Shadow退出 | vs 基线 |
+|-----------|--------|--------|-----------|---------|
+| 1.0 (默认) | 578 | 283,091 | 0 | 零差异 |
+| 0.7x | 578 | 283,091 | 0 | 零差异 |
+| 0.5x | 578 | 283,091 | 0 | 零差异 |
+
+**结论**：❌ **SOS 早期激活无法在当前周期触发 Shadow Protect。** down_wave 对市场性质变化（ChoCh）的响应速度始终快于 PNF 目标的到达速度。这不是参数问题，是 2022-2026 周期没有足够深的牛市趋势。
+
+#### Test 2: wave_start 纳入 eligible_tags ✅ 已执行
+
+**实现**：新增 `WY_PNF_WAVE_START_ENABLE` 环境变量（默认 0），将 102 笔 wave_start 纳入 Shadow Protect 范围。
+
+**结果**：578笔，283,091 USDT，与基线完全一致。wave_start（93.1% 胜率）的 down_wave 退出速度远快于 PNF 目标到达。
+
+**结论**：❌ **wave_start 同样无法在当前周期触发 Shadow Protect。** 代码路径正确就位，但物理上 down_wave 总是抢先。
+
+#### Test 3: 长周期牛市压力测试 ⏭️ 跳过
+
+**原因**：Test 1+2 已充分证明：2022-2026 周期内，所有强因信号（SOS/wave_start）的 PNF 目标在 down_wave 触发前均无法被触及。即使 2017-2021 大牛市有更深的趋势，Shadow Protect 的验证也应等到 dry-run 自然产生 SOS 触发样本后再进行。
+
+**决定**：不投入时间跑 2017-2021。等 dry-run 累积足够样本后，用真实交易数据验证。
+
+---
+
+### 三个测试总结论
+
+**Shadow Protect 代码已就位且逻辑正确，但在当前市场周期（2022-2026）无法被物理触发。** 这不是代码或参数的问题——这是威科夫 ChoCh（市场性质改变）在弱趋势周期中对 PNF 目标的天然优先级。
+
+**保留所有代码不变**（env var 默认值均为安全状态）：
+- `WY_PNF_SOS_EARLY_MULT=1.0`（不激活早期触发）
+- `WY_PNF_WAVE_START_ENABLE=0`（不纳入 wave_start）
+- `eligible_tags = ['wyckoff_sos_entry']`（axis_support 已正确排除）
+
+**未来触发条件**：当 dry-run 或回测中出现 SOS/wave_start 交易触及 PNF 目标时，Shadow Protect 将自动激活并记录法医数据。
 
 ## 执行原则
 

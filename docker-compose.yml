@@ -25,6 +25,8 @@ services:
       - "./wyckoff:/freqtrade/wyckoff"
     environment:
       - PYTHONPATH=/freqtrade
+      - WY_PNF_SHADOW_PROTECT=${WY_PNF_SHADOW_PROTECT:-0}
+      - WY_SKIP_PNF_VALIDATION=${WY_SKIP_PNF_VALIDATION:-0}
     # Expose api on port 8080 (localhost only)
     # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
     # for more information.
@@ -36,4 +38,4 @@ services:
       --logfile /freqtrade/user_data/logs/freqtrade.log
       --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
       --config /freqtrade/user_data/config.json
-      --strategy SimplifiedWyckoff
+      --strategy WyckoffV7_TrueMethod
