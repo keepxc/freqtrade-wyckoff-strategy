@@ -23,6 +23,9 @@ P0 Fix (2026-05-02): 增强 fallback 逻辑
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PNFTargetCalculator:
@@ -185,15 +188,37 @@ class PNFTargetCalculator:
             else:
                 tr_position[i] = 0.5  # 默认中位
         
-        dataframe['tr_low'] = tr_low
-        dataframe['tr_high'] = tr_high
-        dataframe['tr_height'] = tr_height
+        # P0 Fix (2026-05-04): TR 0.7-1.0 区间过滤（负期望区域）
+        # 当 TR position >= 0.7 时，将目标位设为 0，阻止入场
+        tr_filtered_mask = tr_position >= 0.7
+        tr_low_filtered = tr_low.copy()
+        tr_high_filtered = tr_high.copy()
+        tr_height_filtered = tr_height.copy()
+        
+        # 将过滤掉的 K 线的目标位设为 0
+        tr_low_filtered[tr_filtered_mask] = 0.0
+        tr_high_filtered[tr_filtered_mask] = 0.0
+        tr_height_filtered[tr_filtered_mask] = 0.0
+        
+        # 记录过滤统计
+        filtered_count = int(tr_filtered_mask.sum())
+        if filtered_count > 0:
+            logger.info(
+                f'🔴 TR 0.7+ 过滤: {filtered_count} 个 K 线被过滤 '
+                f'(TR position >= 0.7，负期望区域)'
+            )
+        
+        dataframe['tr_low'] = tr_low_filtered
+        dataframe['tr_high'] = tr_high_filtered
+        dataframe['tr_height'] = tr_height_filtered
         dataframe['tr_source'] = tr_source  # P1 Fix: 存储来源标记
         dataframe['tr_source_detail'] = tr_source_detail  # P1 Fix: 存储来源详情
         dataframe['tr_position'] = tr_position  # P0 Fix: 存储TR位置（0.0-1.0）
-        dataframe['target_conservative'] = tr_low + tr_height * 1.0
-        dataframe['target_standard'] = tr_low + tr_height * 1.5
-        dataframe['target_aggressive'] = tr_low + tr_height * 2.0
+        
+        # 计算目标位（过滤后的 TR 会导致目标位为 0）
+        dataframe['target_conservative'] = tr_low_filtered + tr_height_filtered * 1.0
+        dataframe['target_standard'] = tr_low_filtered + tr_height_filtered * 1.5
+        dataframe['target_aggressive'] = tr_low_filtered + tr_height_filtered * 2.0
         dataframe['target_vertical'] = target_vertical
 
     def _calculate_short_side(self, dataframe: DataFrame) -> None:
