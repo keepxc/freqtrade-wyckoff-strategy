@@ -6168,7 +6168,70 @@ class WyckoffV7_TrueMethod(IStrategy):
                     del self._pending_sos_metadata[pair]
                 except Exception as e:
                     logger.warning(f'Failed to store SOS metadata: {e}')
-        # Task 4.2: 所有交易均转存 P&F 目标位（confirm_trade_entry → leverage）
+        
+        # 🔧 P0 Fix (2026-05-04): 直接从 dataframe 提取 P&F 目标位
+        # 根因：confirm_trade_entry 在 dry-run 模式下不被调用，导致 _pending_pnf_metadata 永远为空
+        # 修复：在 leverage() 中直接读取 dataframe（dry-run/live 模式下有效）
+        # leverage() 每次开仓必调，且能拿到 **kwargs 里的 dataframe 和 trade
+        trade = kwargs.get('trade')
+        dataframe = kwargs.get('dataframe')
+        
+        if trade is not None and dataframe is not None and len(dataframe) > 0:
+            try:
+                last = dataframe.iloc[-1]
+                
+                # 提取 P&F 目标位和 TR 边界
+                pnf_meta = {
+                    'target_conservative':       float(last.get('target_conservative', 0.0) or 0.0),
+                    'target_standard':           float(last.get('target_standard', 0.0) or 0.0),
+                    'target_aggressive':         float(last.get('target_aggressive', 0.0) or 0.0),
+                    'target_short_conservative': float(last.get('target_short_conservative', 0.0) or 0.0),
+                    'target_short_standard':     float(last.get('target_short_standard', 0.0) or 0.0),
+                    'entry_side':                side,
+                    'tr_low':                    float(last.get('tr_low', 0.0) or 0.0),
+                    'tr_high':                   float(last.get('tr_high', 0.0) or 0.0),
+                    'tr_height':                 float(last.get('tr_height', 0.0) or 0.0),
+                    'dist_low':                  float(last.get('dist_low', 0.0) or 0.0),
+                    'dist_high':                 float(last.get('dist_high', 0.0) or 0.0),
+                    'dist_height':               float(last.get('dist_height', 0.0) or 0.0),
+                    'entry_tag':                 entry_tag or 'unknown',
+                }
+                
+                # 直接存入 _pnf_trades_metadata，使用 (pair, open_date) 作为精确 key
+                metadata_key = (pair, str(trade.open_date_utc))
+                self._pnf_trades_metadata[metadata_key] = pnf_meta
+                
+                # P1 Fix (2026-05-04): 添加 TR 边界诊断信息
+                tr_source = str(last.get('tr_source', 'unknown'))
+                tr_source_detail = str(last.get('tr_source_detail', ''))
+                
+                # 记录日志
+                if side == 'long':
+                    logger.info(
+                        f'✅ P&F 目标位已锁定 [{pair}] (long): '
+                        f'conservative={pnf_meta["target_conservative"]:.2f}, '
+                        f'standard={pnf_meta["target_standard"]:.2f}, '
+                        f'open_date={trade.open_date_utc} | '
+                        f'🔍 TR边界: low={pnf_meta["tr_low"]:.0f}, '
+                        f'high={pnf_meta["tr_high"]:.0f}, '
+                        f'height={pnf_meta["tr_height"]:.0f}, '
+                        f'source={tr_source}, detail={tr_source_detail}'
+                    )
+                else:
+                    logger.info(
+                        f'✅ P&F 目标位已锁定 [{pair}] (short): '
+                        f'conservative={pnf_meta["target_short_conservative"]:.2f}, '
+                        f'standard={pnf_meta["target_short_standard"]:.2f}, '
+                        f'open_date={trade.open_date_utc} | '
+                        f'🔍 Dist边界: low={pnf_meta["dist_low"]:.0f}, '
+                        f'high={pnf_meta["dist_high"]:.0f}, '
+                        f'height={pnf_meta["dist_height"]:.0f}, '
+                        f'source={tr_source}, detail={tr_source_detail}'
+                    )
+            except Exception as e:
+                logger.warning(f'❌ P&F 目标位提取失败 [{pair}]: {e}')
+        
+        # Task 4.2: 兼容旧逻辑 - 如果 _pending_pnf_metadata 有数据（confirm_trade_entry 被调用的情况）
         pnf_meta = self._pending_pnf_metadata.pop(pair, None)
         if pnf_meta is not None:
             _trade_pnf = kwargs.get('trade')

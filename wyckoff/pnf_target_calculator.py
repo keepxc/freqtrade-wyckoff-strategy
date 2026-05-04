@@ -30,7 +30,7 @@ class PNFTargetCalculator:
 
     def __init__(self, strategy=None):
         self.strategy = strategy
-        self.lookback_fallback = 120  # P0 Fix: 从60增加到120，提供更大的TR识别窗口
+        self.lookback_fallback = 120  # P2 Fix 已回退 (2026-05-04): 验证发现滚动窗口只影响48.7%的K线，效果有限
         self.utad_pre_high_lookback = 20
 
     def calculate_targets(self, dataframe: DataFrame) -> DataFrame:
@@ -48,6 +48,10 @@ class PNFTargetCalculator:
         dataframe['target_standard'] = 0.0
         dataframe['target_aggressive'] = 0.0
         dataframe['target_vertical'] = 0.0
+        
+        # P1 Fix (2026-05-04): 添加 TR 来源诊断字段
+        dataframe['tr_source'] = 'unknown'
+        dataframe['tr_source_detail'] = ''
 
         dataframe['dist_high'] = 0.0
         dataframe['dist_low'] = 0.0
@@ -67,6 +71,8 @@ class PNFTargetCalculator:
         tr_high = np.zeros(bars, dtype=float)
         tr_height = np.zeros(bars, dtype=float)
         target_vertical = np.zeros(bars, dtype=float)
+        tr_source = np.full(bars, 'unknown', dtype=object)  # P1 Fix: TR 来源标记
+        tr_source_detail = np.full(bars, '', dtype=object)  # P1 Fix: TR 来源详情
 
         sc_mask = dataframe.get('climatic_type', 'none') == 'SC'
         is_sos = dataframe.get('is_SOS_bar', False).astype(bool)
@@ -93,14 +99,20 @@ class PNFTargetCalculator:
                 running_high_from_sc = max(running_high_from_sc, float(dataframe['high'].iloc[i]))
                 tr_low[i] = last_sc_low
                 tr_high[i] = running_high_from_sc
+                tr_source[i] = 'SC_anchor'  # P1 Fix: 标记来源
+                tr_source_detail[i] = f'SC@{last_sc_low:.0f}'
             elif phase_tr_valid_vals[i] and phase_tr_low_vals[i] > 0:
                 # Task 3.3: Phase 精确 TR 边界（替换 fallback，但低于 SC 锚点优先级）
                 tr_low[i] = float(phase_tr_low_vals[i])
                 tr_high[i] = float(phase_tr_high_vals[i])
+                tr_source[i] = 'phase_context'  # P1 Fix: 标记来源
+                tr_source_detail[i] = f'Phase[{phase_tr_low_vals[i]:.0f}-{phase_tr_high_vals[i]:.0f}]'
             else:
                 # Fallback 1: 滚动窗口（120根K线）
                 tr_low[i] = float(fallback_low[i])
                 tr_high[i] = float(fallback_high[i])
+                tr_source[i] = 'rolling_window'  # P1 Fix: 标记来源
+                tr_source_detail[i] = f'Window{self.lookback_fallback}'
                 
                 # P0 Fix: Fallback 2 - 如果滚动窗口 TR height 太小，使用 swing high/low
                 # 判断标准：TR height < ATR × 2.0（说明窗口内价格波动不足）
@@ -116,6 +128,8 @@ class PNFTargetCalculator:
                     if (swing_high - swing_low) > (tr_high[i] - tr_low[i]):
                         tr_low[i] = swing_low
                         tr_high[i] = swing_high
+                        tr_source[i] = 'swing_fallback'  # P1 Fix: 标记来源
+                        tr_source_detail[i] = f'Swing{swing_window}[{swing_low:.0f}-{swing_high:.0f}]'
 
             tr_height[i] = max(0.0, tr_high[i] - tr_low[i])
 
@@ -131,6 +145,8 @@ class PNFTargetCalculator:
         dataframe['tr_low'] = tr_low
         dataframe['tr_high'] = tr_high
         dataframe['tr_height'] = tr_height
+        dataframe['tr_source'] = tr_source  # P1 Fix: 存储来源标记
+        dataframe['tr_source_detail'] = tr_source_detail  # P1 Fix: 存储来源详情
         dataframe['target_conservative'] = tr_low + tr_height * 1.0
         dataframe['target_standard'] = tr_low + tr_height * 1.5
         dataframe['target_aggressive'] = tr_low + tr_height * 2.0
