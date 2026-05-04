@@ -179,11 +179,33 @@ class PNFTargetCalculator:
 
         # P0 Fix (2026-05-04): 添加 TR 位置字段用于混合策略验证
         tr_position = np.zeros(bars, dtype=float)
+        target_conservative = np.zeros(bars, dtype=float)
+        target_standard = np.zeros(bars, dtype=float)
+        target_aggressive = np.zeros(bars, dtype=float)
+        
         for i in range(bars):
+            current_close = float(dataframe['close'].iloc[i])
+            
+            # 计算 TR position
             if tr_height[i] > 0:
-                tr_position[i] = (dataframe['close'].iloc[i] - tr_low[i]) / tr_height[i]
+                tr_position[i] = (current_close - tr_low[i]) / tr_height[i]
             else:
                 tr_position[i] = 0.5  # 默认中位
+            
+            # P0 Fix (2026-05-04): TR 0.7+ 目标位修正
+            # 问题：TR >= 0.7 时，标准目标位（tr_low + height * 1.0）可能低于当前价格
+            # 解决：确保目标位至少高于当前价格 2%（即使这些信号会在策略层被过滤）
+            if tr_position[i] >= 0.7:
+                # TR 顶部区域：目标位 = 当前价格 + 2%（保底值，避免 P&F 验证失败）
+                min_target = current_close * 1.02
+                target_conservative[i] = max(tr_low[i] + tr_height[i] * 1.0, min_target)
+                target_standard[i] = max(tr_low[i] + tr_height[i] * 1.5, min_target)
+                target_aggressive[i] = max(tr_low[i] + tr_height[i] * 2.0, min_target)
+            else:
+                # TR < 0.7：正常计算
+                target_conservative[i] = tr_low[i] + tr_height[i] * 1.0
+                target_standard[i] = tr_low[i] + tr_height[i] * 1.5
+                target_aggressive[i] = tr_low[i] + tr_height[i] * 2.0
         
         dataframe['tr_low'] = tr_low
         dataframe['tr_high'] = tr_high
@@ -191,9 +213,9 @@ class PNFTargetCalculator:
         dataframe['tr_source'] = tr_source  # P1 Fix: 存储来源标记
         dataframe['tr_source_detail'] = tr_source_detail  # P1 Fix: 存储来源详情
         dataframe['tr_position'] = tr_position  # P0 Fix: 存储TR位置（0.0-1.0）
-        dataframe['target_conservative'] = tr_low + tr_height * 1.0
-        dataframe['target_standard'] = tr_low + tr_height * 1.5
-        dataframe['target_aggressive'] = tr_low + tr_height * 2.0
+        dataframe['target_conservative'] = target_conservative
+        dataframe['target_standard'] = target_standard
+        dataframe['target_aggressive'] = target_aggressive
         dataframe['target_vertical'] = target_vertical
 
     def _calculate_short_side(self, dataframe: DataFrame) -> None:

@@ -2699,7 +2699,21 @@ class WyckoffV7_TrueMethod(IStrategy):
         )
 
         # 合并三级轴线信号
-        axis_support_entry = axis_strong_entry | axis_medium_entry | axis_weak_entry
+        axis_support_entry_before_tr_filter = axis_strong_entry | axis_medium_entry | axis_weak_entry
+        
+        # P0 Fix (2026-05-04): 过滤 TR 0.7-1.0 区间（负期望区域）
+        # 基于 P0-Task-1 分析：TR 0.7-1.0 区间胜率 38.5%，平均利润 -0.31%
+        # 只过滤 axis_support，不影响 sos/spring/wave_start
+        # 三层保障：
+        #   1. tr_position 默认 0.5 → 不会被误杀
+        #   2. NaN < 0.7 → False → 保守不入场
+        #   3. 其他信号类型完全不受影响
+        tr_position_ok = dataframe['tr_position'] < 0.7
+        axis_support_entry = axis_support_entry_before_tr_filter & tr_position_ok
+        
+        # 记录 TR 0.7+ 过滤统计（延迟到后面输出，避免过早计算）
+        _axis_tr_filtered_count = int((axis_support_entry_before_tr_filter & ~tr_position_ok).sum())
+        
         # 检测轴线支撑与SOS的共振（高胜算进场点）
         axis_sos_confluence = axis_support_entry & sos_entry
         # 5. Spring恢复入场（威科夫理论优化版 - Phase 2 优化：移除牛市限制）
@@ -3239,6 +3253,14 @@ class WyckoffV7_TrueMethod(IStrategy):
             phase_d_hq_count = phase_d_high_quality.sum()
             phase_d_final_count = (phase_d_entry & final_entry).sum()
             logger.info(f'Phase 2 入场信号: 轴线支撑={axis_support_count}, Spring恢复={spring_recovery_count}, Spring #3={spring_3_count}, Spring #2={spring_2_count}, Spring #1={spring_1_count}, 共振信号(Axis+SOS)={confluence_count}')
+            
+            # P0 Fix: TR 0.7+ 过滤统计
+            if _axis_tr_filtered_count > 0:
+                logger.info(
+                    f'🔴 TR 0.7+ 过滤: {_axis_tr_filtered_count} 个 axis_support 信号被过滤 '
+                    f'(TR position >= 0.7，负期望区域)'
+                )
+            
             logger.info(f'Phase 2.4 Phase D 信号: 全部={phase_d_count}, 高质量={phase_d_hq_count}, 最终入场={phase_d_final_count}')
 
             # 详细调试：检查这些信号是否满足 final_entry
