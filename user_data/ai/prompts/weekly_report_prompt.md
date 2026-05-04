@@ -69,10 +69,10 @@
 - 若缺少 regime 分布数据，必须明确写"周报未提供足够 regime 数据，无法判断结构是否异常"
 
 【PNF 元数据链验证规则】（🆕 2026-05-04）
-- 数据来源：grep dryrun.log 提取本周所有 `✅ P&F 目标位已锁定` 日志
-- 统计 tr_source 分布：SC_anchor / phase_context / rolling_window / swing_fallback 各占多少
-- 统计 TR height 分布：中位数、最小/最大值
-- 若日志中无任何 `✅ P&F 目标位已锁定` 记录，必须在验证中写"本周无 PNF 锁定记录，元数据链未激活，目标位可能仍通过 DataFrame 回退"
+- 数据来源：周报中的 `## PNF 元数据链` 段（由 build_weekly_report.py 自动从 dryrun.log 提取生成）
+- tr_source 分布：已在周报 PNF 段中列出（daily_swing / rolling_window / swing_fallback），直接引用
+- TR height 统计：中位数和范围已在周报 PNF 段中列出，直接引用
+- 若周报显示"本周无 PNF 锁定记录"，必须在验证中写"本周无 PNF 锁定记录，元数据链未激活，目标位可能仍通过 DataFrame 回退"
 - 若 tr_source 中 rolling_window + swing_fallback 占比 > 70%，提示"TR 检测依赖回退机制，SC 锚点覆盖率不足"
 - 此项仅用于观察元数据链是否正常工作，不得直接建议调参
 
@@ -108,7 +108,7 @@
 
 ## PNF 元数据链验证（🆕 2026-05-04）
 - 本周锁定记录：[N 条|无记录]
-- TR 来源分布：[SC_anchor N / phase_context N / rolling_window N / swing_fallback N]
+- TR 来源分布：[daily_swing N / rolling_window N / swing_fallback N]
 - TR Height 中位数：[值] | 范围：[min - max]
 - 判断：[正常|需关注|元数据链未激活]
 - 解释：[1-2 句，禁止脑补]
