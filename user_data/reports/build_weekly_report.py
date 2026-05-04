@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 from typing import List, Tuple
 
 
@@ -40,8 +42,81 @@ def fetch_all(conn: sqlite3.Connection, sql: str, params=()):
     return conn.execute(sql, params).fetchall()
 
 
+def get_pnf_metadata_lines(start: datetime, end: datetime) -> List[str]:
+    """从 dryrun.log 提取本周 PNF 元数据链统计。
+
+    解析日志中 `✅ P&F 目标位已锁定` 行，统计：
+    - 锁定记录数
+    - TR source 分布（daily_swing / rolling_window / swing_fallback）
+    - TR height 中位数和范围
+    """
+    log_path = Path("/home/gyan/freqtrade/logs/dryrun.log")
+    if not log_path.exists():
+        return []
+
+    # 正则：提取 source=xxx, height=xxxxx, open_date=YYYY-MM-DD HH:MM:SS
+    pnf_re = re.compile(
+        r'✅ P&F 目标位已锁定.*?open_date=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?'
+        r'height=([\d.]+).*?'
+        r'source=([a-z_]+)'
+    )
+
+    records = []
+    try:
+        with log_path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "✅ P&F 目标位已锁定" not in line:
+                    continue
+                m = pnf_re.search(line)
+                if not m:
+                    continue
+                open_date_str = m.group(1)
+                height = float(m.group(2))
+                source = m.group(3)
+                try:
+                    open_dt = datetime.strptime(open_date_str, "%Y-%m-%d %H:%M:%S")
+                    open_dt = open_dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+                if start <= open_dt < end:
+                    records.append({"source": source, "height": height})
+    except Exception:
+        return []
+
+    if not records:
+        return [
+            "## PNF 元数据链",
+            "- ⚠️ 本周无 PNF 锁定记录，元数据链未激活",
+            "",
+        ]
+
+    n = len(records)
+    heights = [r["height"] for r in records]
+    source_counts: dict = {}
+    for r in records:
+        source_counts[r["source"]] = source_counts.get(r["source"], 0) + 1
+
+    lines = ["## PNF 元数据链"]
+    lines.append(f"- 本周锁定记录：{n} 条")
+    lines.append(f"- TR 来源分布：{' | '.join(f'{k} {v}' for k, v in sorted(source_counts.items()))}")
+    lines.append(f"- TR Height 中位数：{median(heights):.0f} | 范围：{min(heights):.0f} – {max(heights):.0f}")
+
+    # 判定
+    rolling_pct = (source_counts.get("rolling_window", 0) + source_counts.get("swing_fallback", 0)) / n
+    if rolling_pct > 0.7:
+        lines.append("- ⚠️ TR 检测依赖回退机制（rolling_window + swing_fallback > 70%），SC 锚点覆盖率不足")
+    else:
+        lines.append("- ✅ TR source 分布正常（daily_swing 为主）")
+
+    lines.append("")
+    return lines
+
+
 def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tuple[str, List[str], float]:
     start_s, end_s = start.isoformat(), end.isoformat()
+
+    # 🆕 PNF 元数据链：从 dryrun.log 提取
+    pnf_lines = get_pnf_metadata_lines(start, end)
 
     trades = fetch_one(
         conn,
@@ -259,6 +334,10 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
     else:
         lines.append("- 本周 priority enter_tag 无已平仓交易")
     lines.append("")
+
+    # 🆕 PNF 元数据链
+    if pnf_lines:
+        lines.extend(pnf_lines)
 
     # V1B-7: 预警 & 样本不足提醒
     lines.append("## 预警")

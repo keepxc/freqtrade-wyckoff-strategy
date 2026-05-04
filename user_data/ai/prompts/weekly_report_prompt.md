@@ -64,9 +64,17 @@
 
 【Regime 解读规则】
 - 只根据周报中的 regime 分布、bear_market_mode、macro_phase、market_env 等字段进行判断
-- 若 bear_market_mode 占比高，优先提示“当前更偏风险防守环境”
+- 若 bear_market_mode 占比高，优先提示"当前更偏风险防守环境"
 - 若 regime 分布正常，不要强行制造风险结论
-- 若缺少 regime 分布数据，必须明确写“周报未提供足够 regime 数据，无法判断结构是否异常”
+- 若缺少 regime 分布数据，必须明确写"周报未提供足够 regime 数据，无法判断结构是否异常"
+
+【PNF 元数据链验证规则】（🆕 2026-05-04）
+- 数据来源：grep dryrun.log 提取本周所有 `✅ P&F 目标位已锁定` 日志
+- 统计 tr_source 分布：SC_anchor / phase_context / rolling_window / swing_fallback 各占多少
+- 统计 TR height 分布：中位数、最小/最大值
+- 若日志中无任何 `✅ P&F 目标位已锁定` 记录，必须在验证中写"本周无 PNF 锁定记录，元数据链未激活，目标位可能仍通过 DataFrame 回退"
+- 若 tr_source 中 rolling_window + swing_fallback 占比 > 70%，提示"TR 检测依赖回退机制，SC 锚点覆盖率不足"
+- 此项仅用于观察元数据链是否正常工作，不得直接建议调参
 
 【行动建议边界】
 你只能给出以下 3 类建议，不得超出范围：
@@ -97,6 +105,13 @@
 ## Regime 分布判断
 - 当前 regime 结构：[正常|偏风险|无法判断]
 - 解释：[1-3 句]
+
+## PNF 元数据链验证（🆕 2026-05-04）
+- 本周锁定记录：[N 条|无记录]
+- TR 来源分布：[SC_anchor N / phase_context N / rolling_window N / swing_fallback N]
+- TR Height 中位数：[值] | 范围：[min - max]
+- 判断：[正常|需关注|元数据链未激活]
+- 解释：[1-2 句，禁止脑补]
 
 ## 风险提示与行动建议
 - [风险1]：[建议行动]
@@ -130,6 +145,7 @@
 | 信号表现解读 | 结合交易数、胜率、avg_pnl |
 | Detector 激活摘要 | 哪些探测器最活跃，是否存在冲突 |
 | Regime 分布判断 | bear/trend/range 分布是否正常 |
+| PNF 元数据链验证 | TR 来源分布 + TR Height 统计，验证锁定机制是否正常 |
 | 风险提示与行动建议 | 最多 2 项，有依据的行动建议 |
 | 样本充分性声明 | 明确当前样本能否支持决策 |
 

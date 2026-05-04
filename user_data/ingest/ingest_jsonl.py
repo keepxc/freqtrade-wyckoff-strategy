@@ -134,6 +134,10 @@ TRADE_CLOSE_MAP = {
 }
 
 
+# Module-level cache for trade_close matching across calls
+_close_match_cache: Dict[str, str] = {}  # pair → matched trade_id
+
+
 def upsert_trade(conn: sqlite3.Connection, record: Dict[str, Any]) -> None:
     subtype = record.get("event_subtype")
     if subtype == "trade_open":
@@ -147,23 +151,67 @@ def upsert_trade(conn: sqlite3.Connection, record: Dict[str, Any]) -> None:
             payload,
         )
     elif subtype == "trade_close":
-        trade_id = record["trade_id"]
-        # 如果 trade_open 未入库（历史数据只有 close），先创建占位行
-        existing = conn.execute("SELECT 1 FROM trades WHERE trade_id=?", (trade_id,)).fetchone()
-        if not existing:
-            placeholder = {
-                "trade_id": trade_id,
-                "run_id": record.get("run_id", ""),
-                "pair": record.get("pair"),
-                "side": record.get("side"),
-                "enter_time": None,
-            }
-            cols = ", ".join(placeholder.keys())
-            ph = ", ".join([":" + k for k in placeholder.keys()])
-            conn.execute(f"INSERT INTO trades ({cols}) VALUES ({ph})", placeholder)
+        internal_trade_id = record["trade_id"]
+        pair = record.get("pair", "")
+        close_ts = record.get("ts", "")
         sets = ", ".join([f"{dst}=?" for dst in TRADE_CLOSE_MAP.values()])
         values = [normalize_bool(record.get(src)) for src in TRADE_CLOSE_MAP.keys()]
-        conn.execute(f"UPDATE trades SET {sets} WHERE trade_id=?", values + [trade_id])
+
+        # Layer 1: exact trade_id match
+        matched = conn.execute(
+            "SELECT trade_id, exit_time FROM trades WHERE trade_id=?",
+            (internal_trade_id,)).fetchone()
+
+        # Layer 2: same pair, OPEN (exit_time IS NULL), non-backtest, enter_time <= close_ts
+        if not matched:
+            matched = conn.execute(
+                "SELECT trade_id, exit_time FROM trades "
+                "WHERE pair=? AND exit_time IS NULL "
+                "AND run_id NOT LIKE '%backtest%' AND run_id NOT LIKE '%demo%' "
+                "AND run_id NOT LIKE '%test%' "
+                "AND enter_time IS NOT NULL AND enter_time <= ? "
+                "ORDER BY enter_time DESC LIMIT 1",
+                (pair, close_ts)).fetchone()
+            if matched:
+                _close_match_cache[pair] = matched["trade_id"]
+
+        # Layer 3: only accept if Layer 2 already matched this pair in this run
+        if not matched:
+            recent_tid = _close_match_cache.get(pair)
+            if recent_tid:
+                matched = conn.execute(
+                    "SELECT trade_id, exit_time FROM trades WHERE trade_id=?",
+                    (recent_tid,)).fetchone()
+                # Don't overwrite newer close data
+                if matched and matched["exit_time"] and close_ts <= matched["exit_time"]:
+                    matched = None
+
+        if matched:
+            actual_trade_id = matched["trade_id"]
+            existing_exit = matched["exit_time"]
+            if existing_exit and close_ts <= existing_exit:
+                return  # Already have newer close data
+            conn.execute(
+                f"UPDATE trades SET {sets} WHERE trade_id=?",
+                values + [actual_trade_id])
+        else:
+            # Fallback: create placeholder (historical data with no matching open)
+            existing = conn.execute(
+                "SELECT 1 FROM trades WHERE trade_id=?",
+                (internal_trade_id,)).fetchone()
+            if not existing:
+                placeholder = {
+                    "trade_id": internal_trade_id,
+                    "run_id": record.get("run_id", ""),
+                    "pair": pair,
+                    "side": record.get("side"),
+                    "enter_time": None,
+                }
+                cols = ", ".join(placeholder.keys())
+                ph = ", ".join([":" + k for k in placeholder.keys()])
+                conn.execute(f"INSERT INTO trades ({cols}) VALUES ({ph})", placeholder)
+            conn.execute(f"UPDATE trades SET {sets} WHERE trade_id=?",
+                         values + [internal_trade_id])
     else:
         raise ValueError(f"Unsupported trade_event subtype: {subtype}")
 

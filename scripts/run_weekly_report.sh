@@ -13,4 +13,5 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting weekly report generation..."
     --output "$OUTPUT" \
     --store
 
+ln -sf "$OUTPUT" "$FREQTRADE_DIR/weekly_report_latest.md"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Done: $OUTPUT"
