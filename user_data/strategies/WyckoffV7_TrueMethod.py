@@ -3012,7 +3012,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             if 'axis_metadata' not in dataframe.columns:
                 dataframe['axis_metadata'] = None
             for idx in dataframe[axis_mask].index:
-                axis_meta = {  # 🔧 Fix: 重命名为 axis_meta 避免遮蔽函数参数 metadata
+                axis_meta = {
                     'tr_source': str(dataframe.loc[idx, 'tr_source']),
                     'tr_position': float(dataframe.loc[idx, 'tr_position']),
                     'tr_low': float(dataframe.loc[idx, 'tr_low']),
@@ -3022,11 +3022,12 @@ class WyckoffV7_TrueMethod(IStrategy):
                 }
                 dataframe.at[idx, 'axis_metadata'] = axis_meta
                 # 存储到pending metadata用于后续leverage方法使用
-                if pair not in self._pending_axis_metadata:
-                    self._pending_axis_metadata[pair] = {}
+                _pair = metadata.get('pair', 'unknown')
+                if _pair not in self._pending_axis_metadata:
+                    self._pending_axis_metadata[_pair] = {}
                 # 使用时间戳作为key
                 timestamp = dataframe.loc[idx, 'date']
-                self._pending_axis_metadata[pair][timestamp] = axis_meta
+                self._pending_axis_metadata[_pair][timestamp] = axis_meta
         
         dataframe.loc[spring_recovery_entry & final_entry, 'enter_tag'] = 'wyckoff_spring'  # Phase 2
         # Phase 2.2a: Spring 质量分级信号（优先级：#3 > #2 > #1）
@@ -6209,9 +6210,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         Returns:
             float: 杠杆倍数（总是 1.0）
         """
+        # 🔧 P0 Fix (2026-05-04): 提前提取 trade 和 dataframe，避免 UnboundLocalError
+        trade = kwargs.get('trade')
+        dataframe = kwargs.get('dataframe')
+        
         # 如果是 SOS 交易，存储元数据到实例变量以供 custom_exit() 使用
         if entry_tag == 'wyckoff_sos':
-            trade = kwargs.get('trade')
             # 从临时存储读取元数据（confirm_trade_entry 中保存的）
             sos_metadata = self._pending_sos_metadata.get(pair)
             if trade is not None and sos_metadata is not None:
@@ -6248,14 +6252,11 @@ class WyckoffV7_TrueMethod(IStrategy):
             except Exception as e:
                 logger.warning(f'Failed to store Axis Support metadata: {e}')
         
-        # 🔧 P0 Fix (2026-05-04): 直接从 dataframe 提取 P&F 目标位
-        # 根因：confirm_trade_entry 在 dry-run 模式下不被调用，导致 _pending_pnf_metadata 永远为空
-        # 修复：在 leverage() 中直接读取 dataframe（dry-run/live 模式下有效）
-        # leverage() 每次开仓必调，且能拿到 **kwargs 里的 dataframe 和 trade
-        trade = kwargs.get('trade')
-        dataframe = kwargs.get('dataframe')
-        
-        if trade is not None and dataframe is not None and len(dataframe) > 0:
+        # P0 Fix (2026-05-04): 直接从 dataframe 提取 P&F 目标位
+        # leverage() 每次开仓必调，且能拿到 **kwargs 里的 dataframe
+        # dry_run 下 trade 可能为 None（leverage() 在 trade 创建前调用），
+        # 此时仍从 dataframe 提取数据并输出日志，但不存入 _pnf_trades_metadata
+        if dataframe is not None and len(dataframe) > 0:
             try:
                 last = dataframe.iloc[-1]
                 
@@ -6276,13 +6277,15 @@ class WyckoffV7_TrueMethod(IStrategy):
                     'entry_tag':                 entry_tag or 'unknown',
                 }
                 
-                # 直接存入 _pnf_trades_metadata，使用 (pair, open_date) 作为精确 key
-                metadata_key = (pair, str(trade.open_date_utc))
-                self._pnf_trades_metadata[metadata_key] = pnf_meta
-                
-                # P1 Fix (2026-05-04): 添加 TR 边界诊断信息
+                # TR 边界诊断信息
                 tr_source = str(last.get('tr_source', 'unknown'))
                 tr_source_detail = str(last.get('tr_source_detail', ''))
+                open_date_str = str(trade.open_date_utc) if trade else current_time.isoformat()
+                
+                # 存入 _pnf_trades_metadata（仅当 trade 可用时）
+                if trade is not None:
+                    metadata_key = (pair, str(trade.open_date_utc))
+                    self._pnf_trades_metadata[metadata_key] = pnf_meta
                 
                 # 记录日志
                 if side == 'long':
@@ -6290,7 +6293,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                         f'✅ P&F 目标位已锁定 [{pair}] (long): '
                         f'conservative={pnf_meta["target_conservative"]:.2f}, '
                         f'standard={pnf_meta["target_standard"]:.2f}, '
-                        f'open_date={trade.open_date_utc} | '
+                        f'open_date={open_date_str} | '
                         f'🔍 TR边界: low={pnf_meta["tr_low"]:.0f}, '
                         f'high={pnf_meta["tr_high"]:.0f}, '
                         f'height={pnf_meta["tr_height"]:.0f}, '
@@ -6301,7 +6304,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                         f'✅ P&F 目标位已锁定 [{pair}] (short): '
                         f'conservative={pnf_meta["target_short_conservative"]:.2f}, '
                         f'standard={pnf_meta["target_short_standard"]:.2f}, '
-                        f'open_date={trade.open_date_utc} | '
+                        f'open_date={open_date_str} | '
                         f'🔍 Dist边界: low={pnf_meta["dist_low"]:.0f}, '
                         f'high={pnf_meta["dist_high"]:.0f}, '
                         f'height={pnf_meta["dist_height"]:.0f}, '
