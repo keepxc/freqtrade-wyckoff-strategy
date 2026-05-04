@@ -2582,6 +2582,9 @@ class WyckoffV7_TrueMethod(IStrategy):
         
         目标：在保持77%+收益的基础上，增加10-20%的有效信号
         """
+        # 🔧 Fix: 从metadata中提取pair，避免后续使用时未定义
+        pair = metadata.get('pair', '')
+        
         dataframe['enter_long'] = 0
         # === 基础环境过滤 ===
         # 牛市背景确认
