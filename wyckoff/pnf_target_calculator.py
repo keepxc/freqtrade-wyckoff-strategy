@@ -196,6 +196,16 @@ class PNFTargetCalculator:
         dataframe['target_aggressive'] = tr_low + tr_height * 2.0
         dataframe['target_vertical'] = target_vertical
 
+        # TR 0.7+ 目标位修正：价格在TR上段时目标位不应低于当前价的2%涨幅
+        high_tr_mask = tr_position >= 0.7
+        if high_tr_mask.any():
+            prices = dataframe['close'].values
+            floor = prices * 1.02
+            for col in ['target_conservative', 'target_standard', 'target_aggressive']:
+                current = dataframe[col].values
+                current[high_tr_mask] = np.maximum(current[high_tr_mask], floor[high_tr_mask])
+                dataframe[col] = current
+
     def _calculate_short_side(self, dataframe: DataFrame) -> None:
         bars = len(dataframe)
         dist_high = np.zeros(bars, dtype=float)
