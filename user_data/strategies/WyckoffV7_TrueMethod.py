@@ -2700,12 +2700,6 @@ class WyckoffV7_TrueMethod(IStrategy):
 
         # 合并三级轴线信号
         axis_support_entry = axis_strong_entry | axis_medium_entry | axis_weak_entry
-        # TR 0.7+ 过滤：axis_support 信号在TR上段不入场（目标位空间不足）
-        axis_support_tr_filtered = axis_support_entry & (dataframe['tr_position'] >= 0.7)
-        axis_support_entry = axis_support_entry & (dataframe['tr_position'] < 0.7)
-        n_filtered = int(axis_support_tr_filtered.sum())
-        if n_filtered > 0:
-            logger.info(f"TR≥0.7 过滤了 {n_filtered} 个缺少入场空间的 axis_support 信号")
         # 检测轴线支撑与SOS的共振（高胜算进场点）
         axis_sos_confluence = axis_support_entry & sos_entry
         # 5. Spring恢复入场（威科夫理论优化版 - Phase 2 优化：移除牛市限制）
