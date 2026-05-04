@@ -686,7 +686,8 @@ if self.event_bridge is not None:
 3.2  sot_exit
 3.5  sow_fast_exit
 3.6  profit_protect_exit (WY_PROFIT_PROTECT=1)
-3.7  axis_support_failed_exit (WY_AXIS_FAILED_EXIT=1)
+3.7  ~~axis_support_failed_exit (WY_AXIS_FAILED_EXIT=1)~~ [已归档 2026-05-03]
+     理由: 3.25年仅4笔触发，样本不足，已有 timeout_loss_exit 兜底
 3.75 timeout_loss_exit
 3.8  pnf_target_1 / pnf_target_2 (HARD EXIT)
 4.0  wyckoff_down_wave
@@ -703,7 +704,8 @@ if self.event_bridge is not None:
 3.2  sot_exit
 3.5  sow_fast_exit
 3.6  profit_protect_exit (WY_PROFIT_PROTECT=1)
-3.7  axis_support_failed_exit (WY_AXIS_FAILED_EXIT=1)
+3.7  ~~axis_support_failed_exit (WY_AXIS_FAILED_EXIT=1)~~ [已归档 2026-05-03]
+     理由: 3.25年仅4笔触发，样本不足，已有 timeout_loss_exit 兜底
 3.75 timeout_loss_exit
 3.8  pnf_warning_zone_activation (CONTINUE, not exit)
 3.85 pnf_timeout_exit (NEW - 48h timeout)
