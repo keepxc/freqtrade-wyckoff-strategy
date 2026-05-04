@@ -697,6 +697,8 @@ class WyckoffV7_TrueMethod(IStrategy):
         self.multi_tf_context: Dict[str, Dict] = {}
         # SOS 元数据临时存储（用于在回调之间传递元数据）
         self._pending_sos_metadata: Dict[str, Dict] = {}
+        # P0 Fix (2026-05-04): Axis Support 元数据临时存储
+        self._pending_axis_metadata: Dict[str, Dict] = {}
         # SOS 交易元数据存储（key: (pair, open_date_str), value: metadata）
         self._sos_trades_metadata: Dict[tuple, Dict] = {}
         # Task 4.2: P&F 目标位元数据临时存储（confirm_trade_entry → leverage）
@@ -1177,6 +1179,12 @@ class WyckoffV7_TrueMethod(IStrategy):
                     df_1d['daily_ema200']    = ta.EMA(df_1d['close'], timeperiod=200)
                     df_1d['daily_atr20']     = ta.ATR(df_1d, timeperiod=20)
                     df_1d['daily_vol_sma20'] = df_1d['volume'].rolling(20).mean()
+                    
+                    # P0-Task-2: 计算日线 swing 点（20 根日线 = 约 20 天）
+                    df_1d['daily_swing_high'] = df_1d['high'].rolling(20).max()
+                    df_1d['daily_swing_low'] = df_1d['low'].rolling(20).min()
+                    df_1d['daily_swing_height'] = df_1d['daily_swing_high'] - df_1d['daily_swing_low']
+                    
                     # 路径B — Daily SOW Bar（宽区间+极量+低收盘+已破EMA200，物理强信号）
                     df_1d['_bar_range']   = df_1d['high'] - df_1d['low']
                     df_1d['_close_pos']   = (
@@ -1270,6 +1278,8 @@ class WyckoffV7_TrueMethod(IStrategy):
                     _daily_cols = [
                         'date', 'daily_ema200', 'daily_atr20',
                         'macro_phase', 'daily_choch_confirmed', 'daily_sow_bar',
+                        # P0-Task-2: Daily swing 点
+                        'daily_swing_high', 'daily_swing_low', 'daily_swing_height',
                         # Task 4.1b-final 新字段
                         'daily_bc_detected', 'daily_bc_path',
                         'daily_ar_high', 'daily_ar_low',
@@ -2991,6 +3001,30 @@ class WyckoffV7_TrueMethod(IStrategy):
         dataframe.loc[lps_pullback_entry & final_entry, 'enter_tag'] = 'wyckoff_lps'  # Priority 2
         # Phase 2信号（优先级更高）
         dataframe.loc[axis_support_entry & final_entry, 'enter_tag'] = 'wyckoff_axis_support'  # Phase 2
+        
+        # P0 Fix (2026-05-04): 为 axis_support 交易添加 TR metadata
+        # 用于验证混合策略实施效果（tr_source分布和TR位置分段）
+        axis_mask = axis_support_entry & final_entry
+        if axis_mask.any():
+            if 'axis_metadata' not in dataframe.columns:
+                dataframe['axis_metadata'] = None
+            for idx in dataframe[axis_mask].index:
+                metadata = {
+                    'tr_source': str(dataframe.loc[idx, 'tr_source']),
+                    'tr_position': float(dataframe.loc[idx, 'tr_position']),
+                    'tr_low': float(dataframe.loc[idx, 'tr_low']),
+                    'tr_high': float(dataframe.loc[idx, 'tr_high']),
+                    'tr_height': float(dataframe.loc[idx, 'tr_height']),
+                    'tr_source_detail': str(dataframe.loc[idx, 'tr_source_detail']),
+                }
+                dataframe.at[idx, 'axis_metadata'] = metadata
+                # 存储到pending metadata用于后续leverage方法使用
+                if pair not in self._pending_axis_metadata:
+                    self._pending_axis_metadata[pair] = {}
+                # 使用时间戳作为key
+                timestamp = dataframe.loc[idx, 'date']
+                self._pending_axis_metadata[pair][timestamp] = metadata
+        
         dataframe.loc[spring_recovery_entry & final_entry, 'enter_tag'] = 'wyckoff_spring'  # Phase 2
         # Phase 2.2a: Spring 质量分级信号（优先级：#3 > #2 > #1）
         # 注意：由于Spring质量等级是互斥的，顺序不影响结果，但按优先级排列更清晰
@@ -5826,6 +5860,30 @@ class WyckoffV7_TrueMethod(IStrategy):
                     self._pending_sos_metadata[pair] = sos_metadata
                 else:
                     logger.warning(f'SOS 交易入场: {pair}, 但 sos_metadata 不可用，将使用默认值（质量评分=0）')
+        
+        # P0 Fix (2026-05-04): 为 axis_support 交易存储 TR metadata
+        # 用于验证混合策略实施效果
+        if entry_tag == 'wyckoff_axis_support':
+            dataframe = kwargs.get('dataframe')
+            if dataframe is not None and len(dataframe) > 0:
+                last_candle = dataframe.iloc[-1]
+                axis_metadata = last_candle.get('axis_metadata')
+                if axis_metadata is not None and isinstance(axis_metadata, dict):
+                    tr_source = axis_metadata.get('tr_source', 'unknown')
+                    tr_position = axis_metadata.get('tr_position', 0.5)
+                    tr_height = axis_metadata.get('tr_height', 0.0)
+                    tr_source_detail = axis_metadata.get('tr_source_detail', '')
+                    
+                    logger.info(
+                        f'Axis Support 交易入场确认: {pair}, '
+                        f'TR来源={tr_source}, TR位置={tr_position:.2f}, '
+                        f'TR高度={tr_height:.0f}, 详情={tr_source_detail}'
+                    )
+                    # 保存元数据到实例变量，稍后在 leverage() 中使用
+                    self._pending_axis_metadata[pair] = axis_metadata
+                else:
+                    logger.warning(f'Axis Support 交易入场: {pair}, 但 axis_metadata 不可用')
+        
         # Task 4.2: 所有交易均提取 P&F 目标位，存入 _pending_pnf_metadata
         # P0 Fix (2026-05-02): 添加目标位验证，阻止无效目标位的入场
         dataframe_pnf = kwargs.get('dataframe')
@@ -6168,6 +6226,24 @@ class WyckoffV7_TrueMethod(IStrategy):
                     del self._pending_sos_metadata[pair]
                 except Exception as e:
                     logger.warning(f'Failed to store SOS metadata: {e}')
+        
+        # P0 Fix (2026-05-04): 存储 Axis Support 元数据到 trade.custom_info
+        if pair in self._pending_axis_metadata:
+            try:
+                axis_metadata = self._pending_axis_metadata[pair]
+                if trade is not None:
+                    if not hasattr(trade, 'custom_info') or trade.custom_info is None:
+                        trade.custom_info = {}
+                    trade.custom_info.update(axis_metadata)
+                    logger.info(
+                        f"Axis Support 元数据已存储: {pair}, open_date={trade.open_date_utc}, "
+                        f"TR来源={axis_metadata.get('tr_source', 'unknown')}, "
+                        f"TR位置={axis_metadata.get('tr_position', 0.5):.2f}"
+                    )
+                    # 清理临时存储
+                    del self._pending_axis_metadata[pair]
+            except Exception as e:
+                logger.warning(f'Failed to store Axis Support metadata: {e}')
         
         # 🔧 P0 Fix (2026-05-04): 直接从 dataframe 提取 P&F 目标位
         # 根因：confirm_trade_entry 在 dry-run 模式下不被调用，导致 _pending_pnf_metadata 永远为空

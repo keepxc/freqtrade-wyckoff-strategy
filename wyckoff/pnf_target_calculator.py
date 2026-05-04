@@ -108,28 +108,63 @@ class PNFTargetCalculator:
                 tr_source[i] = 'phase_context'  # P1 Fix: 标记来源
                 tr_source_detail[i] = f'Phase[{phase_tr_low_vals[i]:.0f}-{phase_tr_high_vals[i]:.0f}]'
             else:
-                # Fallback 1: 滚动窗口（120根K线）
-                tr_low[i] = float(fallback_low[i])
-                tr_high[i] = float(fallback_high[i])
-                tr_source[i] = 'rolling_window'  # P1 Fix: 标记来源
-                tr_source_detail[i] = f'Window{self.lookback_fallback}'
+                # P0-Task-3: 混合策略 - 根据 TR 位置选择目标位计算方法
+                # 先计算 1H rolling window 的 TR 位置
+                rolling_low_val = float(fallback_low[i])
+                rolling_high_val = float(fallback_high[i])
+                rolling_height_val = rolling_high_val - rolling_low_val
+                
+                current_close = float(dataframe['close'].iloc[i])
+                tr_position_1h = (current_close - rolling_low_val) / (rolling_height_val + 1e-9) if rolling_height_val > 0 else 0.5
+                
+                # 检查是否有日线 swing 数据
+                has_daily_swing = (
+                    'daily_swing_high_1d' in dataframe.columns and
+                    'daily_swing_low_1d' in dataframe.columns
+                )
+                
+                # 混合策略：TR < 0.5 使用日线 swing，TR ≥ 0.5 使用 1H rolling
+                if has_daily_swing and tr_position_1h < 0.5:
+                    # TR 下半段（64.4%的交易）：使用日线 swing
+                    daily_swing_high = dataframe.get('daily_swing_high_1d', pd.Series(0, index=dataframe.index)).iloc[i]
+                    daily_swing_low = dataframe.get('daily_swing_low_1d', pd.Series(0, index=dataframe.index)).iloc[i]
+                    
+                    # 验证日线 swing 数据有效性
+                    if daily_swing_high > 0 and daily_swing_low > 0 and daily_swing_high > daily_swing_low:
+                        tr_low[i] = float(daily_swing_low)
+                        tr_high[i] = float(daily_swing_high)
+                        tr_source[i] = 'daily_swing'
+                        tr_source_detail[i] = f'DailySwing20[{daily_swing_low:.0f}-{daily_swing_high:.0f}]'
+                    else:
+                        # 日线数据无效，fallback 到 1H rolling
+                        tr_low[i] = rolling_low_val
+                        tr_high[i] = rolling_high_val
+                        tr_source[i] = 'rolling_window'
+                        tr_source_detail[i] = f'Window{self.lookback_fallback}'
+                else:
+                    # TR 上半段（35.6%的交易）或无日线数据：使用 1H rolling window
+                    tr_low[i] = rolling_low_val
+                    tr_high[i] = rolling_high_val
+                    tr_source[i] = 'rolling_window'
+                    tr_source_detail[i] = f'Window{self.lookback_fallback}'
                 
                 # P0 Fix: Fallback 2 - 如果滚动窗口 TR height 太小，使用 swing high/low
-                # 判断标准：TR height < ATR × 2.0（说明窗口内价格波动不足）
-                atr_val = dataframe.get('atr_20', dataframe.get('atr', pd.Series(0, index=dataframe.index))).iloc[i]
-                if atr_val > 0 and (tr_high[i] - tr_low[i]) < (atr_val * 2.0):
-                    # 使用最近的 swing high/low（最近20根K线的极值）
-                    swing_window = 20
-                    start_idx = max(0, i - swing_window)
-                    swing_low = float(dataframe['low'].iloc[start_idx:i+1].min())
-                    swing_high = float(dataframe['high'].iloc[start_idx:i+1].max())
-                    
-                    # 只有当swing范围更大时才使用（避免用更小的范围替换）
-                    if (swing_high - swing_low) > (tr_high[i] - tr_low[i]):
-                        tr_low[i] = swing_low
-                        tr_high[i] = swing_high
-                        tr_source[i] = 'swing_fallback'  # P1 Fix: 标记来源
-                        tr_source_detail[i] = f'Swing{swing_window}[{swing_low:.0f}-{swing_high:.0f}]'
+                # 注意：这个逻辑仅在使用 rolling_window 时才触发
+                if tr_source[i] == 'rolling_window':
+                    atr_val = dataframe.get('atr_20', dataframe.get('atr', pd.Series(0, index=dataframe.index))).iloc[i]
+                    if atr_val > 0 and (tr_high[i] - tr_low[i]) < (atr_val * 2.0):
+                        # 使用最近的 swing high/low（最近20根K线的极值）
+                        swing_window = 20
+                        start_idx = max(0, i - swing_window)
+                        swing_low = float(dataframe['low'].iloc[start_idx:i+1].min())
+                        swing_high = float(dataframe['high'].iloc[start_idx:i+1].max())
+                        
+                        # 只有当swing范围更大时才使用（避免用更小的范围替换）
+                        if (swing_high - swing_low) > (tr_high[i] - tr_low[i]):
+                            tr_low[i] = swing_low
+                            tr_high[i] = swing_high
+                            tr_source[i] = 'swing_fallback'
+                            tr_source_detail[i] = f'Swing{swing_window}[{swing_low:.0f}-{swing_high:.0f}]'
 
             tr_height[i] = max(0.0, tr_high[i] - tr_low[i])
 
@@ -142,11 +177,20 @@ class PNFTargetCalculator:
             else:
                 target_vertical[i] = tr_high[i] + tr_height[i]
 
+        # P0 Fix (2026-05-04): 添加 TR 位置字段用于混合策略验证
+        tr_position = np.zeros(bars, dtype=float)
+        for i in range(bars):
+            if tr_height[i] > 0:
+                tr_position[i] = (dataframe['close'].iloc[i] - tr_low[i]) / tr_height[i]
+            else:
+                tr_position[i] = 0.5  # 默认中位
+        
         dataframe['tr_low'] = tr_low
         dataframe['tr_high'] = tr_high
         dataframe['tr_height'] = tr_height
         dataframe['tr_source'] = tr_source  # P1 Fix: 存储来源标记
         dataframe['tr_source_detail'] = tr_source_detail  # P1 Fix: 存储来源详情
+        dataframe['tr_position'] = tr_position  # P0 Fix: 存储TR位置（0.0-1.0）
         dataframe['target_conservative'] = tr_low + tr_height * 1.0
         dataframe['target_standard'] = tr_low + tr_height * 1.5
         dataframe['target_aggressive'] = tr_low + tr_height * 2.0
