@@ -1,0 +1,52 @@
+{
+  "tr_source_analysis": {
+    "total_axis_trades": 425,
+    "tr_source_stats": {
+      "unknown": {
+        "count": 425,
+        "wins": 279,
+        "losses": 146,
+        "total_profit": 178673.0888198501,
+        "total_profit_pct": 504.6204506096776
+      }
+    }
+  },
+  "tr_position_segments": {
+    "0.0-0.3": {
+      "count": 0,
+      "wins": 0,
+      "total_profit_pct": 0.0,
+      "win_rate": 0.0,
+      "avg_profit_pct": 0.0
+    },
+    "0.3-0.5": {
+      "count": 0,
+      "wins": 0,
+      "total_profit_pct": 0.0,
+      "win_rate": 0.0,
+      "avg_profit_pct": 0.0
+    },
+    "0.5-0.7": {
+      "count": 0,
+      "wins": 0,
+      "total_profit_pct": 0.0,
+      "win_rate": 0.0,
+      "avg_profit_pct": 0.0
+    },
+    "0.7-1.0": {
+      "count": 0,
+      "wins": 0,
+      "total_profit_pct": 0.0,
+      "win_rate": 0.0,
+      "avg_profit_pct": 0.0
+    }
+  },
+  "axis_support_details": {
+    "total_trades": 425,
+    "wins": 279,
+    "losses": 146,
+    "win_rate": 65.64705882352942,
+    "avg_profit_pct": 1.1873422367286524,
+    "total_profit_pct": 504.6204506096772
+  }
+}

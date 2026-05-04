@@ -1,0 +1,101 @@
+{
+  "summary": {
+    "total_trades": 578,
+    "axis_support_trades": 425,
+    "analyzed_trades": 425,
+    "time_span_years": 4.317590691307323,
+    "total_profit": 178673.08881985,
+    "signal_distribution": {
+      "wyckoff_axis_support": 425,
+      "wyckoff_sow": 26,
+      "wyckoff_spring_1": 4,
+      "wyckoff_wave_start": 102,
+      "wyckoff_efficiency": 4,
+      "wyckoff_utad": 4,
+      "wyckoff_lps": 5,
+      "wyckoff_sos": 7,
+      "wyckoff_spring_test_sig": 1
+    }
+  },
+  "threshold_scan": [
+    {
+      "threshold": 0.45,
+      "total_trades": 13,
+      "profit_trades": 11,
+      "loss_trades": 2,
+      "win_rate": 84.61538461538461,
+      "loss_rate": 15.384615384615385,
+      "zone_profit": 6896.242433329999,
+      "profit_contribution": 3.8596984464085944,
+      "trades_per_year": 3.010938490805327,
+      "avg_profit_per_trade": 530.4801871792307
+    },
+    {
+      "threshold": 0.5,
+      "total_trades": 16,
+      "profit_trades": 13,
+      "loss_trades": 3,
+      "win_rate": 81.25,
+      "loss_rate": 18.75,
+      "zone_profit": 7099.00348668,
+      "profit_contribution": 3.97318003151425,
+      "trades_per_year": 3.705770450221941,
+      "avg_profit_per_trade": 443.6877179175
+    },
+    {
+      "threshold": 0.55,
+      "total_trades": 30,
+      "profit_trades": 23,
+      "loss_trades": 7,
+      "win_rate": 76.66666666666667,
+      "loss_rate": 23.333333333333332,
+      "zone_profit": 9923.68260231,
+      "profit_contribution": 5.554100322469777,
+      "trades_per_year": 6.948319594166139,
+      "avg_profit_per_trade": 330.789420077
+    },
+    {
+      "threshold": 0.6,
+      "total_trades": 41,
+      "profit_trades": 31,
+      "loss_trades": 10,
+      "win_rate": 75.60975609756098,
+      "loss_rate": 24.390243902439025,
+      "zone_profit": 17777.04067663,
+      "profit_contribution": 9.949478566721364,
+      "trades_per_year": 9.496036778693723,
+      "avg_profit_per_trade": 433.58635796658535
+    },
+    {
+      "threshold": 0.65,
+      "total_trades": 56,
+      "profit_trades": 40,
+      "loss_trades": 16,
+      "win_rate": 71.42857142857143,
+      "loss_rate": 28.57142857142857,
+      "zone_profit": 20464.90340973,
+      "profit_contribution": 11.453825276600028,
+      "trades_per_year": 12.970196575776793,
+      "avg_profit_per_trade": 365.4447037451786
+    },
+    {
+      "threshold": 0.7,
+      "total_trades": 73,
+      "profit_trades": 50,
+      "loss_trades": 23,
+      "win_rate": 68.4931506849315,
+      "loss_rate": 31.506849315068493,
+      "zone_profit": 27920.27314429,
+      "profit_contribution": 15.626456859679111,
+      "trades_per_year": 16.907577679137603,
+      "avg_profit_per_trade": 382.4694951272603
+    }
+  ],
+  "target_zone_tr_0_5": {
+    "total_trades": 16,
+    "win_rate": 81.25,
+    "loss_rate": 18.75,
+    "profit_contribution": 3.97318003151425,
+    "trades_per_year": 3.705770450221941
+  }
+}
