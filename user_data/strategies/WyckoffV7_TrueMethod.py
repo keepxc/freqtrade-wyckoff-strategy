@@ -3009,7 +3009,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             if 'axis_metadata' not in dataframe.columns:
                 dataframe['axis_metadata'] = None
             for idx in dataframe[axis_mask].index:
-                metadata = {
+                axis_meta = {  # 🔧 Fix: 重命名为 axis_meta 避免遮蔽函数参数 metadata
                     'tr_source': str(dataframe.loc[idx, 'tr_source']),
                     'tr_position': float(dataframe.loc[idx, 'tr_position']),
                     'tr_low': float(dataframe.loc[idx, 'tr_low']),
@@ -3017,13 +3017,13 @@ class WyckoffV7_TrueMethod(IStrategy):
                     'tr_height': float(dataframe.loc[idx, 'tr_height']),
                     'tr_source_detail': str(dataframe.loc[idx, 'tr_source_detail']),
                 }
-                dataframe.at[idx, 'axis_metadata'] = metadata
+                dataframe.at[idx, 'axis_metadata'] = axis_meta
                 # 存储到pending metadata用于后续leverage方法使用
                 if pair not in self._pending_axis_metadata:
                     self._pending_axis_metadata[pair] = {}
                 # 使用时间戳作为key
                 timestamp = dataframe.loc[idx, 'date']
-                self._pending_axis_metadata[pair][timestamp] = metadata
+                self._pending_axis_metadata[pair][timestamp] = axis_meta
         
         dataframe.loc[spring_recovery_entry & final_entry, 'enter_tag'] = 'wyckoff_spring'  # Phase 2
         # Phase 2.2a: Spring 质量分级信号（优先级：#3 > #2 > #1）
