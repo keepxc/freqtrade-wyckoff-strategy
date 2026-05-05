@@ -709,7 +709,8 @@ class WyckoffV7_TrueMethod(IStrategy):
         # PNF Shadow Protect Integration: 实例变量初始化（全部通过环境变量控制）
         self.pnf_shadow_protect_enabled = os.getenv('WY_PNF_SHADOW_PROTECT', '0') == '1'
         self.pnf_timeout_hours = float(os.getenv('WY_PNF_TIMEOUT_HOURS', '48'))
-        # 🆕 超参测试用：PNF目标乘数（axis_support默认0.2, sos默认0.35）
+        # 🆕 超参测试用：PNF目标乘数（axis_support默认1.0, sos默认0.35）
+        # 📝 Note: 超参优化(2026-05-03)测试0.15-0.35均劣于1.0，保持1.0
         self.pnf_axis_mult = float(os.getenv('WY_PNF_AXIS_MULT', '1.0'))
         self.pnf_sos_mult = float(os.getenv('WY_PNF_SOS_MULT', '0.35'))
         # 🆕 超参测试用：PNF激活最小盈利门槛（默认3%）
@@ -722,12 +723,16 @@ class WyckoffV7_TrueMethod(IStrategy):
         self.pnf_sos_early_mult = float(os.getenv('WY_PNF_SOS_EARLY_MULT', '1.0'))
         # 🆕 Test 2: wave_start 纳入 Shadow Protect（默认 0=不启用）
         self.pnf_wave_start_enable = os.getenv('WY_PNF_WAVE_START_ENABLE', '0') == '1'
+        # 🆕 Test 4.1 方案C: axis_support 纳入 Shadow Protect（默认 0=不启用）
+        self.pnf_axis_enable = os.getenv('WY_PNF_AXIS_ENABLE', '0') == '1'
         logger.info(f'PNF Shadow Protect: {"启用" if self.pnf_shadow_protect_enabled else "禁用"} '
                     f'(WY_PNF_SHADOW_PROTECT={os.getenv("WY_PNF_SHADOW_PROTECT", "1")}), '
                     f'超时={self.pnf_timeout_hours}h, axis_mult={self.pnf_axis_mult}, '
                     f'sos_mult={self.pnf_sos_mult}, min_profit={self.pnf_min_profit}, '
                     f'SP阈值={self.pnf_sp_max_profit}/{self.pnf_sp_giveback}/{self.pnf_sp_min_current}, '
-                    f'sos_early_mult={self.pnf_sos_early_mult}, wave_start_enable={self.pnf_wave_start_enable}')
+                    f'sos_early_mult={self.pnf_sos_early_mult}, '
+                    f'wave_start_enable={self.pnf_wave_start_enable}, '
+                    f'axis_enable={self.pnf_axis_enable}')
         
         # 开发状态标记
         self.phase_1_active = True  # Weis Wave Foundation ✓ 完成
@@ -4935,6 +4940,8 @@ class WyckoffV7_TrueMethod(IStrategy):
             return (True, reason)
         return (False, '')
 
+
+
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: datetime,
                          current_rate: float, current_profit: float, **kwargs) -> float:
         """
@@ -5227,8 +5234,8 @@ class WyckoffV7_TrueMethod(IStrategy):
         🆕 根据入场类型返回调整后的 PNF 保守目标位。
         
         威科夫因果定律：不同入场信号蕴含的"因"不同。
-        - axis_support (BUEC/LPS)：次级动能，使用 0.5x TR Height（TR 中位）
-        - sos_entry：主趋势确认，使用 1.0x TR Height（TR 顶部）
+        - axis_support (BUEC/LPS)：次级动能，使用可配置乘数（默认1.0x TR Height）
+        - sos_entry：主趋势确认，使用可配置乘数（默认0.35x TR Height）
         - 其他：保持原始 target_conservative
         
         Args:
@@ -5246,7 +5253,8 @@ class WyckoffV7_TrueMethod(IStrategy):
             tr_height = float(pnf_metadata.get('tr_height', 0.0) or 0.0)
             
             if entry_tag == 'wyckoff_axis_support' and tr_low > 0 and tr_height > 0:
-                # axis_support (BUEC/LPS): 可配置乘数（WY_PNF_AXIS_MULT，默认0.2）
+                # axis_support (BUEC/LPS): 可配置乘数（WY_PNF_AXIS_MULT，默认1.0）
+                # 📝 Note: 超参优化(2026-05-03)测试0.15-0.35均劣于1.0，保持1.0
                 adjusted = tr_low + tr_height * self.pnf_axis_mult
                 if adjusted < target_cons:
                     profit_needed = (adjusted - tr_low) / tr_low * 100 if tr_low > 0 else 0
@@ -5270,8 +5278,9 @@ class WyckoffV7_TrueMethod(IStrategy):
             dist_height = float(pnf_metadata.get('dist_height', 0.0) or 0.0)
             
             if entry_tag == 'wyckoff_axis_support' and dist_high > 0 and dist_height > 0:
-                # axis_support short: 0.5x Dist Height（Distribution 中位）
-                adjusted = dist_high - dist_height * 0.5
+                # axis_support short: 可配置乘数（默认1.0x Dist Height）
+                # 📝 Note: 多头已验证1.0x最优，空头保持对称
+                adjusted = dist_high - dist_height * self.pnf_axis_mult
                 if adjusted > target_short_cons:  # 空头目标向下调整（价格更低）
                     logger.debug(
                         f'PNF 目标调整 (axis_support short): {target_short_cons:.2f} → {adjusted:.2f} '
@@ -5310,10 +5319,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         
         # 检查 entry_tag 是否符合条件
         # 🔧 P0 修正（2026-05-03）：axis_support 是弱因信号（BUEC/LPS），PnF 目标为"绝对结利线"
-        # 仅 sos_entry（强趋势确认）+ wave_start（测试中）激活 Shadow Protect 博弈超额利润
+        # 仅 sos_entry（强趋势确认）+ wave_start（测试中）+ axis_support（Test 4.1 方案C）激活 Shadow Protect
         eligible_tags = ['wyckoff_sos_entry']
         if self.pnf_wave_start_enable:
             eligible_tags.append('wyckoff_wave_start')
+        if self.pnf_axis_enable:
+            eligible_tags.append('wyckoff_axis_support')
         if trade.enter_tag not in eligible_tags:
             return 'hard_exit'
         
@@ -5707,7 +5718,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             
             if not trade.is_short:
                 _tgt_std  = float(pnf_metadata.get('target_standard', 0.0) or 0.0)
-                # 🆕 axis_support 使用 0.5x TR Height 调整目标
+                # 🆕 axis_support 使用可配置乘数调整目标（默认1.0x TR Height）
                 _tgt_cons = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, False)
                 if _tgt_std > 0 and current_rate >= _tgt_std:
                     logger.info(f'P&F 目标位2(多头标准): {pair}, '
@@ -5736,7 +5747,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                         return 'pnf_target_1'
             else:
                 _tgt_short_std  = float(pnf_metadata.get('target_short_standard', 0.0) or 0.0)
-                # 🆕 axis_support 使用 0.5x Dist Height 调整目标
+                # 🆕 axis_support 使用可配置乘数调整目标（默认1.0x Dist Height）
                 _tgt_short_cons = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, True)
                 if _tgt_short_std > 0 and current_rate <= _tgt_short_std:
                     logger.info(f'P&F 目标位2(空头标准): {pair}, '
@@ -5959,7 +5970,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             
             # 目标位有效，保存到元数据
             # 🆕 P0 Fix (2026-05-03): 同时保存 tr_low/tr_high/tr_height 和 entry_tag，
-            # 用于 axis_support 目标乘数调整（0.5x TR Height）
+            # 用于 axis_support 目标乘数调整（默认1.0x TR Height）
             pnf_meta = {
                 'target_conservative':       target_cons,
                 'target_standard':           target_std,

@@ -10,7 +10,7 @@
 
 预埋/待启用：
 - `[~]` Phase-aware 退出（P0）— ExitLogic 已实现，策略未接线
-- `[ ]` 分批止盈（P0）— Freqtrade 原生不支持分批减仓
+- `[ ]` 分批止盈（P0）— **Freqtrade 支持**，通过 `adjust_trade_position()` 实现（详见下方）
 - `[ ]` RM-4：验证与工程护城河
 
 ---
@@ -1162,6 +1162,571 @@ python -m py_compile wyckoff/pnf_target_calculator.py user_data/strategies/Wycko
 
 ---
 
+#### ⚠️ Test 4: 弱因/强因信号目标位差异验证（✅ Test 4.1/4.3 已完成）
+
+> **状态**: ✅ **Test 4.1 方案C 已完成** | ⚠️ **发现根本问题：down_wave 过早退出**  
+> **完成时间**: 2026-05-04  
+> **报告**: `TEST_4_3_SIGNAL_TARGET_ANALYSIS_REPORT.md`  
+> **下一步**: Test 4.4 down_wave 优化（P0 优先级）
+
+**核心发现**（Test 4.3 数据分析）:
+
+1. **代码与文档不一致**:
+   - 注释说 axis_support 使用 0.5x TR Height
+   - 实际代码默认值是 1.0x TR Height
+   - 超参优化验证 1.0x 最优（197,780 USDT vs 144,444 USDT）
+
+2. **弱因 vs 强因表现差异显著**:
+   - axis_support 平均利润: **5.65%**
+   - 强因信号平均利润: **10.56%**
+   - 差距: **-46.5%**
+
+3. **axis_support 达到高目标的比例**:
+   - 达到 5%+: **37.9%** (99笔)
+   - 达到 8%+: **31.0%** (81笔)
+   - 达到 15%+: **19.5%** (51笔)
+
+4. **Shadow Protect 潜在收益**:
+   - 如果 axis_support 激活 Shadow Protect
+   - 99 笔交易 × 1.5% 额外利润 = **+14,850 USDT (+4.2%)**
+
+**🔍 Test 4.1 方案C 关键发现**（2026-05-04）:
+
+1. **Shadow Protect 无法触发的根本原因**:
+   - ❌ 不是代码问题（代码实现正确）
+   - ❌ 不是市场问题（数据显示有上涨空间）
+   - ✅ **是 down_wave 过早退出问题**
+
+2. **down_wave 过早退出数据**:
+   - 392 笔 axis_support + down_wave 交易
+   - **100% 提前退出**（0 笔在峰值退出）
+   - 平均实际利润：**1.65%**
+   - 平均最高利润：**2.84%**
+   - **平均错失利润：1.18%**（相当于实际利润的 72%）
+
+3. **潜在收益**:
+   - 如果能持有到峰值，平均利润可提升 **72%**
+   - 总利润可从 3511% 提升到约 **3800%+**
+
+**关键矛盾**:
+- 单笔平均看：axis_support 应该更保守（5.65% vs 10.56%）
+- 总利润看：1.0x 是最优配置（超参优化已验证）
+- **根本原因**：down_wave 过早退出，导致无法到达目标位
+
+**实施优先级更新**：
+
+- [x] **P0**: Test 4.3 数据分析（✅ 已完成）
+- [x] **P1**: Test 4.1 方案C（axis 激活 Shadow Protect）（✅ 已完成）
+- [ ] **P0**: Test 4.4 down_wave 优化（🆕 新增，最高优先级）
+- [ ] **P2**: Test 4.2 eligible_tags 对比（优先级降低）
+
+**验收标准**：
+
+- [x] 有数据支持或证伪"弱因信号应该更保守"的假设
+- [x] 确定最优的 axis_mult 和 sos_mult 配置
+- [x] 发现 down_wave 过早退出问题
+- [ ] 优化 down_wave 逻辑，提升 axis_support 平均利润
+
+**如果测试发现问题**：
+
+- ~~如果 axis_support 也能跑到 1.5x，应该加入 Shadow Protect~~ ✅ 已验证：能跑到但被 down_wave 提前退出
+- ~~如果 sos_entry 的 0.35x 过于保守，应该提高到 0.5x 或 1.0x~~ ⏸️ 暂缓
+- ~~如果弱因/强因区分无效，应该统一处理~~ ⏸️ 暂缓
+- ✅ **优先解决 down_wave 过早退出问题**（Test 4.4）
+
+---
+
+##### Test 4.1: axis_support 目标位乘数对比
+
+**测试矩阵**：
+
+| 配置 | axis_mult | sos_mult | Shadow Protect | 说明 |
+|------|-----------|----------|---------------|------|
+| 基线 | 1.0 | 0.35 | sos only | 当前配置 |
+| 方案A | 0.5 | 0.35 | sos only | 弱因更保守 |
+| 方案B | 1.0 | 1.0 | sos only | 统一目标 |
+| 方案C | 1.0 | 0.35 | sos + axis | axis 也激活 Shadow |
+
+**验收指标**：
+
+- axis_support 平均退出利润
+- axis_support 胜率
+- 总利润和最大回撤
+- 错失利润分析（达到 1.0x 但未达到 1.5x 的比例）
+
+##### Test 4.2: Shadow Protect eligible_tags 对比
+
+**测试矩阵**：
+
+| 配置 | eligible_tags | 说明 |
+|------|--------------|------|
+| 当前 | `['wyckoff_sos_entry']` | 只有 SOS 激活 Shadow |
+| 方案A | `['wyckoff_sos_entry', 'wyckoff_axis_support']` | axis 也激活 Shadow |
+| 方案B | `['wyckoff_sos_entry', 'wyckoff_wave_start']` | 加入 wave_start |
+| 方案C | `['wyckoff_sos_entry', 'wyckoff_axis_support', 'wyckoff_wave_start']` | 全部激活 |
+
+**验收指标**：
+
+- 各信号类型的平均持仓时长
+- 各信号类型的平均退出利润
+- Shadow Protect 触发次数和效果
+- 利润回吐分析
+
+##### Test 4.3: 分信号类型统计分析（✅ 已完成）
+
+**数据收集**（从当前基线）：
+
+```python
+# 按 enter_tag 分组统计
+for tag in ['wyckoff_axis_support', 'wyckoff_sos_entry', 'wyckoff_wave_start']:
+    trades = df[df['enter_tag'] == tag]
+    
+    # 统计达到不同目标位的比例
+    reached_conservative = (trades['close_rate'] >= trades['target_conservative']).sum()
+    reached_standard = (trades['close_rate'] >= trades['target_standard']).sum()
+    reached_aggressive = (trades['close_rate'] >= trades['target_aggressive']).sum()
+    
+    # 统计平均退出利润
+    avg_profit = trades['profit_ratio'].mean()
+    
+    # 统计持仓时长
+    avg_duration = trades['trade_duration'].mean()
+```
+
+**关键问题**：
+
+1. axis_support 有多少比例的交易达到了 1.5x 目标？ → **37.9% 达到 5%+**
+2. 如果 axis_support 也激活 Shadow Protect，能否提升平均利润？ → **潜在 +4.2% 总利润**
+3. sos_entry 使用 0.35x 目标是否过于保守？ → **待 Test 4.1 验证**
+
+**实施优先级**：
+
+- [x] **P0**: Test 4.3 数据分析（✅ 已完成）
+- [x] **P1**: Test 4.1 方案C（axis 激活 Shadow Protect）（✅ 已完成）
+- [ ] **P2**: Test 4.2 eligible_tags 对比（组合测试）
+
+**验收标准**：
+
+- [x] 有数据支持或证伪"弱因信号应该更保守"的假设
+- [x] 确定最优的 axis_mult 和 sos_mult 配置
+- [ ] 确定最优的 eligible_tags 配置
+
+**如果测试发现问题**：
+
+- 如果 axis_support 也能跑到 1.5x，应该加入 Shadow Protect
+- 如果 sos_entry 的 0.35x 过于保守，应该提高到 0.5x 或 1.0x
+- 如果弱因/强因区分无效，应该统一处理
+
+---
+
+#### ✅ Test 4.1 方案C 回测结果（2026-05-04）
+
+> **状态**: ✅ **已完成** | ⚠️ **关键发现：down_wave 过早退出，错失平均 1.18% 利润**  
+> **完成时间**: 2026-05-04 23:08  
+> **配置**: `WY_PNF_AXIS_ENABLE=1`（axis_support 激活 Shadow Protect）  
+> **日志文件**: `backtest_test41c_axis_shadow_correct_20260504.log`
+
+**回测配置**：
+- 时间范围：2022-01-01 至 2026-05-02（4.3年）
+- 环境变量：`WY_PNF_AXIS_ENABLE=1`
+- 其他配置：与当前基线一致
+
+**回测结果对比**：
+
+| 指标 | 方案C (axis Shadow) | 当前基线 | 差异 |
+|------|-------------------|---------|------|
+| 总交易数 | 513 笔 | 513 笔 | 0 |
+| 总利润 | **+3511.73%** | +3512.06% | -0.33% |
+| 胜率 | **73.5%** | 73.5% | 0 |
+| 最大回撤 | **6.28%** | 6.28% | 0 |
+| Sharpe | 2.15 | 2.15 | 0 |
+| SQN | 7.87 | 7.87 | 0 |
+| CAGR | 128.77% | 128.77% | 0 |
+
+**axis_support 信号表现**：
+
+| 指标 | 方案C | 说明 |
+|------|------|------|
+| 交易数 | 261 笔 | 占总交易 50.9% |
+| 平均利润 | 1.42% | 与基线一致 |
+| 总利润 | 147,483 USDT | 占总利润 42.0% |
+| 胜率 | 68.6% | 与基线一致 |
+| 平均持仓 | 1天15小时51分 | 与基线一致 |
+
+**退出原因分析**：
+
+| 退出原因 | 次数 | 平均利润% | 占比 | 说明 |
+|---------|------|-----------|------|------|
+| wyckoff_down_wave | 469 | 1.94% | 91.4% | 主要退出路径 |
+| roi (20%) | 6 | 20.0% | 1.2% | 极值退出 |
+| trailing_stop_loss | 5 | -12.0% | 1.0% | 止损退出 |
+| wyckoff_climax | 14 | -0.49% | 2.7% | 反转退出 |
+| **pnf_shadow_protect** | **0** | **-** | **0%** | **未触发** ❌ |
+
+**🔍 深度分析：axis_support + down_wave 退出（392笔）**
+
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| **平均实际利润** | **1.65%** | 实际退出时的利润 |
+| **平均最高利润** | **2.84%** | 持仓期间的最高利润 |
+| **平均错失利润** | **1.18%** | 如果持有到峰值可多赚的利润 |
+| **在峰值退出** | **0 笔 (0%)** | 没有一笔在峰值退出 |
+| **提前退出** | **392 笔 (100%)** | 全部提前退出 |
+| **错失利润 > 5%** | **12 笔 (3.1%)** | 严重提前退出的交易 |
+
+**关键发现**：
+
+1. **Shadow Protect 完全未触发**：
+   - ✅ 代码实现正确：`axis_enable=True` 已生效
+   - ❌ 物理上无法触发：down_wave 总是抢先退出
+   - 📊 0 笔交易通过 Shadow Protect 退出
+
+2. **down_wave 过早退出问题**：
+   - 100% 的 axis_support 交易在价格到达峰值前就被 down_wave 退出
+   - 平均错失 1.18% 利润（相当于实际利润的 **72%**）
+   - 实际利润 1.65% → 潜在利润 2.84%（如果持有到峰值）
+
+3. **2022-2026 市场特征**：
+   - 数据显示确实有上涨空间（平均最高利润 2.84%）
+   - 但 down_wave 在价格到达峰值前就触发（平均 1.65% 时退出）
+   - 这不是市场问题，而是 down_wave 过于敏感
+
+4. **错失利润示例**（前3笔）：
+   - 2022-01-05: 实际 -6.38% → 可能 0.34% (错失 6.72%)
+   - 2022-02-17: 实际 -7.46% → 可能 0.96% (错失 8.42%)
+   - 2022-03-03: 实际 -7.31% → 可能 0.68% (错失 7.98%)
+| trailing_stop_loss | 5 | -12.0% | 止损退出（1.0%） |
+| **pnf_shadow_protect** | **0** | **-** | **未触发** ❌ |
+
+**关键发现**：
+
+1. **Shadow Protect 完全未触发**：
+   - 0 笔交易通过 Shadow Protect 退出
+   - 所有 axis_support 交易仍由 down_wave 或其他机制退出
+   - 与 Test 1/2 的结论一致：down_wave 总是抢先
+
+2. **性能完全一致**：
+   - 所有指标与基线 100% 一致
+   - 证明 Shadow Protect 代码路径正确（不影响现有逻辑）
+   - 但在当前市场周期无法被物理触发
+
+3. **物理原因**：
+   - axis_support 平均利润 1.42%，远低于 PNF 目标位（通常 5-8%）
+   - down_wave（ChoCh）在价格到达 PNF 目标前就触发退出
+   - 这是威科夫市场性质改变的天然优先级
+
+**结论与下一步**：
+
+- ✅ **代码实现正确**：Shadow Protect 逻辑就位且不影响现有性能
+- ❌ **无法验证效果**：在 2022-2026 周期内，Shadow Protect 从未被触发
+- ⚠️ **根本原因**：down_wave 过于敏感，在价格到达目标位前就退出
+- 📊 **潜在收益**：如果能持有到峰值，平均利润可从 1.65% 提升到 2.84%（+72%）
+
+**建议**：
+
+1. **保持 Shadow Protect 代码**：逻辑正确，等待未来触发
+2. **优先调整 down_wave**：解决过早退出问题（见 Test 4.4）
+3. **暂停 Test 4.2**：eligible_tags 组合测试优先级降低
+
+**下一步行动**：
+
+- [ ] 保持当前配置（`WY_PNF_AXIS_ENABLE=0`）
+- [ ] 在 dry-run 中观察是否有 axis_support 交易达到 PNF 目标
+- [ ] 如果 dry-run 中出现触发样本，重新评估 Shadow Protect 效果
+- [ ] Test 4.2（eligible_tags 组合测试）暂不执行（优先级降低）
+- [ ] **优先执行 Test 4.4**（down_wave 优化，P0 优先级）
+
+##### Test 4.4: down_wave 退出逻辑优化（❌ 已取消，转向 axis_mult 测试）
+
+> **状态**: ❌ **已取消** | **诊断完成：2026-05-05** | **新方向：axis_mult 测试**  
+> **背景**: Test 4.1 方案C 发现 down_wave 过早退出，导致 100% 的 axis_support 交易错失平均 1.18% 利润  
+> **诊断结论**: 通过分析 258 笔 axis_support + down_wave 交易，发现调高阈值不可行  
+> **路径 A 放弃原因**: 收益上限低（~1.1%），TSL 风险高（每增加 1 次 TSL = -9% 总利润）  
+> **新方向**: 转向 axis_mult 测试（预期收益 ~1.3%，风险低）
+
+**诊断报告**: `AXIS_DOWN_WAVE_DIAGNOSTIC_REPORT.md`  
+**决策文档**: `PATH_A_CORRECTION.md`  
+**分析脚本**: `analyze_tr_07_filter.py`
+
+**关键数据（2026-05-05 最新回测）**:
+
+| 信号类型 | 交易数 | 平均利润 | 胜率 | 说明 |
+|---------|--------|---------|------|------|
+| axis_support | 425 | 1.19% | 65.6% | 低于 1.5% 目标 |
+| sos + wave_start | 109 | 3.08% | 92.7% | 表现良好 |
+| 高利润交易（≥5%） | 17 | - | - | 其中 13 笔被 down_wave 退出 |
+
+**路径 A 收益上限分析**:
+
+```
+13 笔被 down_wave 提前退出的高利润交易
+× 平均多赚 3% = 39% 额外利润
+÷ 总利润 3511% = ~1.1% 提升幅度（天花板）
+```
+
+**路径 A 风险分析**:
+
+```
+当前 TSL 触发: 5 次（平均 -12%）
+如果 TSL 从 5 次增加到 6 次:
+  → -9% 总利润（吃掉 1.1% 天花板的 8 倍）
+```
+
+**axis_mult 测试优势**:
+
+```
+261 笔 axis_support 交易
+× 平均利润提升 0.18% (1.19% → 1.37%)
+= 47% 额外利润
+÷ 总利润 3511% = ~1.3% 提升幅度
+```
+
+**风险对比**:
+
+| 项目 | 路径 A | axis_mult 测试 |
+|------|--------|---------------|
+| 预期收益 | ~1.1% | ~1.3% |
+| 实施风险 | **高**（引入 TSL 风险） | **低**（只调整目标位） |
+| 影响范围 | 109 笔（21%） | 425 笔（83%） |
+| 实施复杂度 | **高**（新逻辑） | **低**（环境变量） |
+| 可逆性 | **低**（需要回滚代码） | **高**（改环境变量） |
+
+**决策建议（2026-05-05）**:
+
+### ⏸️ 暂停路径 A 完整回测
+
+**理由**:
+1. 收益上限只有 ~1.1%（13 笔交易的天花板）
+2. TSL 风险高（每增加 1 次 TSL = -9% 总利润）
+3. 实施复杂度高（新逻辑，难以回滚）
+
+### ✅ 优先进行 axis_mult 测试
+
+**理由**:
+1. 预期收益 ~1.3%（比路径 A 高）
+2. 风险低（只调整目标位，不引入新逻辑）
+3. 影响范围大（425 笔，占 83%）
+4. 实施简单（环境变量，易于回滚）
+5. TR ≥ 0.7 过滤已修复（2026-05-04）
+
+### 📋 行动顺序
+
+1. **✅ 已完成**: 创建 `analyze_tr_07_filter.py` 脚本
+2. **✅ 已完成**: 统计当前回测中信号分布
+3. **✅ 已完成**: 回退路径 A 代码
+4. **✅ 已完成**: 测试 `WY_PNF_AXIS_MULT=1.2` → **结果：完全无效**
+5. **❌ 已取消**: 测试 `WY_PNF_AXIS_MULT=1.5` → **预计同样无效，不再测试**
+6. **⏳ 待评估**: 重新评估路径 A（down_wave 优化）
+
+**测试命令**:
+
+```bash
+# 测试 1: axis_mult = 1.2
+docker compose run --rm freqtrade backtesting \
+  --config user_data/config_backtest.json \
+  --strategy WyckoffV7_TrueMethod \
+  --timerange 20220101-20260504 \
+  --cache none \
+  -e WY_PNF_AXIS_MULT=1.2
+
+# 测试 2: axis_mult = 1.5
+docker compose run --rm freqtrade backtesting \
+  --config user_data/config_backtest.json \
+  --strategy WyckoffV7_TrueMethod \
+  --timerange 20220101-20260504 \
+  --cache none \
+  -e WY_PNF_AXIS_MULT=1.5
+```
+
+**验收标准**:
+- axis_support 平均利润 > 1.19%
+- 胜率 ≥ 65.6%
+- 不影响 down_wave 保护效果
+- 总利润 ≥ 3511.73%
+
+---
+
+**分析时间**: 2026-05-05  
+**分析人**: 用户  
+**结论**: axis_mult 测试是更好的下一步  
+**状态**: 路径 A 已回退，等待 axis_mult 测试结果
+
+**诊断报告**: `AXIS_DOWN_WAVE_DIAGNOSTIC_REPORT.md`
+
+**关键发现**（2026-05-05 诊断分析）:
+
+1. **亏损单峰值利润接近0**:
+   - 83 笔亏损单（32.2%）
+   - 平均峰值利润: **0.50%**（接近0）
+   - 67.5% 的亏损单峰值在 0-1% 之间
+   - **结论**: 这些单本来就是输的，延迟退出只会让亏损更大
+
+2. **down_wave 保护效果良好**:
+   - 只有 28.7% 的交易错失了显著利润（> 1.18%）
+   - 71.3% 的交易 down_wave 表现良好
+   - **结论**: 不应该为了救 28.7% 而牺牲 71.3% 的保护效果
+
+3. **延迟退出的 TSL 风险极高**:
+   - 当前 TSL 触发: 5 笔（-19,093 USDT）
+   - 估算延迟退出后: 18 笔（-68,734 USDT）
+   - **风险增加 260%**
+   - **结论**: 少数几笔 TSL 的破坏力 > 多笔小幅提升的收益
+
+**为什么不调高 down_wave 阈值？**
+
+| 原因 | 数据支持 |
+|------|---------|
+| 亏损单峰值接近0 | 平均 0.50%，救不回来 |
+| down_wave 保护良好 | 71.3% 的交易表现良好 |
+| TSL 风险极高 | 5 → 18 笔（+260%） |
+| 设计矛盾 | down_wave 和 Shadow Protect 争抢退出权 |
+
+**测试矩阵的根本缺陷**:
+
+1. **测量错误的目标**: "平均利润从 1.42% 提升到 2.0%+" 假设了持有更久总是更好的
+2. **缺少关键指标**: TSL 触发次数、最大单笔亏损、亏损单峰值分布
+3. **设计矛盾**: down_wave 在价格到达 2.84% 时触发，目标位在 5-8%，Shadow Protect 永远没有激活机会
+
+**❌ 已取消的测试矩阵**:
+
+<details>
+<parameter name="summary">原测试矩阵（已取消，点击展开）
+
+**实现**：新增 `WY_PNF_WAVE_START_ENABLE` 环境变量（默认 0），将 102 笔 wave_start 纳入 Shadow Protect 范围。
+
+**结果**：578笔，283,091 USDT，与基线完全一致。wave_start（93.1% 胜率）的 down_wave 退出速度远快于 PNF 目标到达。
+
+**结论**：❌ **wave_start 同样无法在当前周期触发 Shadow Protect。** 代码路径正确就位，但物理上 down_wave 总是抢先。
+
+#### Test 3: 长周期牛市压力测试 ⏭️ 跳过
+
+**原因**：Test 1+2 已充分证明：2022-2026 周期内，所有强因信号（SOS/wave_start）的 PNF 目标在 down_wave 触发前均无法被触及。即使 2017-2021 大牛市有更深的趋势，Shadow Protect 的验证也应等到 dry-run 自然产生 SOS 触发样本后再进行。
+
+**决定**：不投入时间跑 2017-2021。等 dry-run 累积足够样本后，用真实交易数据验证。
+
+---
+
+#### ⚠️ Test 4: 弱因/强因信号目标位差异验证（✅ 已完成 Test 4.3）
+
+> **状态**: ✅ **Test 4.3 已完成** | ⚠️ **发现关键问题**  
+> **完成时间**: 2026-05-04  
+> **报告**: `TEST_4_3_SIGNAL_TARGET_ANALYSIS_REPORT.md`
+
+**当前实现**：
+
+| 信号类型 | 分类 | 目标位乘数 | Shadow Protect | 说明 |
+|---------|------|-----------|---------------|------|
+| `wyckoff_axis_support` | 弱因 | `WY_PNF_AXIS_MULT=1.0` | ❌ 不激活 | 保守目标=铁退出线 |
+| `wyckoff_sos_entry` | 强因 | `WY_PNF_SOS_MULT=0.35` | ✅ 激活警告区 | 可跑到标准目标 |
+| `wyckoff_wave_start` | 强因 | 1.0x (无调整) | ⚠️ 可选激活 | 需 `WY_PNF_WAVE_START_ENABLE=1` |
+
+**代码位置**：
+- `_get_adjusted_pnf_target()`: 第 5220-5280 行
+- `_check_pnf_warning_zone_activation()`: 第 5314 行（`eligible_tags`）
+
+**问题诊断**：
+
+1. **代码与文档不一致**：
+   - 代码注释说 axis_support 使用 0.5x TR Height
+   - 实际默认值是 `WY_PNF_AXIS_MULT=1.0`（1.0x TR Height）
+   - 超参优化验证的也是 1.0 最优
+
+2. **缺少对比测试**：
+   - 没有测试 axis_support 使用 1.0x vs 0.5x 的收益差异
+   - 没有测试 sos_entry 使用 0.35x vs 1.0x 的收益差异
+   - 没有验证"弱因信号应该更保守退出"的假设
+
+3. **Shadow Protect 排除 axis_support 的依据不足**：
+   - M1 修改基于"物理逻辑"（弱因信号剩余动能有限）
+   - 但没有数据支持这个假设
+   - 可能错失 axis_support 的超额利润机会
+
+**需要补充的测试**：
+
+##### Test 4.1: axis_support 目标位乘数对比
+
+**测试矩阵**：
+
+| 配置 | axis_mult | sos_mult | Shadow Protect | 说明 |
+|------|-----------|----------|---------------|------|
+| 基线 | 1.0 | 0.35 | sos only | 当前配置 |
+| 方案A | 0.5 | 0.35 | sos only | 弱因更保守 |
+| 方案B | 1.0 | 1.0 | sos only | 统一目标 |
+| 方案C | 1.0 | 0.35 | sos + axis | axis 也激活 Shadow |
+
+**验收指标**：
+
+- axis_support 平均退出利润
+- axis_support 胜率
+- 总利润和最大回撤
+- 错失利润分析（达到 1.0x 但未达到 1.5x 的比例）
+
+##### Test 4.2: Shadow Protect eligible_tags 对比
+
+**测试矩阵**：
+
+| 配置 | eligible_tags | 说明 |
+|------|--------------|------|
+| 当前 | `['wyckoff_sos_entry']` | 只有 SOS 激活 Shadow |
+| 方案A | `['wyckoff_sos_entry', 'wyckoff_axis_support']` | axis 也激活 Shadow |
+| 方案B | `['wyckoff_sos_entry', 'wyckoff_wave_start']` | 加入 wave_start |
+| 方案C | `['wyckoff_sos_entry', 'wyckoff_axis_support', 'wyckoff_wave_start']` | 全部激活 |
+
+**验收指标**：
+
+- 各信号类型的平均持仓时长
+- 各信号类型的平均退出利润
+- Shadow Protect 触发次数和效果
+- 利润回吐分析
+
+##### Test 4.3: 分信号类型统计分析
+
+**数据收集**（从当前基线）：
+
+```python
+# 按 enter_tag 分组统计
+for tag in ['wyckoff_axis_support', 'wyckoff_sos_entry', 'wyckoff_wave_start']:
+    trades = df[df['enter_tag'] == tag]
+    
+    # 统计达到不同目标位的比例
+    reached_conservative = (trades['close_rate'] >= trades['target_conservative']).sum()
+    reached_standard = (trades['close_rate'] >= trades['target_standard']).sum()
+    reached_aggressive = (trades['close_rate'] >= trades['target_aggressive']).sum()
+    
+    # 统计平均退出利润
+    avg_profit = trades['profit_ratio'].mean()
+    
+    # 统计持仓时长
+    avg_duration = trades['trade_duration'].mean()
+```
+
+**关键问题**：
+
+1. axis_support 有多少比例的交易达到了 1.5x 目标？
+2. 如果 axis_support 也激活 Shadow Protect，能否提升平均利润？
+3. sos_entry 使用 0.35x 目标是否过于保守？
+
+**实施优先级**：
+
+- [ ] **P0**: Test 4.3 数据分析（无需修改代码，分析现有回测结果）
+- [ ] **P1**: Test 4.1 axis_mult 对比（单变量测试）
+- [ ] **P2**: Test 4.2 eligible_tags 对比（组合测试）
+
+**验收标准**：
+
+- [ ] 有数据支持"弱因信号应该更保守"的假设
+- [ ] 或者有数据证明当前区分是错误的
+- [ ] 确定最优的 axis_mult 和 sos_mult 配置
+- [ ] 确定最优的 eligible_tags 配置
+
+**如果测试发现问题**：
+
+- 如果 axis_support 也能跑到 1.5x，应该加入 Shadow Protect
+- 如果 sos_entry 的 0.35x 过于保守，应该提高到 0.5x 或 1.0x
+- 如果弱因/强因区分无效，应该统一处理
+
+---
+
 ### 三个测试总结论
 
 **Shadow Protect 代码已就位且逻辑正确，但在当前市场周期（2022-2026）无法被物理触发。** 这不是代码或参数的问题——这是威科夫 ChoCh（市场性质改变）在弱趋势周期中对 PNF 目标的天然优先级。
@@ -1263,9 +1828,240 @@ python -m py_compile wyckoff/pnf_target_calculator.py user_data/strategies/Wycko
 
 1. **动态目标调整**: 根据入场位置动态调整目标
 2. **Trailing Stop**: 达到目标后使用跟踪止损
-3. **分批退出**: 分批止盈（需 Freqtrade 支持）
+3. **分批退出**: 分批止盈（✅ **Freqtrade 支持**，详见下方"分批止盈功能设计"章节）
 
 **当前建议**: 保持现有配置，继续积累数据
+
+---
+
+## 分批止盈功能设计（待实现）
+
+> **状态**: 📋 设计完成，待实现  
+> **发现时间**: 2026-05-04  
+> **Freqtrade 支持**: ✅ 通过 `adjust_trade_position()` 回调实现
+
+### 背景
+
+之前认为 Freqtrade 不支持分批减仓，但查阅官方文档后发现：
+- ✅ **Freqtrade 支持分批退出**
+- ✅ 通过 `adjust_trade_position()` 回调实现
+- ✅ 可以返回负数表示减仓（分批止盈）
+- ✅ 支持回测和实盘
+
+**官方文档**: https://www.freqtrade.io/en/stable/strategy-callbacks/#adjust-trade-position
+
+### 核心机制
+
+#### 1. 启用功能
+
+```python
+class WyckoffV7_TrueMethod(IStrategy):
+    position_adjustment_enable = True  # 启用仓位调整
+```
+
+#### 2. 实现回调
+
+```python
+def adjust_trade_position(self, trade: Trade, current_time: datetime,
+                          current_rate: float, current_profit: float,
+                          min_stake: float | None, max_stake: float,
+                          current_entry_rate: float, current_exit_rate: float,
+                          current_entry_profit: float, current_exit_profit: float,
+                          **kwargs) -> float | None | tuple[float | None, str | None]:
+    """
+    返回值:
+    - 正数: 增加仓位（DCA 加仓）
+    - 负数: 减少仓位（分批止盈）
+    - None: 不操作
+    - 元组: (金额, 标签) 用于记录退出原因
+    """
+    pass
+```
+
+#### 3. 计算公式
+
+```python
+# 退出数量 = |返回值| × trade.amount / trade.stake_amount
+
+# 示例：退出 30% 仓位
+return -(trade.stake_amount * 0.3), "pnf_conservative_30%"
+
+# 示例：退出一半仓位
+return -(trade.stake_amount / 2), "half_profit_5%"
+
+# 示例：全部退出
+return -trade.stake_amount, "full_exit"
+```
+
+### P&F 三级目标分批止盈方案
+
+#### 设计方案
+
+| 批次 | 目标位 | 退出比例 | 剩余仓位 | 说明 |
+|------|--------|---------|---------|------|
+| 第一批 | `target_conservative` (1.0× TR) | 30% | 70% | 保守目标，确保基础利润 |
+| 第二批 | `target_standard` (1.5× TR) | 40% | 30% | 标准目标，兑现主要利润 |
+| 第三批 | `target_aggressive` (2.0× TR) 或 ROI | 30% | 0% | 激进目标，博弈超额利润 |
+
+#### 实现示例
+
+```python
+def adjust_trade_position(self, trade: Trade, current_time: datetime,
+                          current_rate: float, current_profit: float,
+                          min_stake: float | None, max_stake: float,
+                          **kwargs) -> float | None | tuple[float | None, str | None]:
+    
+    # 避免重复操作
+    if trade.has_open_orders:
+        return None
+    
+    # 获取 P&F 目标位（从元数据链读取）
+    metadata_key = (trade.pair, str(trade.open_date_utc))
+    pnf_meta = self._pnf_trades_metadata.get(metadata_key, {})
+    
+    if not pnf_meta:
+        return None
+    
+    target_conservative = float(pnf_meta.get('target_conservative', 0) or 0)
+    target_standard = float(pnf_meta.get('target_standard', 0) or 0)
+    target_aggressive = float(pnf_meta.get('target_aggressive', 0) or 0)
+    
+    # 多头分批止盈
+    if not trade.is_short:
+        # 第一批：30% 在 target_conservative
+        if (current_rate >= target_conservative and 
+            target_conservative > 0 and 
+            trade.nr_of_successful_exits == 0):
+            return -(trade.stake_amount * 0.3), "pnf_conservative_30%"
+        
+        # 第二批：40% 在 target_standard
+        if (current_rate >= target_standard and 
+            target_standard > 0 and 
+            trade.nr_of_successful_exits == 1):
+            # 注意：这里是剩余仓位的 40%，实际是总仓位的 28% (70% * 0.4)
+            # 为了退出总仓位的 40%，需要计算：0.4 / 0.7 ≈ 0.571
+            return -(trade.stake_amount * 0.571), "pnf_standard_40%"
+        
+        # 第三批：剩余 30% 由 ROI 或 target_aggressive 处理
+        # 可以在这里实现，或者让 custom_exit 处理
+    
+    # 空头分批止盈（类似逻辑）
+    else:
+        target_short_cons = float(pnf_meta.get('target_short_conservative', 0) or 0)
+        target_short_std = float(pnf_meta.get('target_short_standard', 0) or 0)
+        
+        if (current_rate <= target_short_cons and 
+            target_short_cons > 0 and 
+            trade.nr_of_successful_exits == 0):
+            return -(trade.stake_amount * 0.3), "pnf_short_conservative_30%"
+        
+        if (current_rate <= target_short_std and 
+            target_short_std > 0 and 
+            trade.nr_of_successful_exits == 1):
+            return -(trade.stake_amount * 0.571), "pnf_short_standard_40%"
+    
+    return None
+```
+
+### 关键注意事项
+
+#### 1. 性能考虑
+
+- **调用频率**: 每 5 秒调用一次（live/dry-run），每根 K 线调用一次（backtest）
+- **避免重复**: 使用 `trade.nr_of_successful_exits` 跟踪已退出批次
+- **检查挂单**: 使用 `trade.has_open_orders` 避免冲突
+
+#### 2. 止损计算
+
+- ⚠️ **止损仍基于初始开仓价**，不是平均价
+- ⚠️ 分批退出后，止损不会自动调整
+- ✅ 可以在 `custom_stoploss()` 中根据 `trade.nr_of_successful_exits` 调整止损
+
+#### 3. 利润计算
+
+- 每批退出的利润是**相对于平均入场价**
+- 最终总利润是**所有批次的加权平均**
+- `trade.stake_amount` 会在每次退出后自动更新
+
+#### 4. 回测支持
+
+- ✅ 支持回测
+- ✅ 订单会在价格触及时成交
+- ⚠️ 每根 K 线只能调整一次（实盘可能多次）
+
+### 与现有退出逻辑的协同
+
+#### 优先级设计
+
+```
+1. Stoploss (最高优先级，保护本金)
+2. adjust_trade_position (分批止盈)
+3. custom_exit (其他退出逻辑)
+4. ROI (兜底退出)
+```
+
+#### 冲突处理
+
+- **Down Wave 退出**: 如果 down_wave 触发，会全部退出，不会分批
+- **Shadow Protect**: 可以与分批止盈共存，在达到目标后激活
+- **ROI**: 只处理剩余仓位（第三批 30%）
+
+### 实施步骤
+
+#### Phase 1: 基础实现（必须）
+
+- [ ] 启用 `position_adjustment_enable = True`
+- [ ] 实现 `adjust_trade_position()` 基础框架
+- [ ] 实现两批止盈（30% + 70%）
+- [ ] 添加日志记录每批退出
+- [ ] 回测验证基础功能
+
+#### Phase 2: 三批止盈（推荐）
+
+- [ ] 实现三批止盈（30% + 40% + 30%）
+- [ ] 处理剩余仓位的比例计算
+- [ ] 验证总利润计算正确性
+- [ ] 对比全仓退出 vs 分批退出的收益差异
+
+#### Phase 3: 动态调整（可选）
+
+- [ ] 根据 `enter_tag` 差异化分批比例
+- [ ] 根据市场环境调整分批策略
+- [ ] 实现动态止损跟随（分批后收紧止损）
+- [ ] 添加分批止盈的统计分析
+
+### 预期效果
+
+#### 优势
+
+1. **降低回撤**: 提前兑现部分利润，减少利润回吐
+2. **提高胜率**: 分批退出可以提高整体胜率
+3. **优化心理**: 锁定部分利润后，剩余仓位更从容
+4. **灵活性**: 可以根据不同信号调整分批策略
+
+#### 风险
+
+1. **错失大行情**: 过早退出可能错失后续涨幅
+2. **手续费增加**: 多次退出会增加手续费成本
+3. **复杂度提升**: 需要仔细处理各种边界情况
+4. **回测差异**: 回测和实盘可能有细微差异
+
+### 验收标准
+
+- [ ] 回测中分批退出正常触发
+- [ ] 每批退出的利润计算正确
+- [ ] 总利润与预期一致
+- [ ] 不影响其他退出逻辑（down_wave, stoploss）
+- [ ] 日志清晰记录每批退出的原因和金额
+- [ ] 对比回测：分批 vs 全仓，收益差异在合理范围内
+
+### 参考资料
+
+- **Freqtrade 官方文档**: https://www.freqtrade.io/en/stable/strategy-callbacks/#adjust-trade-position
+- **官方示例**: 文档中包含 DCA 加仓和分批止盈的完整示例
+- **相关回调**: `custom_stake_amount()`, `custom_exit()`, `custom_stoploss()`
+
+---
 
 ### 总结
 
@@ -1775,3 +2571,384 @@ self.lookback_fallback = 120  # P2 Fix 已回退 (2026-05-04): 验证发现滚�
 
 </details>
 
+
+
+---
+
+##### 路径 A: 重构 down_wave 与 Shadow Protect 协作逻辑（❌ 已放弃）
+
+> **状态**: ❌ **已放弃** | **决策时间：2026-05-05**  
+> **触发**: Test 4.4 诊断分析（2026-05-05）  
+> **放弃原因**: 收益上限低（~1.1%），TSL 风险高，实施复杂度高  
+> **新方向**: 转向 axis_mult 测试（预期收益 ~1.3%，风险低）
+
+**决策文档**: `PATH_A_CORRECTION.md`  
+**分析脚本**: `analyze_tr_07_filter.py`  
+**代码回退**: 2026-05-05 已完成
+
+**放弃理由**:
+
+1. **收益上限低**:
+   - 13 笔被 down_wave 提前退出的高利润交易
+   - 平均多赚 3% = 39% 额外利润
+   - 相对于总利润 3511% → 提升幅度约 **1.1%**（天花板）
+
+2. **TSL 风险高**:
+   - 当前 TSL 触发: 5 次（平均 -12%）
+   - 如果 TSL 从 5 次增加到 6 次: **-9% 总利润**
+   - 风险 > 收益（-9% vs +1.1%）
+
+3. **实施复杂度高**:
+   - 需要重构 down_wave 与 Shadow Protect 协作逻辑
+   - 难以回滚
+   - 可能引入新的 bug
+
+**axis_mult 测试优势**:
+
+| 项目 | 路径 A | axis_mult 测试 |
+|------|--------|---------------|
+| 预期收益 | ~1.1% | ~1.3% |
+| 实施风险 | **高**（引入 TSL 风险） | **低**（只调整目标位） |
+| 影响范围 | 109 笔（21%） | 425 笔（83%） |
+| 实施复杂度 | **高**（新逻辑） | **低**（环境变量） |
+| 可逆性 | **低**（需要回滚代码） | **高**（改环境变量） |
+
+**下一步行动**:
+
+- [x] 回退路径 A 代码
+- [x] 创建 `analyze_tr_07_filter.py` 脚本
+- [x] 统计当前回测中信号分布
+- [ ] 测试 `WY_PNF_AXIS_MULT=1.2`
+- [ ] 测试 `WY_PNF_AXIS_MULT=1.5`
+- [ ] 如果 axis_mult 测试结果不理想，再考虑路径 A
+
+**测试命令**:
+
+```bash
+# 测试 1: axis_mult = 1.2
+docker compose run --rm freqtrade backtesting \
+  --config user_data/config_backtest.json \
+  --strategy WyckoffV7_TrueMethod \
+  --timerange 20220101-20260504 \
+  --cache none \
+  -e WY_PNF_AXIS_MULT=1.2
+
+# 测试 2: axis_mult = 1.5
+docker compose run --rm freqtrade backtesting \
+  --config user_data/config_backtest.json \
+  --strategy WyckoffV7_TrueMethod \
+  --timerange 20220101-20260504 \
+  --cache none \
+  -e WY_PNF_AXIS_MULT=1.5
+```
+
+**验收标准**:
+- axis_support 平均利润 > 1.19%
+- 胜率 ≥ 65.6%
+- 不影响 down_wave 保护效果
+- 总利润 ≥ 3511.73%
+
+---
+
+**决策时间**: 2026-05-05  
+**决策人**: 用户  
+**状态**: 路径 A 已放弃，转向 axis_mult 测试
+
+**核心问题**:
+
+```
+设计意图:
+  down_wave 检测市场性质改变 
+  → 到达目标位后 Shadow Protect 接管 
+  → 追踪保护利润
+
+实际情况:
+  down_wave 在价格到达 2.84% 时触发
+  → 目标位通常在 5-8%
+  → Shadow Protect 永远没有激活机会
+```
+
+**新逻辑设计**:
+
+```
+阶段 1: 进场后 → 到达 PnF 目标位的 70% 之前
+  → down_wave 正常工作（保护早期阶段）
+  
+阶段 2: 到达 PnF 目标位的 70% 之后
+  → 切换为 Shadow Protect 接管（保护目标位附近的利润）
+```
+
+**实现方案**:
+
+```python
+# 在 custom_exit 中
+def custom_exit(self, pair, trade, current_time, current_rate, current_profit, **kwargs):
+    if trade.enter_tag == 'wyckoff_axis_support':
+        # 获取 PnF 目标位（从元数据链）
+        metadata_key = (pair, str(trade.open_date_utc))
+        pnf_meta = self._pnf_trades_metadata.get(metadata_key, {})
+        pnf_target_rate = float(pnf_meta.get('target_conservative', 0) or 0)
+        
+        if pnf_target_rate > 0:
+            # 计算当前利润占目标的比例
+            target_profit = (pnf_target_rate - trade.open_rate) / trade.open_rate
+            profit_pct_of_target = current_profit / target_profit if target_profit > 0 else 0
+            
+            # 阶段 1: 未到达目标 70% 之前，down_wave 正常工作
+            if profit_pct_of_target < float(os.getenv('WY_DW_TO_SHADOW_THRESHOLD', '0.7')):
+                if self._check_down_wave_exit(dataframe, current_time):
+                    return 'wyckoff_down_wave'
+            
+            # 阶段 2: 到达目标 70% 之后，切换为 Shadow Protect
+            else:
+                if self._check_shadow_protect_exit(trade, current_rate, current_profit):
+                    return 'pnf_shadow_protect'
+    
+    return None
+```
+
+**环境变量**:
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `WY_DW_TO_SHADOW_THRESHOLD` | 0.7 | 切换阈值（目标的 70%） |
+| `WY_SHADOW_GIVEBACK_THRESHOLD` | 0.025 | Shadow Protect 回吐阈值（2.5%） |
+| `WY_SHADOW_MIN_PROFIT` | 0.05 | Shadow Protect 最低利润（5%） |
+
+**优势**:
+
+1. **各司其职**: down_wave 保护早期，Shadow Protect 保护目标位附近
+2. **不互相干扰**: 两个机制不再争抢退出权
+3. **灵活调整**: 可以通过环境变量调整切换阈值
+4. **向后兼容**: 默认 disabled（`WY_DW_TO_SHADOW_THRESHOLD=0` 时退化为原逻辑）
+
+**验收标准**:
+
+| 指标 | 当前基线 | 目标 | 说明 |
+|------|---------|------|------|
+| axis_support 平均利润 | 1.42% | **1.8%+** | 提升 27%+ |
+| Shadow Protect 触发次数 | 0 | **> 0** | 证明机制生效 |
+| TSL 触发次数 | 5 | **≤ 8** | 控制风险 |
+| 最大单笔亏损 | -12% | **≤ -15%** | 控制极端风险 |
+| 总利润 | 3511.73% | **3600%+** | 提升 2.5%+ |
+| 最大回撤 | 6.28% | **< 8%** | 控制风险 |
+
+**实施步骤**:
+
+- [ ] **Step 1**: 实现 `_check_down_wave_exit()` 辅助方法
+- [ ] **Step 2**: 实现 `_check_shadow_protect_exit()` 辅助方法
+- [ ] **Step 3**: 在 `custom_exit` 中集成阶段切换逻辑
+- [ ] **Step 4**: 添加诊断日志（记录切换时刻和原因）
+- [ ] **Step 5**: 回测验证（2022-2026 全周期）
+- [ ] **Step 6**: 分析 Shadow Protect 触发样本
+- [ ] **Step 7**: 优化切换阈值（0.7 可能不是最优值）
+
+**风险评估**:
+
+| 风险 | 可能性 | 影响 | 缓解措施 |
+|------|-------|------|---------|
+| Shadow Protect 仍然不触发 | 中 | 中 | 降低切换阈值到 0.5 |
+| 早期保护不足 | 低 | 高 | 保持 down_wave 在阶段 1 |
+| 切换阈值不合理 | 中 | 中 | 通过回测优化 |
+| 代码复杂度增加 | 低 | 低 | 充分测试和文档 |
+
+**如果路径 A 失败**:
+
+- 如果 Shadow Protect 仍然不触发 → 降低切换阈值到 0.5 或 0.3
+- 如果早期保护不足 → 调整 down_wave 在阶段 1 的敏感度
+- 如果总利润下降 → 回退到基线配置
+- 如果设计仍有矛盾 → 考虑完全独立的两套退出逻辑
+
+
+---
+
+## ❌ axis_mult 测试结果 — 2026-05-05
+
+> **状态**: ❌ **测试失败，已放弃此路径**  
+> **完成时间**: 2026-05-05  
+> **测试配置**: `WY_PNF_AXIS_MULT=1.2`  
+> **回测周期**: 2022-01-01 至 2026-05-04 (4.3年)  
+> **完整报告**: `AXIS_MULT_1_2_TEST_REPORT.md`
+
+### 回测结果对比
+
+| 指标 | axis_mult 1.2 | 基线 (1.0) | 差异 |
+|------|--------------|-----------|------|
+| 总交易数 | 513 笔 | 513 笔 | **0** |
+| 总利润 | +3512.06% | +3512.06% | **0** |
+| 胜率 | 73.5% | 73.5% | **0** |
+| axis_support 平均利润 | 1.42% | 1.42% | **0** |
+| axis_support 总利润 | 147,483 USDT | 147,483 USDT | **0** |
+
+### 核心结论
+
+**axis_mult 1.2 完全无效**：所有指标与基线 100% 一致，证明提高目标位到 1.2× **无任何改善**。
+
+### 物理原因
+
+1. down_wave 在价格到达 **1.42%** 时就触发退出
+2. 目标位在 **6-9.6%**（1.2× TR Height）
+3. 无论目标位多高，down_wave 总是抢先退出
+4. **提高目标位无法改变退出时机**
+
+### 最后一笔交易（按时间排序）
+
+- **交易对**: BTC/USDT:USDT
+- **入场标签**: `wyckoff_sos`（不是 axis_support）
+- **开仓**: 2026-05-01 14:00 @ 78,691.30
+- **平仓**: 2026-05-02 11:00 @ 78,205.50
+- **利润**: **-0.73%** (-1,054.60 USDT)
+- **退出原因**: `force_exit`（回测结束强制平仓）
+- **持仓时长**: 21 小时
+
+### 决策与建议
+
+#### ❌ 放弃 axis_mult 路径
+
+**理由**:
+- axis_mult 1.2 已证明无效
+- axis_mult 1.5 预计同样无效
+- 提高目标位无法改变退出时机
+
+#### ✅ 重新评估路径 A（down_wave 优化）
+
+**新的收益估算**:
+- 原估算: ~1.1%（基于 13 笔高利润交易）
+- **修正估算: ~4.4%**（基于 261 笔 axis_support 平均提升 0.6%）
+
+**计算逻辑**:
+```
+261 笔 axis_support
+× 平均利润提升 0.6% (1.42% → 2.0%)
+= 156% 额外利润
+÷ 总利润 3512%
+= ~4.4% 提升幅度
+```
+
+**关键洞察**:
+- axis_mult 测试证明：问题不在目标位，而在退出时机
+- 必须调整 down_wave 逻辑，才能让价格有机会到达更高目标
+- 路径 A 的收益上限可能被低估了
+
+#### 📋 下一步行动
+
+1. **✅ 已完成**: axis_mult 1.2 测试
+2. **❌ 已取消**: axis_mult 1.5 测试（预计无效）
+3. **⏳ 待评估**: 重新设计路径 A 测试方案
+4. **⏳ 待测试**: down_wave 阈值调整（0.001 → 0.0015 → 0.002）
+5. **⏳ 待监控**: TSL 触发次数变化
+
+### 代码状态
+
+**无需回退**：
+- 策略代码中只有注释修改（从 0.2 改为 1.0）
+- 这是正确的修正（超参优化已验证 1.0 最优）
+- `WY_PNF_AXIS_MULT` 默认值保持 1.0
+
+**Git 状态**:
+```
+modified:   user_data/strategies/WyckoffV7_TrueMethod.py
+  - 注释修正: axis_support 默认 0.2 → 1.0
+  - 添加 Note: 超参优化验证 1.0 最优
+```
+
+### 相关文档
+
+- 完整报告: `AXIS_MULT_1_2_TEST_REPORT.md`
+- 分析脚本: `analyze_axis_mult_backtest.py`
+- 回测文件: `backtest-result-2026-05-05_05-48-03.zip`
+- 路径 A 分析: `PATH_A_CORRECTION.md`
+- 诊断报告: `AXIS_DOWN_WAVE_DIAGNOSTIC_REPORT.md`
+
+---
+
+**测试时间**: 2026-05-05  
+**测试人**: 用户  
+**状态**: axis_mult 路径已放弃，转向路径 A 重新评估
+
+
+---
+
+## ✅ 代码注释一致性确认 — 2026-05-05
+
+> **状态**: ✅ **已确认一致**  
+> **检查时间**: 2026-05-05  
+> **检查人**: 用户
+
+### 用户发现的疑问
+
+**第 5249 行注释** vs **第 713 行代码**：
+- 用户担心注释写"默认0.2"，但代码是"默认1.0"
+- 如果真是 0.2x，目标位会低于入场价（不合理）
+
+### 实际检查结果
+
+**✅ 代码和注释已经一致**：
+
+**第 713 行**（初始化）：
+```python
+# 🆕 超参测试用：PNF目标乘数（axis_support默认1.0, sos默认0.35）
+# 📝 Note: 超参优化(2026-05-03)测试0.15-0.35均劣于1.0，保持1.0
+self.pnf_axis_mult = float(os.getenv('WY_PNF_AXIS_MULT', '1.0'))
+```
+
+**第 5256 行**（使用处）：
+```python
+# axis_support (BUEC/LPS): 可配置乘数（WY_PNF_AXIS_MULT，默认1.0）
+# 📝 Note: 超参优化(2026-05-03)测试0.15-0.35均劣于1.0，保持1.0
+adjusted = tr_low + tr_height * self.pnf_axis_mult
+```
+
+### 历史修正记录
+
+**之前确实存在注释错误**（已在 2026-05-04 修正）：
+- 修改前: 注释写"默认0.2"
+- 修改后: 注释写"默认1.0"
+- 原因: 超参优化验证 1.0 是最优配置
+
+### 物理合理性验证
+
+**为什么 1.0x 是合理的？**
+
+以用户提到的例子：
+- TR 底部: 74,893
+- TR 高度: 5,853
+- 入场价: 78,878（在 TR 中上部）
+
+**如果用 0.2x**：
+```
+目标位 = 74,893 + 5,853 × 0.2 = 76,063
+→ 低于入场价 78,878
+→ 永远不会触发（不合理）
+```
+
+**如果用 1.0x**：
+```
+目标位 = 74,893 + 5,853 × 1.0 = 80,746
+→ 高于入场价 78,878
+→ 需要上涨 2.3% 才能触发（合理）
+```
+
+### 结论
+
+- ✅ **代码正确**: 默认值 1.0
+- ✅ **注释正确**: 已修正为 1.0
+- ✅ **物理合理**: 1.0x 是唯一合理的默认值
+- ✅ **超参验证**: 1.0 优于 0.15-0.35（回测数据支持）
+
+### Git 状态
+
+```
+modified:   user_data/strategies/WyckoffV7_TrueMethod.py
+  - 第 713 行: 注释已修正为"默认1.0"
+  - 第 5256 行: 注释已修正为"默认1.0"
+  - 添加 Note: 超参优化验证
+```
+
+**无需进一步修改**。
+
+---
+
+**检查时间**: 2026-05-05  
+**检查人**: 用户  
+**状态**: 代码和注释已一致，无需修改

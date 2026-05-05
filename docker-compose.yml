@@ -26,6 +26,9 @@ services:
     environment:
       - PYTHONPATH=/freqtrade
       - WY_PNF_SHADOW_PROTECT=${WY_PNF_SHADOW_PROTECT:-0}
+      - WY_PNF_AXIS_ENABLE=${WY_PNF_AXIS_ENABLE:-0}
+      - WY_PNF_WAVE_START_ENABLE=${WY_PNF_WAVE_START_ENABLE:-0}
+      - WY_PNF_SOS_EARLY_MULT=${WY_PNF_SOS_EARLY_MULT:-1.0}
       - WY_SKIP_PNF_VALIDATION=${WY_SKIP_PNF_VALIDATION:-0}
     # Expose api on port 8080 (localhost only)
     # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
