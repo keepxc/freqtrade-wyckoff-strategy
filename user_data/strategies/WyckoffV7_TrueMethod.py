@@ -54,6 +54,10 @@ wyckoff_path = os.path.join(os.path.dirname(__file__), '..', '..')
 if wyckoff_path not in sys.path:
     sys.path.insert(0, wyckoff_path)
 import talib.abstract as ta
+# === V8 日线结构层（D-011 Step 1：Phase 过滤入场）===
+from v8_modules.sc_detector import add_v8_sc_detection
+from v8_modules.phase_detector import add_v8_phase_detection
+from v8_modules.pnf_calculator import add_v8_pnf_targets
 import logging
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
@@ -444,6 +448,19 @@ class WyckoffV7_TrueMethod(IStrategy):
     # 实验：提高全局效率阈值，过滤弱下降波，观察 axis_support×down_wave WR 是否提升
     # 默认 0.001（原值不变），开启实验：docker run -e WY_DW_EFF_THRESHOLD=0.003
     down_wave_eff_threshold: float = float(os.getenv('WY_DW_EFF_THRESHOLD', '0.001'))
+
+    # V8 退出机制重构：down_wave 最低利润门槛（2026-05-07）
+    # 背景：down_wave 78% 方向正确，但中位数触发利润仅 +1.43%，过早锁死利润空间
+    # 方案：不改 down_wave 判断逻辑，仅加利润保护——低于门槛时 down_wave 保持沉默
+    # 默认 0.0（不设门槛，保持基线不变），测试：WY_DW_MIN_PROFIT=0.02 / 0.03
+    dw_min_profit: float = float(os.getenv('WY_DW_MIN_PROFIT', '0.0'))
+
+    # ============================================================
+    # V8 日线结构层（D-011 Step 1：Phase 过滤入场，退出不变）
+    # 开关：WY_V8=1 启用 Phase 过滤，默认 0（不影响 V7 基线）
+    # ============================================================
+    use_v8: bool = os.getenv('WY_V8', '0').lower() not in ('0', 'false', 'off')
+
     # P3: 波段级 Effort/Result 背离（默认关闭，验证通过后可手动开启）
     # 作用：swing_up_er_weak → 辅助提前退出；swing_down_er_exhaustion → Spring 质量×1.15
     # 开启方式：docker run -e WY_P3_SWING_ER=1
@@ -709,8 +726,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         # PNF Shadow Protect Integration: 实例变量初始化（全部通过环境变量控制）
         self.pnf_shadow_protect_enabled = os.getenv('WY_PNF_SHADOW_PROTECT', '0') == '1'
         self.pnf_timeout_hours = float(os.getenv('WY_PNF_TIMEOUT_HOURS', '48'))
-        # 🆕 超参测试用：PNF目标乘数（axis_support默认1.0, sos默认0.35）
-        # 📝 Note: 超参优化(2026-05-03)测试0.15-0.35均劣于1.0，保持1.0
+        # 🆕 超参测试用：PNF目标乘数（axis_support默认0.2, sos默认0.35）
         self.pnf_axis_mult = float(os.getenv('WY_PNF_AXIS_MULT', '1.0'))
         self.pnf_sos_mult = float(os.getenv('WY_PNF_SOS_MULT', '0.35'))
         # 🆕 超参测试用：PNF激活最小盈利门槛（默认3%）
@@ -723,16 +739,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         self.pnf_sos_early_mult = float(os.getenv('WY_PNF_SOS_EARLY_MULT', '1.0'))
         # 🆕 Test 2: wave_start 纳入 Shadow Protect（默认 0=不启用）
         self.pnf_wave_start_enable = os.getenv('WY_PNF_WAVE_START_ENABLE', '0') == '1'
-        # 🆕 Test 4.1 方案C: axis_support 纳入 Shadow Protect（默认 0=不启用）
-        self.pnf_axis_enable = os.getenv('WY_PNF_AXIS_ENABLE', '0') == '1'
         logger.info(f'PNF Shadow Protect: {"启用" if self.pnf_shadow_protect_enabled else "禁用"} '
                     f'(WY_PNF_SHADOW_PROTECT={os.getenv("WY_PNF_SHADOW_PROTECT", "1")}), '
                     f'超时={self.pnf_timeout_hours}h, axis_mult={self.pnf_axis_mult}, '
                     f'sos_mult={self.pnf_sos_mult}, min_profit={self.pnf_min_profit}, '
                     f'SP阈值={self.pnf_sp_max_profit}/{self.pnf_sp_giveback}/{self.pnf_sp_min_current}, '
-                    f'sos_early_mult={self.pnf_sos_early_mult}, '
-                    f'wave_start_enable={self.pnf_wave_start_enable}, '
-                    f'axis_enable={self.pnf_axis_enable}')
+                    f'sos_early_mult={self.pnf_sos_early_mult}, wave_start_enable={self.pnf_wave_start_enable}')
         
         # 开发状态标记
         self.phase_1_active = True  # Weis Wave Foundation ✓ 完成
@@ -1278,6 +1290,22 @@ class WyckoffV7_TrueMethod(IStrategy):
                         df_1d['daily_tr_width_atr']      = float('nan')
                         df_1d['daily_tr_overlap']        = float('nan')
                         df_1d['daily_gate_score']        = 0.0
+
+                    # === V8 日线结构层（D-011 Step 1：Phase 过滤入场）===
+                    if self.use_v8:
+                        try:
+                            # D-002: shift(1) 防前瞻偏差（保留 date 列不偏移）
+                            _shifted = df_1d.drop(columns=['date']).shift(1)
+                            _shifted['date'] = df_1d['date']
+                            _shifted = add_v8_sc_detection(_shifted)
+                            _shifted = add_v8_phase_detection(_shifted)
+                            _shifted = add_v8_pnf_targets(_shifted)
+                            for _col in _shifted.columns:
+                                if _col.startswith('v8_'):
+                                    df_1d[_col] = _shifted[_col]
+                        except Exception as _v8_err:
+                            logger.warning(f'V8 日线检测失败: {_v8_err}')
+
                     # merge_informative_pair：Daily → 1H（ffill=True，无前瞻偏差）
                     # 当日 1H 只能看到昨日已收盘的 Daily K线，ffill 正确处理 24H 内的填充
                     _daily_cols = [
@@ -1299,6 +1327,14 @@ class WyckoffV7_TrueMethod(IStrategy):
                         'daily_tr_width_atr', 'daily_tr_overlap',
                         'daily_gate_score',
                     ]
+                    # V8 结构层（仅 WY_V8=1 时存在）
+                    if self.use_v8:
+                        _daily_cols += [
+                            'v8_phase', 'v8_phase_allow_long',
+                            'v8_sc_final', 'v8_sc_low', 'v8_sc_type',
+                            'v8_target_1', 'v8_target_2', 'v8_target_3',
+                            'v8_target_locked', 'v8_tr_high', 'v8_tr_low',
+                        ]
                     df_1d_slim = df_1d[_daily_cols].copy()
                     dataframe = merge_informative_pair(
                         dataframe, df_1d_slim,
@@ -2464,6 +2500,11 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 基本趋势支撑
         trend_support = (dataframe['close'] > dataframe['ema_50'] * 0.95) | (dataframe['close'] > dataframe['ema_200'] * 1.02)
 
+        # === V8 诊断：trading_allowed 三因子拆解 — 保存子条件 ===
+        dataframe['_ta_bull_market'] = bull_market
+        dataframe['_ta_not_distribution'] = not_distribution
+        dataframe['_ta_trend_support'] = trend_support
+
         # === Task 2.5: Phase E 背景检测 ===
         in_phase_e = dataframe['wyckoff_context'] == 'phase_e'
 
@@ -2500,7 +2541,12 @@ class WyckoffV7_TrueMethod(IStrategy):
         #   market_env == 'trading_range' → Spring/Axis 标准路由
 
         # 综合交易许可（通用）
-        dataframe['trading_allowed'] = bull_market & not_distribution & trend_support
+        # V8 盈利清算：移除 bull_market（close > EMA200）
+        # 原定义：bull_market & not_distribution & trend_support
+        # 物理依据：wave_start 是 ChoCh 动能检测，最佳入场在 EMA200 下方
+        #           EMA200 滞后过滤系统性放弃 Phase C/D 最优买点
+        # 清算目标：验证被 EMA200 拦截的 325 笔信号的盈利能力
+        dataframe['trading_allowed'] = not_distribution & trend_support
 
         # Task 2.14: 强/中等轴线 + 意图干净 → 完全旁路 EMA
         # 物理依据：轴线经过 ≥2 次测试，是 HVN 真实物理锚点，不需要 EMA 作安全带
@@ -2643,7 +2689,24 @@ class WyckoffV7_TrueMethod(IStrategy):
         # 努力结果和谐
         # 无SOT警告
         # 波段质量OK（宽松）
-        wave_start_entry = dataframe['is_wave_start'] & (dataframe['wave_direction'] == 'up') & (dataframe['wave_efficiency'] > 0.0001) & bull_market & wyckoff_context_ok & harmony_ok & no_sot_warning & quality_ok
+        # V8 实验：wave_start 移除 bull_market（EMA200），纯 A/B 对比
+        wave_start_entry = dataframe['is_wave_start'] & (dataframe['wave_direction'] == 'up') & (dataframe['wave_efficiency'] > 0.0001) & wyckoff_context_ok & harmony_ok & no_sot_warning & quality_ok
+
+        # === V8 诊断：wave_start 过滤器逐级计数（临时，分析完移除）===
+        _ws_raw = dataframe['is_wave_start'] & (dataframe['wave_direction'] == 'up') & (dataframe['wave_efficiency'] > 0.0001)
+        _ws_counts = {
+            'raw': int(_ws_raw.sum()),
+            'blocked_bull_market': int((_ws_raw & ~bull_market).sum()),
+            'blocked_context': int((_ws_raw & bull_market & ~wyckoff_context_ok).sum()),
+            'blocked_harmony': int((_ws_raw & bull_market & wyckoff_context_ok & ~harmony_ok).sum()),
+            'blocked_sot': int((_ws_raw & bull_market & wyckoff_context_ok & harmony_ok & ~no_sot_warning).sum()),
+            'blocked_quality': int((_ws_raw & bull_market & wyckoff_context_ok & harmony_ok & no_sot_warning & ~quality_ok).sum()),
+            'final': int(wave_start_entry.sum()),
+        }
+        _diag_file = '/freqtrade/user_data/ws_filter_diag.txt'
+        with open(_diag_file, 'a') as _df:
+            _df.write(f'raw={_ws_counts["raw"]} bull={_ws_counts["blocked_bull_market"]} ctx={_ws_counts["blocked_context"]} harmony={_ws_counts["blocked_harmony"]} sot={_ws_counts["blocked_sot"]} quality={_ws_counts["blocked_quality"]} final={_ws_counts["final"]}\n')
+        # === V8 诊断结束 ===
         # 3. 效率突破入场 - 关键高收益信号
         # 效率突破条件
         # 基础环境条件
@@ -3012,6 +3075,76 @@ class WyckoffV7_TrueMethod(IStrategy):
                     f'P2 RS软门控: 风险区低质量多头抑制 {before_cnt - after_cnt} 笔 '
                     f'(风险K线={int(_rs_bear_risk.sum())})'
                 )
+
+        # === V8 诊断：final_entry 层漏斗（wave_start 专用，临时）===
+        # 统计 wave_start_entry 信号在 final_entry 各层被拦截的数量
+        _ws_diag = wave_start_entry.copy()
+        _fe_ws_before = int((_ws_diag & final_entry).sum())  # 进入 final_entry 的 wave_start
+        _fe_ws_counts = {
+            'ws_entry': int(wave_start_entry.sum()),
+            'blocked_composite_intent': int((_ws_diag & ~composite_intent_ok).sum()),
+            '_pass_composite': int((_ws_diag & composite_intent_ok).sum()),
+        }
+        _ws_diag = _ws_diag & composite_intent_ok
+        _fe_ws_counts['blocked_trading_allowed'] = int((_ws_diag & ~dataframe['trading_allowed']).sum())
+        _ws_diag = _ws_diag & dataframe['trading_allowed']
+        _fe_ws_counts['blocked_rr_long'] = int((_ws_diag & ~rr_long_ok).sum())
+        _ws_diag = _ws_diag & rr_long_ok
+        _fe_ws_counts['blocked_bear'] = int((_ws_diag & bear_market_block_long).sum())
+        _ws_diag = _ws_diag & ~bear_market_block_long
+        _fe_ws_counts['blocked_daily_gate'] = int((_ws_diag & daily_gate_hard_block).sum())
+        _ws_diag = _ws_diag & ~daily_gate_hard_block
+        _fe_ws_counts['blocked_pnf'] = int((_ws_diag & ~pnf_target_valid_long).sum())
+        _ws_diag = _ws_diag & pnf_target_valid_long
+        _fe_ws_counts['final_survivors'] = int(_ws_diag.sum())
+        _df = open('/freqtrade/user_data/ws_final_diag.txt', 'a')
+        _df.write(f'entered_fe={_fe_ws_before} ' + ' '.join(f'{k}={v}' for k,v in _fe_ws_counts.items()) + '\n')
+        _df.close()
+
+        # === V8 诊断：trading_allowed 三因子拆解（全局，非仅 wave_start）===
+        # 对所有依赖 trading_allowed 的信号（lps/sos/ws/efficiency/phase_d_hq），
+        # 分解 trading_allowed 的三个子条件拦截情况
+        _ta_signals = (lps_pullback_entry | sos_entry | wave_start_entry |
+                       efficiency_entry | phase_d_high_quality)
+        _ta_before = _ta_signals & composite_intent_ok  # 到达 trading_allowed 门前
+        _ta_blocked = _ta_before & ~dataframe['trading_allowed']
+        _ta_pass = _ta_before & dataframe['trading_allowed']
+
+        _bm = dataframe['_ta_bull_market']
+        _nd = dataframe['_ta_not_distribution']
+        _ts = dataframe['_ta_trend_support']
+
+        _ta_diag = {
+            'ta_total_arrive': int(_ta_before.sum()),          # 到达门前的信号总数
+            'ta_pass': int(_ta_pass.sum()),                     # 通过
+            'ta_blocked_total': int(_ta_blocked.sum()),         # 拦截总数
+            # 单因子独占拦截（仅该条件失败，另外两个通过）
+            'ta_blk_bull_only': int((_ta_blocked & ~_bm & _nd & _ts).sum()),
+            'ta_blk_dist_only': int((_ta_blocked & _bm & ~_nd & _ts).sum()),
+            'ta_blk_trend_only': int((_ta_blocked & _bm & _nd & ~_ts).sum()),
+            # 组合拦截（至少两个条件失败）
+            'ta_blk_bull_trend': int((_ta_blocked & ~_bm & _nd & ~_ts).sum()),
+            'ta_blk_bull_dist': int((_ta_blocked & ~_bm & ~_nd & _ts).sum()),
+            'ta_blk_dist_trend': int((_ta_blocked & _bm & ~_nd & ~_ts).sum()),
+            'ta_blk_all3': int((_ta_blocked & ~_bm & ~_nd & ~_ts).sum()),
+            # 汇总：每个因子参与拦截的次数（含组合）
+            'ta_blk_bull_any': int((_ta_blocked & ~_bm).sum()),
+            'ta_blk_dist_any': int((_ta_blocked & ~_nd).sum()),
+            'ta_blk_trend_any': int((_ta_blocked & ~_ts).sum()),
+        }
+        _ta_file = '/freqtrade/user_data/ta_factor_diag.txt'
+        with open(_ta_file, 'a') as _tf:
+            _tf.write(' '.join(f'{k}={v}' for k, v in _ta_diag.items()) + '\n')
+        # === 三因子拆解诊断结束 ===
+        if self.use_v8:
+            _v8_col = 'v8_phase_allow_long_1d'
+            _v8_allow = dataframe.get(_v8_col, pd.Series(True, index=dataframe.index))
+            _v8_allow = _v8_allow.fillna(True).astype(bool)
+            _blocked_by_v8 = final_entry & ~_v8_allow
+            if _blocked_by_v8.any():
+                logger.info(f'V8 Phase 过滤: {int(_blocked_by_v8.sum())} 个入场被阻止 (非 C/D/E)')
+            final_entry = final_entry & _v8_allow
+
         dataframe.loc[final_entry, 'enter_long'] = 1
         # 入场标签（优先级从低到高）
         dataframe.loc[sos_entry & final_entry, 'enter_tag'] = 'wyckoff_sos'
@@ -4940,8 +5073,6 @@ class WyckoffV7_TrueMethod(IStrategy):
             return (True, reason)
         return (False, '')
 
-
-
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: datetime,
                          current_rate: float, current_profit: float, **kwargs) -> float:
         """
@@ -5234,8 +5365,8 @@ class WyckoffV7_TrueMethod(IStrategy):
         🆕 根据入场类型返回调整后的 PNF 保守目标位。
         
         威科夫因果定律：不同入场信号蕴含的"因"不同。
-        - axis_support (BUEC/LPS)：次级动能，使用可配置乘数（默认1.0x TR Height）
-        - sos_entry：主趋势确认，使用可配置乘数（默认0.35x TR Height）
+        - axis_support (BUEC/LPS)：次级动能，使用 0.5x TR Height（TR 中位）
+        - sos_entry：主趋势确认，使用 1.0x TR Height（TR 顶部）
         - 其他：保持原始 target_conservative
         
         Args:
@@ -5253,12 +5384,11 @@ class WyckoffV7_TrueMethod(IStrategy):
             tr_height = float(pnf_metadata.get('tr_height', 0.0) or 0.0)
             
             if entry_tag == 'wyckoff_axis_support' and tr_low > 0 and tr_height > 0:
-                # axis_support (BUEC/LPS): 可配置乘数（WY_PNF_AXIS_MULT，默认1.0）
-                # 📝 Note: 超参优化(2026-05-03)测试0.15-0.35均劣于1.0，保持1.0
+                # axis_support (BUEC/LPS): 可配置乘数（WY_PNF_AXIS_MULT，默认0.2）
                 adjusted = tr_low + tr_height * self.pnf_axis_mult
                 if adjusted < target_cons:
                     profit_needed = (adjusted - tr_low) / tr_low * 100 if tr_low > 0 else 0
-                    logger.info(
+                    logger.debug(
                         f'📐 PNF 目标调整 (axis_support {self.pnf_axis_mult}x): '
                         f'target={target_cons:.2f} → adjusted={adjusted:.2f} '
                         f'(TR: {tr_low:.0f}-{tr_high:.0f}, h={tr_height:.0f}, '
@@ -5278,9 +5408,8 @@ class WyckoffV7_TrueMethod(IStrategy):
             dist_height = float(pnf_metadata.get('dist_height', 0.0) or 0.0)
             
             if entry_tag == 'wyckoff_axis_support' and dist_high > 0 and dist_height > 0:
-                # axis_support short: 可配置乘数（默认1.0x Dist Height）
-                # 📝 Note: 多头已验证1.0x最优，空头保持对称
-                adjusted = dist_high - dist_height * self.pnf_axis_mult
+                # axis_support short: 0.5x Dist Height（Distribution 中位）
+                adjusted = dist_high - dist_height * 0.5
                 if adjusted > target_short_cons:  # 空头目标向下调整（价格更低）
                     logger.debug(
                         f'PNF 目标调整 (axis_support short): {target_short_cons:.2f} → {adjusted:.2f} '
@@ -5319,12 +5448,10 @@ class WyckoffV7_TrueMethod(IStrategy):
         
         # 检查 entry_tag 是否符合条件
         # 🔧 P0 修正（2026-05-03）：axis_support 是弱因信号（BUEC/LPS），PnF 目标为"绝对结利线"
-        # 仅 sos_entry（强趋势确认）+ wave_start（测试中）+ axis_support（Test 4.1 方案C）激活 Shadow Protect
+        # 仅 sos_entry（强趋势确认）+ wave_start（测试中）激活 Shadow Protect 博弈超额利润
         eligible_tags = ['wyckoff_sos_entry']
         if self.pnf_wave_start_enable:
             eligible_tags.append('wyckoff_wave_start')
-        if self.pnf_axis_enable:
-            eligible_tags.append('wyckoff_axis_support')
         if trade.enter_tag not in eligible_tags:
             return 'hard_exit'
         
@@ -5718,7 +5845,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             
             if not trade.is_short:
                 _tgt_std  = float(pnf_metadata.get('target_standard', 0.0) or 0.0)
-                # 🆕 axis_support 使用可配置乘数调整目标（默认1.0x TR Height）
+                # 🆕 axis_support 使用 0.5x TR Height 调整目标
                 _tgt_cons = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, False)
                 if _tgt_std > 0 and current_rate >= _tgt_std:
                     logger.info(f'P&F 目标位2(多头标准): {pair}, '
@@ -5747,7 +5874,7 @@ class WyckoffV7_TrueMethod(IStrategy):
                         return 'pnf_target_1'
             else:
                 _tgt_short_std  = float(pnf_metadata.get('target_short_standard', 0.0) or 0.0)
-                # 🆕 axis_support 使用可配置乘数调整目标（默认1.0x Dist Height）
+                # 🆕 axis_support 使用 0.5x Dist Height 调整目标
                 _tgt_short_cons = self._get_adjusted_pnf_target(trade.enter_tag, pnf_metadata, True)
                 if _tgt_short_std > 0 and current_rate <= _tgt_short_std:
                     logger.info(f'P&F 目标位2(空头标准): {pair}, '
@@ -5831,18 +5958,21 @@ class WyckoffV7_TrueMethod(IStrategy):
                         return 'wyckoff_down_wave'
                 # flag 开启时 axis_support 不满足严格条件 → 不触发标准 down_wave
             else:
-                # 标准条件：is_wave_start && wave_direction=='down' && wave_efficiency > 0.001
-                # 修复 Bug-2026-03-31: is_wave_start 在实盘最后一根K线上永远是 False。
-                # wave_analyzer 总是将最后一根K线标为当前wave的终点(is_wave_end)，
-                # 不会是起点(is_wave_start)。使用回看窗口（最近4根K线）捕获刚开始的下降波段。
-                for _lb in range(0, min(4, current_index + 1)):
-                    _ci = current_index - _lb
-                    if ((_ci >= 0 and dataframe.iloc[_ci, self._wave_idx['is_wave_start']]) and
-                            dataframe.iloc[_ci, self._wave_idx['wave_direction']] == 'down' and
-                            dataframe.iloc[_ci, self._wave_idx['wave_efficiency']] > 0.001):
-                        wave_efficiency = dataframe.iloc[_ci, self._wave_idx['wave_efficiency']]
-                        logger.info(f'标准下降波段退出: {pair}, 波段效率={wave_efficiency:.4f}, 回看={_lb}根K线, 收益={current_profit:.2%}')
-                        return 'wyckoff_down_wave'
+                # V8 退出重构：利润门控——低利润时 down_wave 保持沉默
+                # down_wave 78% 方向正确，问题不在判断逻辑而在触发时机太早
+                # 解决方案：不改效率阈值，只加最低利润门槛
+                if current_profit < self.dw_min_profit:
+                    pass  # 利润不够 → 跳过 down_wave，等待更高利润或 ROI/TSL
+                else:
+                    # 标准条件：is_wave_start && wave_direction=='down' && wave_efficiency > 0.001
+                    for _lb in range(0, min(4, current_index + 1)):
+                        _ci = current_index - _lb
+                        if ((_ci >= 0 and dataframe.iloc[_ci, self._wave_idx['is_wave_start']]) and
+                                dataframe.iloc[_ci, self._wave_idx['wave_direction']] == 'down' and
+                                dataframe.iloc[_ci, self._wave_idx['wave_efficiency']] > 0.001):
+                            wave_efficiency = dataframe.iloc[_ci, self._wave_idx['wave_efficiency']]
+                            logger.debug(f'标准下降波段退出: {pair}, 波段效率={wave_efficiency:.4f}, 回看={_lb}根K线, 收益={current_profit:.2%}')
+                            return 'wyckoff_down_wave'
         # 没有触发任何退出条件
         return None
 
@@ -5970,7 +6100,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             
             # 目标位有效，保存到元数据
             # 🆕 P0 Fix (2026-05-03): 同时保存 tr_low/tr_high/tr_height 和 entry_tag，
-            # 用于 axis_support 目标乘数调整（默认1.0x TR Height）
+            # 用于 axis_support 目标乘数调整（0.5x TR Height）
             pnf_meta = {
                 'target_conservative':       target_cons,
                 'target_standard':           target_std,
