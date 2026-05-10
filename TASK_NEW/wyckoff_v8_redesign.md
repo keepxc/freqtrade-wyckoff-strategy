@@ -1,8 +1,8 @@
 # Wyckoff V8 True Method — 重新设计 TASK 文档
 
-**版本**: V8.5.0  
+**版本**: V8.5.1  
 **创建日期**: 2026-05-06  
-**上次更新**: 2026-05-10（新 V8 路径确立：入场信号语义矛盾审计 + wave_start 频率提升。A+B 实验固化，基线升至 11,313%）  
+**上次更新**: 2026-05-10（真 V8 架构确立：新策略文件从零实现，入场 Phase D/E + wave_start，退出全走 custom_exit + PNF 目标位。OI 接口预留不强依赖。TASK 4-6 重新激活。）  
 **背景**: V7 入场端 EMA200 移除释放 138% 利润，但 1H 退出端微调被证明存在不可预测的滞后性。V8 目标不变：三层分离架构下实现威科夫因果律。
 
 ---
@@ -22,6 +22,7 @@
 | **V8.4.2** | 2026-05-07 | **Phase E 分层抑制系列实验完成。非对称架构（入口自由+出口分层）：Phase E 全量抑制 → 1,716%（-79%）；非对称抑制（仅 wave_start）→ 8,070%（≈V7.1）。最终结论：Freqtrade 向量化 exit_signal 优先权决定了 per-trade 退出豁免无法生效。V7.1=8,374% 为当前可达天花板。** |
 | **V8.4.3** | 2026-05-07 | **指纹过滤实验（V7.7）：向量化路径中直接读取 _active_entry_tag，wave_start+Phase E+和谐 抑制 17.3% down_wave → 5,368%（-36%）。结论：1H 动量衰减的"第一直觉"优于结构"宏观坚持"。7 轮实验无一超越 V7.1。战略转向：退出端已触物理极限，转攻日线层"因"的纯净度（TASK 1 SC/BC 识别）。** |
 | **V8.5.0** | 2026-05-10 | **新 V8 路径确立：放弃三层分离架构，转向入场信号语义矛盾审计 + wave_start 频率提升。实验 A（豁免 distributing +1375%）+ 实验 B（bear×accumulating 豁免 +1564%）固化。基线升至 11,313%（2022-2026），DD 6.28% 不变。TASK 4-6 暂停，TASK 1-3 重新定位为标注层。** |
+| **V8.5.1** | 2026-05-10 | **真 V8 架构确立：新策略文件 WyckoffV8.py 从零实现，不引用 V7 代码。入场：wave_start ChoCh + Phase D/E 上下文。退出：全走 custom_exit + PNF 目标位，绕过 Freqtrade 向量化路径约束。OI 接口预留不强依赖。TASK 1-3 升级为核心依赖，TASK 4-6 重新激活。** |
 
 ---
 
@@ -1796,3 +1797,83 @@ wave_start 709 笔 raw（2022-2026）
 | `ws_filter_diag.txt` | 📊 | wave_start_entry 漏斗诊断输出 |
 | `ws_final_diag.txt` | 📊 | final_entry 漏斗诊断输出 |
 | `ta_factor_diag.txt` | 📊 | trading_allowed 三因子诊断输出 |
+
+---
+
+## Session 4：真 V8 架构确立（2026-05-10）
+
+### 核心决策
+
+**新策略文件 `WyckoffV8.py`，从零实现，不引用 V7 任何代码逻辑。**
+
+V7 所有实验失败的根本原因是在 V7 框架内改造，被 Freqtrade 两个机制锁死：
+1. `exit_signal`（向量化）优先于 `custom_exit`，per-trade 退出插不进去
+2. V7 的 `down_wave` 是 Pandas 向量化布尔 Series，无法做 per-trade 差异化
+
+新策略文件完全不使用 `exit_signal` 做退出，全走 `custom_exit`，两个约束同时消失。
+
+---
+
+### V8 架构设计
+
+```
+日线层（每日更新）
+├── TASK 1: sc_detector.py      → SC/BC 识别，v8_sc_final / v8_sc_low
+├── TASK 2: phase_detector.py   → Phase A-E 状态机，v8_phase / v8_tr_high / v8_tr_low
+└── TASK 3: pnf_calculator.py   → P&F 目标位锁定，v8_target_1/2/3
+         └── [OI 接口预留]       → oi_confirmed 字段，默认 True，数据到位后接入
+
+1H 执行层（TASK 4）
+└── 入场条件：
+    ├── wave_start ChoCh 检测    → 主信号（91% WR，2.87% 均利润）
+    ├── Phase D/E 上下文         → 不硬排除，作为质量加分
+    │   Phase A/B = 不开多（结构建立期，方向未定）
+    │   Phase D/E/unknown = 允许开多
+    └── 基础风控条件             → RR / 仓位上限等
+
+退出层（TASK 5）
+└── 全 custom_exit 实现：
+    ├── PNF T1 前：持仓（除非结构破坏止损）
+    ├── 到达 T1：移止损到保本 / 可选减仓 50%
+    ├── 到达 T2：继续减仓或移止损
+    ├── 到达 T3：全部离场
+    └── 结构止损：收盘跌破 TR Low → 清仓（Phase 失败信号）
+
+集成层（TASK 6）
+└── WyckoffV8.py：新策略文件，informative_pairs 接入日线数据，1H 执行
+```
+
+---
+
+### 关键设计决策
+
+| 决策点 | 选择 | 原因 |
+|--------|------|------|
+| Phase 门控严格度 | Phase A/B 不开，D/E/unknown 允许 | Phase E = 77.8% 时间，排除后频率崩塌；unknown = 不确认坏 |
+| 退出路径 | 全 custom_exit，零 exit_signal | 绕过 Freqtrade 向量化约束，实现真正的 per-trade PNF 跟踪 |
+| OI 数据 | 接口预留，默认 True 不过滤 | Binance 历史 OI 仅 30 天，无法回测；数据到位后接入 TASK 1 |
+| 入场信号 | wave_start 为主信号 | 91% WR + 2.87% 均利润，系统内质量最高 alpha |
+| 与 V7 关系 | 新文件，不引用 V7 代码 | V7 作为生产基线继续运行，V8 独立验证后替换 |
+
+---
+
+### TASK 状态总览（更新）
+
+| TASK | 内容 | 状态 | 说明 |
+|------|------|:---:|------|
+| **TASK 1** | `sc_detector.py` SC/BC 识别 | ✅ 完成 | 升级为核心依赖；BTC 2018-2026 验证通过（9 个 SC） |
+| **TASK 2** | `phase_detector.py` Phase A-E | ✅ 完成 | 升级为核心依赖；Phase D=5%, E=77.8% 分布合理 |
+| **TASK 3** | `pnf_calculator.py` PNF 目标位 | ✅ 完成 | 升级为核心依赖；6 次锁定事件，方向正确 |
+| **TASK 4** | 1H 执行层设计 | 🔵 下一步 | 入场条件 + Phase 上下文整合 |
+| **TASK 5** | 退出层设计 | 🔵 待开始 | 全 custom_exit + PNF 目标位驱动 |
+| **TASK 6** | `WyckoffV8.py` 集成 | 🔵 待开始 | 新策略文件，日线 informative + 1H 执行 |
+| **TASK 7** | 回测验证 & 对比基线 | 🔵 待开始 | vs V7.1+A+B（11,313%），2022-2026 |
+
+---
+
+### 待解决的设计问题（TASK 4 开始前需拍板）
+
+1. **Phase unknown 的处理**：当前 341 天（11.2%）未分类，建议同 D/E 一起允许开多，不强制分类
+2. **结构止损的定义**：收盘跌破 TR Low 清仓 vs ATR 倍数止损 — 需要验证哪种更适配 wave_start
+3. **T1 到达后的持仓比例**：减仓 50% or 移止损不减仓 — 影响大单的截取能力
+4. **custom_exit 性能**：每根 1H K 线 × 所有持仓调用一次，需要评估回测速度是否可接受

@@ -39,28 +39,28 @@
 
 ## V8 当前状态（2026-05-10）
 
-**原计划（已放弃）**：7 个月三层分离架构重设计 — 工程量过大，验证周期太长。
+**真 V8 架构确立**：新策略文件 `WyckoffV8.py` 从零实现，不引用 V7 代码。
 
-**实际执行范围（大幅收窄）**：只做 wave_start 频率提升。
+> 核心：V7 退出端约束（Freqtrade 向量化路径）来自在 V7 框架内修改，新文件不用 `exit_signal`，全走 `custom_exit`，约束消失。
 
-> **依据**：wave_start 是系统里最确定的 alpha（91% 胜率，2.87% 均利润），但频率低（~36 笔/年实盘）。频率提升比任何退出优化天花板更高，且不破坏已有 alpha。
+### 架构
+```
+日线层：sc_detector → phase_detector → pnf_calculator（TASK 1-3，已完成）
+1H 层：wave_start ChoCh + Phase D/E 上下文（TASK 4）
+退出层：custom_exit + PNF T1/T2/T3 目标位驱动（TASK 5）
+集成：WyckoffV8.py（TASK 6）
+```
 
-### 已完成
-- ✅ **TASK 1** `sc_detector.py` — SC/BC 两阶段检测
-- ✅ **TASK 2** `phase_detector.py` — Phase A-E 状态机
-- ✅ **TASK 3** `pnf_calculator.py` — P&F 因果目标位计算
-- ✅ 退出端优化 7 轮实验，结论：V7.1 为 1H 动量退出物理极限
-- ✅ **实验 A**：wave_start 豁免 composite_intent=distributing 拦截 → +1375%，已固化
-
-### 进行中
-- ✅ **实验 B**：wave_start 豁免 bear_market+accumulating → +1564%（9749%→11313%），均利润↑，已固化
-
-### wave_start 漏斗现状（固化后，2022-2026）
-| 层级 | 拦截数 | 备注 |
-|------|--------|------|
-| composite_intent=trending_down | 38 | 保持拦截，下跌趋势不开多 |
-| bear_market_mode | ~73 | 已豁免 accumulating（实验 B 固化），剩余 trending_down/unclear 保持拦截 |
-| composite_intent ctx/harmony/sot/quality | 0 | 对 wave_start 完全无效，可清理死代码 |
+### TASK 状态
+| TASK | 内容 | 状态 |
+|------|------|:---:|
+| TASK 1 | `sc_detector.py` SC/BC 识别 | ✅ |
+| TASK 2 | `phase_detector.py` Phase A-E | ✅ |
+| TASK 3 | `pnf_calculator.py` PNF 目标位 | ✅ |
+| TASK 4 | 1H 执行层设计 | 🔵 下一步 |
+| TASK 5 | 退出层设计（custom_exit + PNF） | 🔵 待开始 |
+| TASK 6 | `WyckoffV8.py` 集成 | 🔵 待开始 |
+| TASK 7 | 回测验证 vs V7.1+A+B（11,313%） | 🔵 待开始 |
 
 V8 模块位置：`user_data/strategies/v8_modules/`
 V8 设计文档：`TASK_NEW/wyckoff_v8_redesign.md`
