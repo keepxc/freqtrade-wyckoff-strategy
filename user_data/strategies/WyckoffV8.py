@@ -154,12 +154,17 @@ class WyckoffV8(IStrategy):
         if self.wave_analyzer is not None:
             try:
                 dataframe = self.wave_analyzer._segment_weis_waves(dataframe)
+                wave_count = int(dataframe.get('is_wave_start', pd.Series(False)).sum())
+                up_count = int((dataframe.get('is_wave_start', pd.Series(False)) &
+                                (dataframe.get('wave_direction', pd.Series('')) == 'up')).sum())
+                logger.info(f'[V8-DIAG] {pair} WaveAnalyzer OK: is_wave_start={wave_count} up_waves={up_count}')
             except Exception as e:
-                logger.warning(f'{pair} WaveAnalyzer failed: {e}')
+                logger.warning(f'[V8-DIAG] {pair} WaveAnalyzer failed: {e}')
                 dataframe['is_wave_start'] = False
                 dataframe['wave_direction'] = ''
                 dataframe['wave_efficiency'] = 0.0
         else:
+            logger.warning(f'[V8-DIAG] {pair} WaveAnalyzer NOT loaded — wave_start=0')
             dataframe['is_wave_start'] = False
             dataframe['wave_direction'] = ''
             dataframe['wave_efficiency'] = 0.0
@@ -172,6 +177,12 @@ class WyckoffV8(IStrategy):
                     df_1d = add_v8_sc_detection(df_1d)
                     df_1d = add_v8_phase_detection(df_1d)
                     df_1d = add_v8_pnf_targets(df_1d)
+
+                    sc_count = int(df_1d.get('v8_sc_final', pd.Series(False)).sum())
+                    phase_d = int((df_1d.get('v8_phase', pd.Series('')) == 'D').sum())
+                    phase_e = int((df_1d.get('v8_phase', pd.Series('')) == 'E').sum())
+                    pnf_valid = int(df_1d.get('v8_target_1', pd.Series(float('nan'))).notna().sum())
+                    logger.info(f'[V8-DIAG] {pair} daily: sc={sc_count} phase_D={phase_d} phase_E={phase_e} pnf_valid={pnf_valid}')
 
                     # merge 回 1H（forward-fill，避免未来数据泄露）
                     daily_cols = [
@@ -193,8 +204,11 @@ class WyckoffV8(IStrategy):
                         direction='backward',
                     )
                     dataframe = dataframe.drop(columns=['date_utc', 'date_1d'], errors='ignore')
+
+                    merged_pnf = int(dataframe.get('v8_target_1', pd.Series(float('nan'))).notna().sum())
+                    logger.info(f'[V8-DIAG] {pair} after merge: 1H rows with pnf_target={merged_pnf}/{len(dataframe)}')
                 else:
-                    logger.warning(f'{pair} 1d data insufficient ({len(df_1d) if df_1d is not None else 0} rows)')
+                    logger.warning(f'[V8-DIAG] {pair} 1d data insufficient ({len(df_1d) if df_1d is not None else 0} rows)')
                     self._fill_v8_defaults(dataframe)
             except Exception as e:
                 logger.error(f'{pair} V8 daily computation failed: {e}')
@@ -206,11 +220,10 @@ class WyckoffV8(IStrategy):
         if V8_MODULES_OK:
             try:
                 dataframe = compute_entry_signal(dataframe)
-                # 诊断输出（回测时写文件）
                 stats = entry_funnel_stats(dataframe)
-                logger.debug(f'{pair} V8 entry funnel: {stats}')
+                logger.info(f'[V8-DIAG] {pair} entry funnel: {stats}')
             except Exception as e:
-                logger.error(f'{pair} entry_detector failed: {e}')
+                logger.error(f'[V8-DIAG] {pair} entry_detector failed: {e}')
                 dataframe['v8_entry_long'] = False
 
         return dataframe
