@@ -278,8 +278,8 @@ class WyckoffV8(IStrategy):
         target_1 = last.get('v8_target_1', np.nan)
         be_offset = float(self.breakeven_offset.value)
 
-        # T1 到达 → 移到保本
-        if not np.isnan(target_1) and current_rate >= target_1:
+        # T1 到达 → 移到保本（只有T1在入场价上方时才有意义）
+        if not np.isnan(target_1) and target_1 > entry_price and current_rate >= target_1:
             breakeven_price = entry_price * (1 + be_offset)
             if current_rate > breakeven_price:
                 sl_price = breakeven_price
