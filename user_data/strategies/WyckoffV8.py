@@ -257,9 +257,15 @@ class WyckoffV8(IStrategy):
     # ── populate_exit_trend（down_wave 主退出，向量化路径）──────
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe['exit_long'] = 0
+
+        # rolling(4) 捕获最近4根K线内的 wave_start（与V7一致，避免实盘最后一根K线漏判）
+        _recent_wave_start = dataframe['is_wave_start'].rolling(4, min_periods=1).max().astype(bool)
+
         is_down_wave = (
-            dataframe.get('is_wave_start', pd.Series(False, index=dataframe.index)).fillna(False) &
-            (dataframe.get('wave_direction', pd.Series('', index=dataframe.index)).fillna('') == 'down')
+            _recent_wave_start &
+            (dataframe['wave_direction'] == 'down') &
+            (dataframe['wave_efficiency'] > 0.001) &                         # 过滤弱下降波
+            (dataframe['wave_displacement'] > dataframe['close'] * 0.008)    # ≥0.8% 实质性位移
         )
         dataframe.loc[is_down_wave, ['exit_long', 'exit_tag']] = [1, 'v8_down_wave']
         return dataframe
