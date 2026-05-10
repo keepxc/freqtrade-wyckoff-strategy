@@ -30,7 +30,6 @@ from functools import reduce
 import os
 
 from freqtrade.strategy import IStrategy, DecimalParameter, IntParameter
-import freqtrade.vendor.qtpylib.indicators as qtpylib
 import talib.abstract as ta
 
 logger = logging.getLogger(__name__)
@@ -111,6 +110,13 @@ class WyckoffV8(IStrategy):
 
     # 启动K线数（日线 SC 检测需要至少 252 根）
     startup_candle_count = 300
+
+    # ── WaveAnalyzer 依赖参数（保持与 V7 默认值一致）────────
+    wave_min_percent = DecimalParameter(0.005, 0.015, default=0.008, space='buy', optimize=False, load=True)
+    wave_atr_multiplier = DecimalParameter(1.0, 2.5, default=1.5, space='buy', optimize=False, load=True)
+    wave_min_bars = IntParameter(2, 8, default=3, space='buy', optimize=False, load=True)
+    sot_wave_count = IntParameter(3, 5, default=3, space='buy', optimize=False, load=True)
+    sot_displacement_ratio = DecimalParameter(0.7, 0.9, default=0.8, space='buy', optimize=False, load=True)
 
     # ── 参数 ─────────────────────────────────────────────────
     # 结构止损：TR Low 之下的缓冲比例
