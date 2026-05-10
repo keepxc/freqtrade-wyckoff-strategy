@@ -836,6 +836,11 @@ class WyckoffV7_TrueMethod(IStrategy):
         # Milestone 1.1: Wave Segmentation Engine
         # Stage 1: 使用模块化的波段分析
         dataframe = self.wave_analyzer._segment_weis_waves(dataframe)
+        # ZigZag 回溯修复：wave_start 在 bar N 确认，实盘要到 N+min_bars 才知道
+        _lag = int(self.wave_min_bars.value)
+        for _col in ['is_wave_start', 'is_wave_end']:
+            if _col in dataframe.columns:
+                dataframe[_col] = dataframe[_col].shift(_lag).fillna(False).astype(bool)
         # P3: 波段级 E/R 背离信号（增量层，不覆盖 bar 级信号）
         if self.use_p3_swing_er and self.wave_analyzer:
             dataframe = self.wave_analyzer.compute_swing_er_signals(dataframe)
