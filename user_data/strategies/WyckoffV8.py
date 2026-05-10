@@ -134,9 +134,6 @@ class WyckoffV8(IStrategy):
     # 结构止损：TR Low 之下的缓冲比例
     tr_low_buffer = DecimalParameter(0.005, 0.03, default=0.01, decimals=3,
                                      space='sell', optimize=False, load=True)
-    # ATR 止损倍数（TR Low 未形成时兜底）
-    atr_sl_mult = DecimalParameter(1.5, 4.0, default=2.5, decimals=1,
-                                   space='sell', optimize=False, load=True)
     # T1 到达后止损移到保本的偏移（避免手续费磨损）
     breakeven_offset = DecimalParameter(0.001, 0.01, default=0.003, decimals=3,
                                         space='sell', optimize=False, load=True)
@@ -294,14 +291,6 @@ class WyckoffV8(IStrategy):
             sl_price = tr_low * (1 - buffer)
             sl_ratio = (sl_price / current_rate) - 1
             # 不能比初始止损更宽
-            if sl_ratio > self.stoploss:
-                return sl_ratio
-
-        # ATR 兜底
-        if not np.isnan(atr) and atr > 0:
-            mult = float(self.atr_sl_mult.value)
-            sl_price = current_rate - atr * mult
-            sl_ratio = (sl_price / current_rate) - 1
             if sl_ratio > self.stoploss:
                 return sl_ratio
 
