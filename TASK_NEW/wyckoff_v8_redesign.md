@@ -1,8 +1,8 @@
 # Wyckoff V8 True Method — 重新设计 TASK 文档
 
-**版本**: V8.4.3  
+**版本**: V8.5.0  
 **创建日期**: 2026-05-06  
-**上次更新**: 2026-05-07（7轮退出优化实验全部完成，V7.1=8,374% 确认为 1H 动量退出物理极限。战略转向：从退出端微调→日线层"因"的纯净度提升）  
+**上次更新**: 2026-05-10（新 V8 路径确立：入场信号语义矛盾审计 + wave_start 频率提升。A+B 实验固化，基线升至 11,313%）  
 **背景**: V7 入场端 EMA200 移除释放 138% 利润，但 1H 退出端微调被证明存在不可预测的滞后性。V8 目标不变：三层分离架构下实现威科夫因果律。
 
 ---
@@ -21,6 +21,7 @@
 | **V8.4.1** | 2026-05-07 | **和谐保险实验证伪：统一和谐→分信号和谐均导致利润暴跌（6,592%/2,556%）。根因：1H 层缺乏日线 Phase 结构保护，单纯靠动能和谐性做退出豁免会导致物理滞后。决策：回退到 V7.1（8,374%）为稳定基线；退出呼吸空间上移到 Phase 结构层实现。** |
 | **V8.4.2** | 2026-05-07 | **Phase E 分层抑制系列实验完成。非对称架构（入口自由+出口分层）：Phase E 全量抑制 → 1,716%（-79%）；非对称抑制（仅 wave_start）→ 8,070%（≈V7.1）。最终结论：Freqtrade 向量化 exit_signal 优先权决定了 per-trade 退出豁免无法生效。V7.1=8,374% 为当前可达天花板。** |
 | **V8.4.3** | 2026-05-07 | **指纹过滤实验（V7.7）：向量化路径中直接读取 _active_entry_tag，wave_start+Phase E+和谐 抑制 17.3% down_wave → 5,368%（-36%）。结论：1H 动量衰减的"第一直觉"优于结构"宏观坚持"。7 轮实验无一超越 V7.1。战略转向：退出端已触物理极限，转攻日线层"因"的纯净度（TASK 1 SC/BC 识别）。** |
+| **V8.5.0** | 2026-05-10 | **新 V8 路径确立：放弃三层分离架构，转向入场信号语义矛盾审计 + wave_start 频率提升。实验 A（豁免 distributing +1375%）+ 实验 B（bear×accumulating 豁免 +1564%）固化。基线升至 11,313%（2022-2026），DD 6.28% 不变。TASK 4-6 暂停，TASK 1-3 重新定位为标注层。** |
 
 ---
 
@@ -1635,3 +1636,163 @@ ws_entry (wave_start 信号):   709  (100%)
 | `ws_filter_diag.txt` | 📊 | wave_start_entry 漏斗（709→244→709） |
 | `ws_final_diag.txt` | 📊 | final_entry 漏斗（554→229→206） |
 | `cmp_ws_bull.py` | 📊 | A/B 对比脚本 |
+
+---
+
+## Session 3：新 V8 路径确立 + 实验 A/B 固化（2026-05-10）
+
+### 战略转向声明
+
+**原 V8 路径（放弃）**: 三层分离架构（日线层 SC/BC → 1H 执行层 → PNF 退出层），7 个月工程量，TASK 4-6 未执行。
+
+**根本原因**：退出端已经物理封顶。7 轮实验证明 Freqtrade 向量化路径下 per-trade 退出逻辑无法生效，custom_exit 拦不住 exit_signal，exit_signal 动到哪里都不如 V7.1 的 down_wave 组合。
+
+**新 V8 路径（确立）**: **入场信号语义矛盾审计 + wave_start 频率提升**
+
+> wave_start 是系统里质量最高的 alpha（91% WR，2.87% 均利润），但频率低。
+> 原因不是信号本身少，而是下游过滤层用了语义上与 ChoCh 矛盾的条件在拦截它。
+> 修复语义矛盾 = 释放已有的、被错误压制的利润，不需要改变信号定义，不需要新模块。
+
+---
+
+### 修订记录（新增）
+
+| 版本 | 日期 | 修改内容 |
+|------|------|---------|
+| **V8.5.0** | 2026-05-10 | 新 V8 路径确立：入场语义矛盾审计 + wave_start 频率提升。实验 A/B 完成固化。TASK 4-6 暂停。 |
+
+---
+
+### 实验 A：wave_start 豁免 composite_intent=distributing 拦截
+
+**背景**: composite_intent_ok 在基线（EMA200 移除后）拦截了 155 笔 wave_start，其中 117 笔来自 `distributing`，38 笔来自 `trending_down`。
+
+**语义矛盾**: wave_start 是 1H ChoCh（Change of Character），已经检测到方向从下到上的动能转变。此时 composite_intent 还标着 `distributing`（派发期），是一个滞后标签——日线结构还没更新，但 1H 动能已经反转。两者同时为真是物理矛盾，拦截没有逻辑依据。
+
+**改动**（固化到 `WyckoffV7_TrueMethod.py`）:
+
+```python
+# V8 固化：wave_start 豁免 distributing 拦截，保留 trending_down 拦截
+# 依据：distributing 是滞后标签，wave_start ChoCh 动能已经反转，语义矛盾
+# 回测验证（2022-2026）：+1375%（8374% → 9749%），胜率 81.4%，回撤 6.28%
+_ws_ci_exempt = wave_start_entry & ~composite_intent_vals.isin(['trending_down'])
+composite_intent_ok = composite_intent_ok | _ws_ci_exempt
+```
+
+**回测结果（2022-2026）**:
+
+| 指标 | V7.1 基线 | 实验 A | 变化 |
+|------|:---:|:---:|------|
+| 总收益率 | 8,374% | **9,749%** | **+1,375%** |
+| 总交易数 | 531 | 554 | +23 |
+| 胜率 | 80.4% | **81.4%** | +1.0pp |
+| 均利润 | 2.14% | 2.11% | -0.03pp |
+| 最大回撤 | 6.28% | 6.28% | ✅ 不变 |
+
+**结论**: 固化。释放了 117 笔被语义矛盾压制的信号，净利润提升 16%。
+
+---
+
+### 实验 B：wave_start 在熊市 accumulating 时豁免 bear_market 拦截
+
+**背景**: 实验 A 后漏斗更新——bear_market_block 新拦截 92 笔 wave_start，其中按 composite_intent 分布：
+- `distributing`: 16 笔
+- `trending_down`: 1 笔
+- `unclear`: 22 笔
+- `accumulating`: 16 笔 ← 目标
+
+**语义矛盾**: `bear_market_mode` 基于 4H HTF 连续 5 天以上 markdown 期激活，是宏观防护。但当 composite_intent == `accumulating` 时，说明日线结构已经进入积累期（Phase A/B/C 范围），wave_start ChoCh 是 Phase C 弹簧反弹或 Phase D 突破的正常买点。熊市积累期是 Wyckoff 理论中最经典的做多入场区，用 bear_market_block 拦截它是对威科夫方法论的违背。
+
+**改动**（固化到 `WyckoffV7_TrueMethod.py`）:
+
+```python
+# V8 固化：wave_start 在熊市但 composite_intent == 'accumulating' 时豁免 bear_market 拦截
+# 依据：熊市积累期 wave_start 是 Phase C/D 正常买点，bear_market_mode 在此场景过于保守
+# 回测验证（2022-2026）：9749% → 11313%，均利润 2.11%→2.16%，胜率 81.4%→81.5%，回撤不变 6.28%
+_ws_bear_exempt_mask = wave_start_entry & (composite_intent_vals == 'accumulating')
+bear_market_block_long = bear_market_block_long & ~_ws_bear_exempt_mask
+```
+
+**回测结果（2022-2026）**:
+
+| 指标 | 实验 A | 实验 A+B | 变化 |
+|------|:---:|:---:|------|
+| 总收益率 | 9,749% | **11,313%** | **+1,564%** |
+| 总交易数 | 554 | 561 | +7 |
+| 胜率 | 81.4% | **81.5%** | +0.1pp |
+| 均利润 | 2.11% | **2.16%** | +0.05pp |
+| 最大回撤 | 6.28% | 6.28% | ✅ 不变 |
+
+**结论**: 固化。均利润和胜率均提升，说明 accumulating 期 wave_start 质量高于平均。
+
+---
+
+### wave_start 漏斗现状（实验 A+B 固化后）
+
+```
+wave_start 709 笔 raw（2022-2026）
+  ↓ ws_filter 层：ctx/harmony/sot/quality 拦截 = 0 ← 对 wave_start 完全无效，可清理
+  ↓ composite_intent_ok：只剩 trending_down 拦截 -38 笔（之前 -155）
+  ↓ trading_allowed：-20 笔（bull+trend 双杀，极少）
+  ↓ rr_long_ok：-2 笔
+  ↓ bear_market_block：remaining ~73 笔
+     ├── trending_down: ~1 笔（合理）
+     ├── unclear: ~22 笔（待审计）
+     └── distributing: ~16 笔（待审计）
+  ↓ final_survivors：~566 笔
+  ↓ max_open_trades=2 容量压制 → ~561 笔成交
+```
+
+---
+
+### TASK 1-3 模块：重新定位
+
+原计划：sc_detector / phase_detector / pnf_calculator 作为入场硬门控（Phase != 'E' 不开多）
+**重新定位**：作为信号质量标注层，不做硬门控
+
+**原因**：
+1. Phase 门控会把交易频率压缩到 30-60/年（实盘不可接受）
+2. pnf_target_valid_long 当前拦截率为 0，说明 wave_start 内在结构天然满足 P&F 因果要求
+3. V8.4.2 实验已经证明：Phase E 硬门控 → 8,070%（-4%），无收益，反而压缩容量
+
+**新定位**：
+- sc_detector → 用于日线 Phase 状态标注，可用于诊断 dashboard
+- phase_detector → 标注 wave_start 所在 Phase，用于分析 unclear/distributing 拦截情况
+- pnf_calculator → 可选择性接入 rr_long_ok 分母优化，但不做强制门控
+
+---
+
+### TASK 4-6：暂停
+
+| TASK | 原计划 | 状态 | 原因 |
+|------|------|:---:|------|
+| TASK 4: 1H 执行层集成 | Phase 门控硬接入 | ⏸ 暂停 | Phase 门控压缩频率，无利润增益 |
+| TASK 5: PNF 退出层 | down_wave 替换 | ⏸ 暂停 | Freqtrade 向量化路径封死，7 轮实验均证伪 |
+| TASK 6: 系统集成 | 三层联调 | ⏸ 暂停 | 依赖 TASK 4/5 |
+
+---
+
+### 新 V8 行动项（语义矛盾审计序列）
+
+| 优先级 | 实验 | 候选信号 | 当前状态 |
+|:---:|------|------|:---:|
+| ✅ | **实验 A**：wave_start 豁免 distributing | +1,375% | 已固化 |
+| ✅ | **实验 B**：wave_start × bear × accumulating 豁免 | +1,564% | 已固化 |
+| **P0** | **实验 C**：wave_start × bear × unclear 豁免？ | ~22 笔待审计 | 待测 |
+| P1 | **实验 D**：trending_down × 38 笔语义审计 | wave_start + trending_down 同时为真？ | 待分析 |
+| P2 | **实验 E**：axis_support 类似语义矛盾审计 | axis_support 72% WR，可能有类似问题 | 待分析 |
+| P3 | **死代码清理**：ctx/harmony/sot/quality 过滤器 | 对 wave_start 拦截率为 0 | 待清理 |
+
+---
+
+### 当前代码状态（2026-05-10）
+
+| 文件 | 状态 | 说明 |
+|------|:---:|------|
+| `WyckoffV7_TrueMethod.py` | ✅ | 实验 A+B 固化，含 ws_entry/ws_final/ta_factor 三路诊断计数器 |
+| `v8_modules/sc_detector.py` | ✅ | SC/BC 两阶段检测，重新定位为标注层 |
+| `v8_modules/phase_detector.py` | ✅ | Phase A-E 状态机，重新定位为标注层 |
+| `v8_modules/pnf_calculator.py` | ✅ | P&F 因果目标位，rr_long_ok 优化备用 |
+| `ws_filter_diag.txt` | 📊 | wave_start_entry 漏斗诊断输出 |
+| `ws_final_diag.txt` | 📊 | final_entry 漏斗诊断输出 |
+| `ta_factor_diag.txt` | 📊 | trading_allowed 三因子诊断输出 |
