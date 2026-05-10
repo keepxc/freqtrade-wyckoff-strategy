@@ -147,8 +147,9 @@ class WyckoffV8(IStrategy):
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         pair = metadata['pair']
 
-        # ── ATR（1H，止损兜底用）────────────────────────────
+        # ── ATR ─────────────────────────────────────────────
         dataframe['atr14'] = ta.ATR(dataframe, timeperiod=14)
+        dataframe['atr_20'] = ta.ATR(dataframe, timeperiod=20)  # WaveAnalyzer 依赖
 
         # ── Wave 检测（1H）──────────────────────────────────
         if self.wave_analyzer is not None:
