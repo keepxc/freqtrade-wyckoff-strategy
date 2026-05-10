@@ -31,8 +31,9 @@ from pandas import DataFrame
 DEFAULT_ENTRY_PARAMS = {
     'wave_efficiency_min': 0.0001,  # ChoCh 最低效率阈值（与 V7 保持一致）
     'phase_block': ['A', 'B'],      # 这些 Phase 不开多
-    'require_pnf_target': True,     # 必须有 PNF 目标位
-    'require_price_below_t1': True, # 入场价必须低于 T1（有上涨空间）
+    'require_pnf_target': True,     # 必须有 PNF 目标位（有因果结构依据）
+    'require_price_below_t1': False, # 不要求价格低于 T1：T1 是退出目标，不是入场过滤
+    # Phase E 时价格常已超过 T1（T1 在 Phase C/D 时锁定），用 close<T1 过滤会砍掉绝大多数 Phase E 信号
 }
 
 
