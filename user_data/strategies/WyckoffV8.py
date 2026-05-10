@@ -299,37 +299,36 @@ class WyckoffV8(IStrategy):
                     current_rate: float, current_profit: float,
                     **kwargs) -> Optional[str]:
         """
-        PNF 目标位驱动退出（TASK 5）。
+        1H 波浪驱动退出 + 日线结构兜底。
 
-        逻辑：
-          - T1 前：持仓（结构止损由 custom_stoploss 负责）
-          - 到达 T2：准备减仓（当前 Freqtrade 不支持部分平仓，标记退出）
-          - 到达 T3：全部离场
-          - 结构失败：收盘跌破 TR Low → 清仓
+        优先级：
+          1. 结构失败：当前价跌破 TR Low（日线结构破坏，紧急出场）
+          2. 1H down_wave 开始：与入场 up_wave 对称，主要退出信号
+          3. PNF T2 到达：利润目标确认退出（辅助）
         """
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if dataframe is None or len(dataframe) == 0:
             return None
 
         last = dataframe.iloc[-1]
-        target_2 = last.get('v8_target_2', np.nan)
-        target_3 = last.get('v8_target_3', np.nan)
         tr_low = last.get('v8_tr_low', np.nan)
+        target_2 = last.get('v8_target_2', np.nan)
+        is_wave_start = last.get('is_wave_start', False)
+        wave_direction = last.get('wave_direction', '')
 
-        # 结构失败：当前价跌破 TR Low
+        # 1. 结构失败：当前价跌破 TR Low（日线结构破坏）
         if not np.isnan(tr_low) and tr_low > 0:
             if current_rate < tr_low:
                 return 'v8_structure_fail'
 
-        # T3 到达：全部离场
-        if not np.isnan(target_3) and current_rate >= target_3:
-            return 'v8_pnf_t3'
+        # 2. 1H down_wave 开始 → 主要退出（与 up_wave 入场对称）
+        if is_wave_start and wave_direction == 'down':
+            return 'v8_down_wave'
 
-        # T2 到达：离场（Freqtrade 单笔全平，后续可升级部分平仓）
+        # 3. PNF T2 到达 → 辅助退出（日线利润目标）
         if not np.isnan(target_2) and current_rate >= target_2:
             return 'v8_pnf_t2'
 
-        # T1 之前：持仓，不退出
         return None
 
     # ── confirm_trade_entry（额外安全检查）──────────────────
