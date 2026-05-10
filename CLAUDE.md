@@ -37,18 +37,27 @@
 
 ---
 
-## V8 当前状态（2026-05-10）
+## V8 当前状态（2026-05-10，V8.5.2）
 
 **真 V8 架构确立**：新策略文件 `WyckoffV8.py` 从零实现，不引用 V7 代码。
 
-> 核心：V7 退出端约束（Freqtrade 向量化路径）来自在 V7 框架内修改，新文件不用 `exit_signal`，全走 `custom_exit`，约束消失。
-
-### 架构
+### 核心设计原则（已纠正）
 ```
-日线层：sc_detector → phase_detector → pnf_calculator（TASK 1-3，已完成）
-1H 层：wave_start ChoCh + Phase D/E 上下文（TASK 4）
-退出层：custom_exit + PNF T1/T2/T3 目标位驱动（TASK 5）
-集成：WyckoffV8.py（TASK 6）
+日线层 = 趋势背景：Phase D/E 过滤 + PNF 因果结构 + TR Low 止损参考
+1H 层  = 交易执行：wave_start 入场 + down_wave 退出（主导）
+PNF 目标位 = 辅助参考：T1→移保本止损，T2→辅助退出
+```
+
+> 关键教训：PNF 目标位是日线宏观目标（月级别），不能作为1H交易的主要退出。
+> 用 PNF T2/T3 驱动退出 → 平均持仓86天，与1H逻辑矛盾。
+> 正确做法：down_wave（1H）主退出，PNF 提供方向和止损移动依据。
+
+### 退出优先级
+```
+1. 结构失败：current_rate < TR Low → v8_structure_fail（紧急）
+2. 1H down_wave 开始             → v8_down_wave（主要）
+3. PNF T2 到达                   → v8_pnf_t2（辅助）
+custom_stoploss: TR Low 结构止损 + T1到达移保本
 ```
 
 ### TASK 状态
@@ -57,13 +66,18 @@
 | TASK 1 | `sc_detector.py` SC/BC 识别 | ✅ |
 | TASK 2 | `phase_detector.py` Phase A-E | ✅ |
 | TASK 3 | `pnf_calculator.py` PNF 目标位 | ✅ |
-| TASK 4 | 1H 执行层设计 | 🔵 下一步 |
-| TASK 5 | 退出层设计（custom_exit + PNF） | 🔵 待开始 |
-| TASK 6 | `WyckoffV8.py` 集成 | 🔵 待开始 |
-| TASK 7 | 回测验证 vs V7.1+A+B（11,313%） | 🔵 待开始 |
+| TASK 4 | 1H 执行层（entry_detector.py） | ✅ |
+| TASK 5 | 退出层（down_wave主退出 + PNF辅助） | ✅ |
+| TASK 6 | `WyckoffV8.py` 集成 | ✅ |
+| TASK 7 | 回测验证 vs V7.1+A+B（11,313%） | 🔵 进行中 |
 
 V8 模块位置：`user_data/strategies/v8_modules/`
 V8 设计文档：`TASK_NEW/wyckoff_v8_redesign.md`
+
+### V8 回测命令
+```bash
+docker compose run --rm freqtrade backtesting --config user_data/config_backtest.json --config user_data/config_v8_backtest.json --strategy WyckoffV8 --timerange 20220101-20260502 --cache none
+```
 
 ---
 
