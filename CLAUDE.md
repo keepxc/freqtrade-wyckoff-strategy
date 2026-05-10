@@ -13,6 +13,26 @@
 
 ---
 
+## ⚠️ 写代码必读：未来函数（Lookahead Bias）检查清单
+
+**每次修改策略代码，必须检查以下几点，否则回测结果不可信：**
+
+1. **ZigZag / 波段检测**：转折点确认时会回溯标记过去的 bar，必须 shift 延迟
+   - 修复方式：`is_wave_start.shift(min_bars)`
+
+2. **日线数据 merge 到 1H**：当天日线 close/phase/PNF 在收盘后才可知
+   - 修复方式：merge 前 `df_1d['date'] += pd.Timedelta(days=1)`
+
+3. **`populate_indicators` 中任何用整段 dataframe 计算的指标**：
+   - 滚动窗口（rolling）必须确认只用过去数据
+   - 禁止用 `df.iloc[i+n]`（向后看）
+
+4. **验证方法**：回测胜率 > 90% 或 DD < 1% 时，**必须怀疑存在未来函数**，立即排查
+
+> 教训：V7 因 ZigZag 回溯导致基线虚高 11,313% → 真实 6,284%（虚高 80%）
+
+---
+
 ## 开始前必读
 
 1. `@AGENTS.md` — 项目整体说明、P5 架构、V1 范围
