@@ -105,12 +105,12 @@ class WyckoffV8(IStrategy):
     timeframe = '1h'
     can_short = False
 
-    # 不使用 exit_signal（全走 custom_exit）
-    use_exit_signal = False
+    # down_wave 通过 exit_signal 向量化路径退出（比 ROI/custom_exit 更早触发）
+    use_exit_signal = True
     exit_profit_only = False
     ignore_roi_if_entry_signal = False
 
-    # ROI：设置极高值，实际退出由 custom_exit 控制
+    # ROI：极高值，防止 config 覆盖干扰 custom_exit 和 exit_signal
     minimal_roi = {"0": 99.0}
 
     # 止损：兜底保护，custom_stoploss 启用后会接管逻辑
@@ -254,9 +254,14 @@ class WyckoffV8(IStrategy):
 
         return dataframe
 
-    # ── populate_exit_trend（不用，靠 custom_exit）───────────
+    # ── populate_exit_trend（down_wave 主退出，向量化路径）──────
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe['exit_long'] = 0
+        is_down_wave = (
+            dataframe.get('is_wave_start', pd.Series(False, index=dataframe.index)).fillna(False) &
+            (dataframe.get('wave_direction', pd.Series('', index=dataframe.index)).fillna('') == 'down')
+        )
+        dataframe.loc[is_down_wave, ['exit_long', 'exit_tag']] = [1, 'v8_down_wave']
         return dataframe
 
     # ── custom_stoploss（结构止损）───────────────────────────
@@ -313,19 +318,13 @@ class WyckoffV8(IStrategy):
         last = dataframe.iloc[-1]
         tr_low = last.get('v8_tr_low', np.nan)
         target_2 = last.get('v8_target_2', np.nan)
-        is_wave_start = last.get('is_wave_start', False)
-        wave_direction = last.get('wave_direction', '')
 
-        # 1. 结构失败：当前价跌破 TR Low（日线结构破坏）
+        # 1. 结构失败：当前价跌破 TR Low（日线结构破坏，紧急退出）
         if not np.isnan(tr_low) and tr_low > 0:
             if current_rate < tr_low:
                 return 'v8_structure_fail'
 
-        # 2. 1H down_wave 开始 → 主要退出（与 up_wave 入场对称）
-        if is_wave_start and wave_direction == 'down':
-            return 'v8_down_wave'
-
-        # 3. PNF T2 到达 → 辅助退出（日线利润目标）
+        # 2. PNF T2 到达 → 辅助退出（down_wave 未触发时的利润目标保护）
         if not np.isnan(target_2) and current_rate >= target_2:
             return 'v8_pnf_t2'
 
