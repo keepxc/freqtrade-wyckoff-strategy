@@ -113,8 +113,9 @@ class WyckoffV8(IStrategy):
     # ROI：设置极高值，实际退出由 custom_exit 控制
     minimal_roi = {"0": 99.0}
 
-    # 止损：作为最终兜底，实际结构止损在 custom_stoploss 实现
-    stoploss = -0.15
+    # 止损：兜底保护，custom_stoploss 启用后会接管逻辑
+    stoploss = -0.12
+    use_custom_stoploss = True  # 启用 custom_stoploss（backtesting 必须显式声明）
 
     # Trailing stop 关闭（由 custom_stoploss 手动管理）
     trailing_stop = False
@@ -324,14 +325,13 @@ class WyckoffV8(IStrategy):
             return None
 
         last = dataframe.iloc[-1]
-        target_1 = last.get('v8_target_1', np.nan)
         target_2 = last.get('v8_target_2', np.nan)
         target_3 = last.get('v8_target_3', np.nan)
         tr_low = last.get('v8_tr_low', np.nan)
 
-        # 结构失败：收盘跌破 TR Low
+        # 结构失败：当前价跌破 TR Low
         if not np.isnan(tr_low) and tr_low > 0:
-            if last['close'] < tr_low:
+            if current_rate < tr_low:
                 return 'v8_structure_fail'
 
         # T3 到达：全部离场
@@ -355,15 +355,9 @@ class WyckoffV8(IStrategy):
 
         last = dataframe.iloc[-1]
 
-        # 必须有 PNF 目标位
+        # 必须有 PNF 目标位（有因果依据才进场）
         if pd.isna(last.get('v8_target_1', np.nan)):
             logger.info(f'{pair} entry rejected: no PNF target')
-            return False
-
-        # 当前价必须低于 T1
-        target_1 = last.get('v8_target_1', np.nan)
-        if not np.isnan(target_1) and rate >= target_1:
-            logger.info(f'{pair} entry rejected: rate {rate:.2f} >= T1 {target_1:.2f}')
             return False
 
         return True
