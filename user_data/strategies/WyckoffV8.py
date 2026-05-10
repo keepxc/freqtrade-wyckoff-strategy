@@ -285,14 +285,12 @@ class WyckoffV8(IStrategy):
                 sl_price = breakeven_price
                 return (sl_price / current_rate) - 1
 
-        # 结构止损：TR Low - buffer
+        # 结构止损：TR Low - buffer（Phase E时TR Low可能远低于当前价，不限制宽度）
+        # 威科夫逻辑：价格跌回TR内才是真正结构失败，不用距离约束
         if not np.isnan(tr_low) and tr_low > 0:
             buffer = float(self.tr_low_buffer.value)
             sl_price = tr_low * (1 - buffer)
-            sl_ratio = (sl_price / current_rate) - 1
-            # 不能比初始止损更宽
-            if sl_ratio > self.stoploss:
-                return sl_ratio
+            return (sl_price / current_rate) - 1
 
         return self.stoploss
 
