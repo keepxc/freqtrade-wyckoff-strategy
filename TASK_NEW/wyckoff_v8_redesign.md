@@ -24,6 +24,7 @@
 | **V8.5.0** | 2026-05-10 | **新 V8 路径确立：放弃三层分离架构，转向入场信号语义矛盾审计 + wave_start 频率提升。实验 A（豁免 distributing +1375%）+ 实验 B（bear×accumulating 豁免 +1564%）固化。基线升至 11,313%（2022-2026），DD 6.28% 不变。TASK 4-6 暂停，TASK 1-3 重新定位为标注层。** |
 | **V8.5.1** | 2026-05-10 | **真 V8 架构确立：新策略文件 WyckoffV8.py 从零实现，不引用 V7 代码。入场：wave_start ChoCh + Phase D/E 上下文。退出：全走 custom_exit + PNF 目标位，绕过 Freqtrade 向量化路径约束。OI 接口预留不强依赖。TASK 1-3 升级为核心依赖，TASK 4-6 重新激活。** |
 | **V8.5.2** | 2026-05-10 | **退出层架构纠正：V8.5.1 以 PNF T2/T3 作为主要退出导致平均持仓86天，与1H交易逻辑矛盾。根本原因：日线 PNF 目标位是月级别宏观目标，不能驱动1H交易的退出。纠正：down_wave 升级为主要退出（custom_exit 优先级2），PNF T2 降级为辅助退出（优先级3），TR Low 结构失败为紧急退出（优先级1）。日线层=趋势背景，1H层=交易执行，职责明确分离。** |
+| **V8.5.3** | 2026-05-10 | **三个连续 Bug 修复 + ZigZag Lookahead 发现：①T1保本逻辑 Phase E 立即触发（T1 < entry_price）：加入 `target_1 > entry_price` 守卫，胜率从34.9%→81.2%；②TR Low 宽度约束拦截结构止损：Phase E中TR Low在entry_price下方30-50%，`sl_ratio > stoploss(-12%)`导致止损回退硬止损，移除宽度约束；③T2辅助退出 Phase E 立即触发（T2 < entry_price）：加入 `target_2 > entry_price` 守卫，修复后 v8_pnf_t2 从523笔→0笔，v8_down_wave 成为主退出（97.4% WR）。④发现 ZigZag 回溯 Lookahead：WaveAnalyzer 在 bar i 确认转折后回溯标记 last_extreme_idx 为 wave_start，导致 V8 回测虚高 75,687%（99% WR）。修复：is_wave_start/is_wave_end 向后 shift min_bars 根，V8→17,360%（93.4% WR）。同步修复 V7，基线从 11,313%→6,284%（76.8% WR）。修复后 V8 仍是 V7 的 2.76 倍。** |
 
 ---
 
@@ -1865,10 +1866,13 @@ V7 所有实验失败的根本原因是在 V7 框架内改造，被 Freqtrade �
 | **TASK 1** | `sc_detector.py` SC/BC 识别 | ✅ 完成 | 升级为核心依赖；BTC 2018-2026 验证通过（9 个 SC） |
 | **TASK 2** | `phase_detector.py` Phase A-E | ✅ 完成 | 升级为核心依赖；Phase D=5%, E=77.8% 分布合理 |
 | **TASK 3** | `pnf_calculator.py` PNF 目标位 | ✅ 完成 | 升级为核心依赖；6 次锁定事件，方向正确 |
-| **TASK 4** | 1H 执行层设计 | 🔵 下一步 | 入场条件 + Phase 上下文整合 |
-| **TASK 5** | 退出层设计 | 🔵 待开始 | 全 custom_exit + PNF 目标位驱动 |
-| **TASK 6** | `WyckoffV8.py` 集成 | 🔵 待开始 | 新策略文件，日线 informative + 1H 执行 |
-| **TASK 7** | 回测验证 & 对比基线 | 🔵 待开始 | vs V7.1+A+B（11,313%），2022-2026 |
+| **TASK 4** | 1H 执行层设计 | ✅ 完成 | entry_detector.py；wave_start ChoCh + Phase D/E + PNF 过滤 |
+| **TASK 5** | 退出层设计 | ✅ 完成 | down_wave 主退出 + T2 辅助 + TR Low 结构失败；V8.5.2/5.3 修复 |
+| **TASK 6** | `WyckoffV8.py` 集成 | ✅ 完成 | 新策略文件完整集成；三个 Bug 修复（T1/T2/TR Low） |
+| **TASK 7** | 回测验证 & 对比基线 | ✅ 完成 | V8（17,360% / 93.4% WR / 0.32% DD）vs V7 修复后基线（6,284%），V8 = V7 × 2.76 |
+| **TASK 8** | ZigZag Lookahead 修复 | ✅ 完成 | V7/V8 同步修复；V7 基线 11,313%→6,284%；V8 75,687%→17,360% |
+| **TASK 9** | Phase C Spring 入场点 | 🔵 待开始 | Phase C = 0%，Spring 判定过严，丢失威科夫最高胜率入场点 |
+| **TASK 10** | Phase E 质量分层 | 🔵 待开始 | Phase E = 77.7%，趋势末端拥挤，需要质量过滤避免高频磨损 |
 
 ---
 
