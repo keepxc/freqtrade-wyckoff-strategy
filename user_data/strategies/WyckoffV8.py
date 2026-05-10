@@ -56,28 +56,39 @@ except ImportError:
     logger.warning('WaveAnalyzer not available — wave_start signals will be empty')
 
 
-# ── WyckoffWave dataclass（WaveAnalyzer 依赖）────────────────
-from dataclasses import dataclass, field
-from typing import List
+# ── WyckoffWave dataclass（与 V7 保持完全一致）──────────────
+from dataclasses import dataclass
 
 @dataclass
 class WyckoffWave:
-    direction: str = ''
-    start_idx: int = 0
-    end_idx: int = 0
-    start_price: float = 0.0
-    end_price: float = 0.0
-    displacement: float = 0.0
-    effort: float = 0.0
-    efficiency: float = 0.0
-    bar_count: int = 0
-    bars: List[int] = field(default_factory=list)
+    start_idx: int
+    end_idx: int
+    start_price: float
+    end_price: float
+    high_price: float
+    low_price: float
+    total_volume: float
+    bar_count: int
+    direction: str  # 'up' or 'down'
+
+    @property
+    def displacement(self) -> float:
+        return abs(self.end_price - self.start_price)
+
+    @property
+    def effort(self) -> float:
+        return self.total_volume
+
+    @property
+    def efficiency(self) -> float:
+        return self.displacement / (self.effort + 1e-9)
 
     @property
     def is_up_wave(self) -> bool:
         return self.direction == 'up'
 
-    def __len__(self):
+    @property
+    def duration_hours(self) -> int:
         return self.bar_count
 
 
