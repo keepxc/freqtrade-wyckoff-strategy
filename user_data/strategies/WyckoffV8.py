@@ -160,24 +160,39 @@ class WyckoffV8(IStrategy):
         dataframe['atr14'] = ta.ATR(dataframe, timeperiod=14)
         dataframe['atr_20'] = ta.ATR(dataframe, timeperiod=20)  # WaveAnalyzer 依赖
 
+        # ── ATH 距离（TASK 10 Phase E 警戒区）─────────────
+        # expanding().max() 保证只用历史数据，无前瞻偏差
+        dataframe['ath'] = dataframe['high'].expanding().max()
+        dataframe['ath_ratio'] = (dataframe['close'] / dataframe['ath']).clip(upper=1.0)
+
         # ── Wave 检测（1H）──────────────────────────────────
         if self.wave_analyzer is not None:
             try:
                 dataframe = self.wave_analyzer._segment_weis_waves(dataframe)
+                # ZigZag 回溯修复：wave_start 标记在 bar N 确认，但实盘要到 N+min_bars 才知道
+                # 把信号向后移 min_bars 根，消除 lookahead bias
+                _lag = int(self.wave_min_bars.value)
+                for _col in ['is_wave_start', 'is_wave_end']:
+                    if _col in dataframe.columns:
+                        dataframe[_col] = dataframe[_col].shift(_lag).fillna(False).astype(bool)
+                # wave_direction / efficiency / displacement 跟随 is_wave_start 的原始位，不移位
+                # （它们描述的是波段属性，不是触发信号）
                 wave_count = int(dataframe.get('is_wave_start', pd.Series(False)).sum())
                 up_count = int((dataframe.get('is_wave_start', pd.Series(False)) &
                                 (dataframe.get('wave_direction', pd.Series('')) == 'up')).sum())
-                logger.info(f'[V8-DIAG] {pair} WaveAnalyzer OK: is_wave_start={wave_count} up_waves={up_count}')
+                logger.info(f'[V8-DIAG] {pair} WaveAnalyzer OK (lag={_lag}): is_wave_start={wave_count} up_waves={up_count}')
             except Exception as e:
                 logger.warning(f'[V8-DIAG] {pair} WaveAnalyzer failed: {e}')
                 dataframe['is_wave_start'] = False
                 dataframe['wave_direction'] = ''
                 dataframe['wave_efficiency'] = 0.0
+                dataframe['wave_displacement'] = 0.0
         else:
             logger.warning(f'[V8-DIAG] {pair} WaveAnalyzer NOT loaded — wave_start=0')
             dataframe['is_wave_start'] = False
             dataframe['wave_direction'] = ''
             dataframe['wave_efficiency'] = 0.0
+            dataframe['wave_displacement'] = 0.0
 
         # ── 日线 Phase / PNF（TASK 1-3）─────────────────────
         if V8_MODULES_OK:
@@ -204,6 +219,10 @@ class WyckoffV8(IStrategy):
                     daily_cols = [c for c in daily_cols if c in df_1d.columns]
                     df_1d_slim = df_1d[daily_cols].copy()
                     df_1d_slim['date'] = pd.to_datetime(df_1d_slim['date'], utc=True)
+                    # 日线数据向后移 1 天：防止 lookahead bias
+                    # 日线 bar 的 close/phase/PNF 在当天结束后才可知
+                    # 必须等次日 1H bar 才能使用
+                    df_1d_slim['date'] = df_1d_slim['date'] + pd.Timedelta(days=1)
 
                     dataframe['date_utc'] = pd.to_datetime(dataframe['date'], utc=True)
                     dataframe = pd.merge_asof(
@@ -331,7 +350,9 @@ class WyckoffV8(IStrategy):
                 return 'v8_structure_fail'
 
         # 2. PNF T2 到达 → 辅助退出（down_wave 未触发时的利润目标保护）
-        if not np.isnan(target_2) and current_rate >= target_2:
+        # 必须 T2 > entry_price，否则 Phase E 中 T2 < 入场价，first bar 立即触发
+        entry_price = trade.open_rate
+        if not np.isnan(target_2) and target_2 > entry_price and current_rate >= target_2:
             return 'v8_pnf_t2'
 
         return None

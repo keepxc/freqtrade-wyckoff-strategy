@@ -6140,23 +6140,30 @@ class WyckoffV7_TrueMethod(IStrategy):
                 'dist_high':                 float(last.get('dist_high',                 0.0) or 0.0),
                 'dist_height':               float(last.get('dist_height',               0.0) or 0.0),
                 'entry_tag':                 entry_tag or 'unknown',
+                'tr_source':                 str(last.get('tr_source', '')),
+                'tr_source_detail':          str(last.get('tr_source_detail', '')),
             }
             self._pending_pnf_metadata[pair] = pnf_meta
-            
-            # 🆕 P0 Fix: 同时以 pair 为 key 存入 _pnf_trades_metadata 作为回退快照
-            # leverage() 会将其迁移到 (pair, open_date_str) 精确 key
             self._pnf_trades_metadata[pair] = pnf_meta
-            
-            # 记录验证成功的日志
+
+            # 详细日志：搬至此处，确保 spot/dry_run 下也可见（leverage() 在 spot 中不被调用）
+            tr_source = pnf_meta['tr_source']
+            tr_source_detail = pnf_meta['tr_source_detail']
             if side == 'long':
                 logger.info(
-                    f'✅ P&F targets validated for {pair} (long): '
-                    f'conservative={target_cons:.2f}, standard={target_std:.2f}'
+                    f'✅ P&F 目标位已锁定 [{pair}] (long): '
+                    f'conservative={target_cons:.2f}, standard={target_std:.2f} | '
+                    f'TR: low={pnf_meta["tr_low"]:.2f}, high={pnf_meta["tr_high"]:.2f}, '
+                    f'height={pnf_meta["tr_height"]:.2f} | '
+                    f'tr_source={tr_source} | detail={tr_source_detail}'
                 )
             else:
                 logger.info(
-                    f'✅ P&F targets validated for {pair} (short): '
-                    f'conservative={target_short_cons:.2f}, standard={target_short_std:.2f}'
+                    f'✅ P&F 目标位已锁定 [{pair}] (short): '
+                    f'conservative={target_short_cons:.2f}, standard={target_short_std:.2f} | '
+                    f'Dist: low={pnf_meta["dist_low"]:.2f}, high={pnf_meta["dist_high"]:.2f}, '
+                    f'height={pnf_meta["dist_height"]:.2f} | '
+                    f'tr_source={tr_source} | detail={tr_source_detail}'
                 )
         
         # P5: 发射交易开仓事件
@@ -6465,39 +6472,11 @@ class WyckoffV7_TrueMethod(IStrategy):
                     'entry_tag':                 entry_tag or 'unknown',
                 }
                 
-                # TR 边界诊断信息
-                tr_source = str(last.get('tr_source', 'unknown'))
-                tr_source_detail = str(last.get('tr_source_detail', ''))
-                open_date_str = str(trade.open_date_utc) if trade else current_time.isoformat()
-                
-                # 存入 _pnf_trades_metadata（仅当 trade 可用时）
+                # 存入精确 key（(pair, open_date_str)），供 futures 模式使用
+                # spot/dry_run 下 leverage() 不被调用，日志和 pair key 存入已在 confirm_trade_entry 完成
                 if trade is not None:
                     metadata_key = (pair, str(trade.open_date_utc))
                     self._pnf_trades_metadata[metadata_key] = pnf_meta
-                
-                # 记录日志
-                if side == 'long':
-                    logger.info(
-                        f'✅ P&F 目标位已锁定 [{pair}] (long): '
-                        f'conservative={pnf_meta["target_conservative"]:.2f}, '
-                        f'standard={pnf_meta["target_standard"]:.2f}, '
-                        f'open_date={open_date_str} | '
-                        f'🔍 TR边界: low={pnf_meta["tr_low"]:.0f}, '
-                        f'high={pnf_meta["tr_high"]:.0f}, '
-                        f'height={pnf_meta["tr_height"]:.0f}, '
-                        f'source={tr_source}, detail={tr_source_detail}'
-                    )
-                else:
-                    logger.info(
-                        f'✅ P&F 目标位已锁定 [{pair}] (short): '
-                        f'conservative={pnf_meta["target_short_conservative"]:.2f}, '
-                        f'standard={pnf_meta["target_short_standard"]:.2f}, '
-                        f'open_date={open_date_str} | '
-                        f'🔍 Dist边界: low={pnf_meta["dist_low"]:.0f}, '
-                        f'high={pnf_meta["dist_high"]:.0f}, '
-                        f'height={pnf_meta["dist_height"]:.0f}, '
-                        f'source={tr_source}, detail={tr_source_detail}'
-                    )
             except Exception as e:
                 logger.warning(f'❌ P&F 目标位提取失败 [{pair}]: {e}')
         

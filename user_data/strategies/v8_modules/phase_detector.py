@@ -148,8 +148,10 @@ def add_v8_phase_detection(df: DataFrame, params: dict = None) -> DataFrame:
         if current_phase == 'C' and tr_locked:
             # C → D: SOS
             # v8.4: 去量化——价格站上中线即可
+            # 守卫：i > phase_c_start，防止 Spring 进入和 SOS 在同一 bar 瞬间跳转
+            # （Spring 回收 bar 收盘通常 > TR 中线，否则 Phase C 永远 = 0%）
             if (not np.isnan(tr_mid_val) and df['close'].iloc[i] > tr_mid_val
-                    and i > cooldown_until):
+                    and i > cooldown_until and i > phase_c_start):
                 current_phase = 'D'
                 consec_below_mid = 0
                 phase_c_start = -1

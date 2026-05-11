@@ -8,6 +8,8 @@ TASK 4 核心模块。
 2. Phase 上下文：Phase A/B 不开多，Phase D/E/unknown 允许
 3. PNF 目标位：v8_target_1 必须存在（有因果依据才进场）
 4. 基础风控：close < v8_target_1（当前价低于目标，有上涨空间）
+5. Phase E 量价和谐（TASK 10）：Phase E 要求 wave_efficiency > 更高阈值 + 实质性位移
+   - 物理含义：量大价不动 = 供应吸收（潜在 Distribution），非 JAC 加速，过滤掉
 
 设计决策（2026-05-10）：
 - Phase unknown 同 D/E 一起允许，不确认坏不等于坏
@@ -15,7 +17,7 @@ TASK 4 核心模块。
 - 不设复杂多条件，每增一个条件都需要回测验证
 
 输入：1H DataFrame，已包含以下列：
-  wave 层：is_wave_start, wave_direction, wave_efficiency
+  wave 层：is_wave_start, wave_direction, wave_efficiency, wave_displacement
   phase 层：v8_phase（来自 phase_detector，已从日线 merge）
   pnf 层：v8_target_1, v8_tr_low, v8_tr_high（已从日线 merge）
 
@@ -29,11 +31,16 @@ from pandas import DataFrame
 
 # 默认参数
 DEFAULT_ENTRY_PARAMS = {
-    'wave_efficiency_min': 0.0001,  # ChoCh 最低效率阈值（与 V7 保持一致）
-    'phase_block': ['A', 'B'],      # 这些 Phase 不开多
-    'require_pnf_target': True,     # 必须有 PNF 目标位（有因果结构依据）
-    'require_price_below_t1': False, # 不要求价格低于 T1：T1 是退出目标，不是入场过滤
+    'wave_efficiency_min': 0.0001,       # ChoCh 最低效率阈值（与 V7 保持一致）
+    'phase_block': ['A', 'B'],           # 这些 Phase 不开多
+    'require_pnf_target': True,          # 必须有 PNF 目标位（有因果结构依据）
+    'require_price_below_t1': False,     # 不要求价格低于 T1：T1 是退出目标，不是入场过滤
     # Phase E 时价格常已超过 T1（T1 在 Phase C/D 时锁定），用 close<T1 过滤会砍掉绝大多数 Phase E 信号
+
+    # TASK 10：Phase E 质量分层
+    'phase_e_displacement_min': 0.008,   # Phase E 最小位移（LOT 过滤，排除无实质移动的假信号）
+    'phase_e_ath_zone': 0.95,            # ATH 警戒区阈值（close > ATH × 0.95 时启用严格过滤）
+    'phase_e_efficiency_min': 0.001,     # ATH 警戒区内的效率门槛（分配区量价和谐检查）
 }
 
 
@@ -86,12 +93,30 @@ def compute_entry_signal(df: DataFrame, params: dict = None) -> DataFrame:
     # df['v8_oi_ok'] = df.get('oi_confirmed', pd.Series(True, index=df.index))
     df['v8_oi_ok'] = pd.Series(True, index=df.index)
 
+    # ── 条件 5（TASK 10）：Phase E 质量分层 ──────────────────
+    # 非 Phase E 直接通过
+    # Phase E 普通区：仅要求位移（LOT，移动容易性）— 有实质位移即证明需求战胜供应
+    # Phase E ATH 警戒区（close > ATH × 0.95）：叠加量价效率检查（防分配区套牢）
+    is_phase_e = v8_phase == 'E'
+    wave_displacement = df.get('wave_displacement', pd.Series(0.0, index=df.index))
+    ath_ratio = df.get('ath_ratio', pd.Series(0.0, index=df.index))
+
+    phase_e_disp_ok = wave_displacement > df['close'] * p['phase_e_displacement_min']
+    near_ath = ath_ratio > p['phase_e_ath_zone']
+    phase_e_eff_ok = wave_efficiency > p['phase_e_efficiency_min']
+
+    # ATH 警戒区：位移 + 效率双重满足；普通区：仅位移
+    df['v8_phase_e_harmony_ok'] = ~is_phase_e | (
+        phase_e_disp_ok & (~near_ath | phase_e_eff_ok)
+    )
+
     # ── 最终信号 ─────────────────────────────────────────────
     df['v8_entry_long'] = (
         df['v8_choch_ok'] &
         df['v8_phase_ok'] &
         df['v8_pnf_ok'] &
-        df['v8_oi_ok']
+        df['v8_oi_ok'] &
+        df['v8_phase_e_harmony_ok']
     )
 
     return df
@@ -105,14 +130,17 @@ def entry_funnel_stats(df: DataFrame) -> dict:
     phase_ok = df.get('v8_phase_ok', pd.Series(False, index=df.index))
     pnf_ok = df.get('v8_pnf_ok', pd.Series(False, index=df.index))
     oi_ok = df.get('v8_oi_ok', pd.Series(True, index=df.index))
+    harmony_ok = df.get('v8_phase_e_harmony_ok', pd.Series(True, index=df.index))
     entry = df.get('v8_entry_long', pd.Series(False, index=df.index))
 
+    pre_harmony = choch & phase_ok & pnf_ok & oi_ok
     return {
         'choch_signals': int(choch.sum()),
         'pass_phase': int((choch & phase_ok).sum()),
         'blocked_phase': int((choch & ~phase_ok).sum()),
         'pass_pnf': int((choch & phase_ok & pnf_ok).sum()),
         'blocked_pnf': int((choch & phase_ok & ~pnf_ok).sum()),
-        'pass_oi': int((choch & phase_ok & pnf_ok & oi_ok).sum()),
+        'pass_oi': int(pre_harmony.sum()),
+        'blocked_phase_e_harmony': int((pre_harmony & ~harmony_ok).sum()),
         'final_entry': int(entry.sum()),
     }

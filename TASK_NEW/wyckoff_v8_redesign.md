@@ -25,6 +25,7 @@
 | **V8.5.1** | 2026-05-10 | **真 V8 架构确立：新策略文件 WyckoffV8.py 从零实现，不引用 V7 代码。入场：wave_start ChoCh + Phase D/E 上下文。退出：全走 custom_exit + PNF 目标位，绕过 Freqtrade 向量化路径约束。OI 接口预留不强依赖。TASK 1-3 升级为核心依赖，TASK 4-6 重新激活。** |
 | **V8.5.2** | 2026-05-10 | **退出层架构纠正：V8.5.1 以 PNF T2/T3 作为主要退出导致平均持仓86天，与1H交易逻辑矛盾。根本原因：日线 PNF 目标位是月级别宏观目标，不能驱动1H交易的退出。纠正：down_wave 升级为主要退出（custom_exit 优先级2），PNF T2 降级为辅助退出（优先级3），TR Low 结构失败为紧急退出（优先级1）。日线层=趋势背景，1H层=交易执行，职责明确分离。** |
 | **V8.5.3** | 2026-05-10 | **三个连续 Bug 修复 + ZigZag Lookahead 发现：①T1保本逻辑 Phase E 立即触发（T1 < entry_price）：加入 `target_1 > entry_price` 守卫，胜率从34.9%→81.2%；②TR Low 宽度约束拦截结构止损：Phase E中TR Low在entry_price下方30-50%，`sl_ratio > stoploss(-12%)`导致止损回退硬止损，移除宽度约束；③T2辅助退出 Phase E 立即触发（T2 < entry_price）：加入 `target_2 > entry_price` 守卫，修复后 v8_pnf_t2 从523笔→0笔，v8_down_wave 成为主退出（97.4% WR）。④发现 ZigZag 回溯 Lookahead：WaveAnalyzer 在 bar i 确认转折后回溯标记 last_extreme_idx 为 wave_start，导致 V8 回测虚高 75,687%（99% WR）。修复：is_wave_start/is_wave_end 向后 shift min_bars 根，V8→17,360%（93.4% WR）。同步修复 V7，基线从 11,313%→6,284%（76.8% WR）。修复后 V8 仍是 V7 的 2.76 倍。** |
+| **V8.5.4** | 2026-05-10 | **Phase C = 0% 根因确认（数据现实，非代码 bug）+ Reaccumulation 架构分析：①phase_detector 添加 `i > phase_c_start` 守卫防同帧 B→C→D 跳转，结果 Phase C 仍为 0%。②诊断脚本确认 BTC 2022-2026 从无 Spring（Phase B 期间 low < TR Low 的事件 = 0），所有 SC 后均为 V 型反弹直接进 Phase D/E。③2025 BTC 从 $120k 回撤至 $74k（-31%）不触发新 SC：因 C2 硬条件要求 252日新低，$74k 远高于 2024 低点 $50k。整段时间处于 2022 SC 的 Phase E（TR Low=$15,399）。④结论：SC 检测器的"年内新低"基因（C2 = 252日新低）从设计上排斥 Reaccumulation 识别；如需检测高位大幅回调（>25% ATH）中的再积累，需要独立的 Reaccumulation 检测分支，替换 C2 为"ATH 回撤 > X%"条件。⑤优先级决策：暂不实现 Reaccumulation 检测（工程量大，边际收益不确定），转向 TASK 10 Phase E 质量分层（直接优化现有 77.7% Phase E 信号）。** |
 
 ---
 
@@ -1871,8 +1872,9 @@ V7 所有实验失败的根本原因是在 V7 框架内改造，被 Freqtrade �
 | **TASK 6** | `WyckoffV8.py` 集成 | ✅ 完成 | 新策略文件完整集成；三个 Bug 修复（T1/T2/TR Low） |
 | **TASK 7** | 回测验证 & 对比基线 | ✅ 完成 | V8（17,360% / 93.4% WR / 0.32% DD）vs V7 修复后基线（6,284%），V8 = V7 × 2.76 |
 | **TASK 8** | ZigZag Lookahead 修复 | ✅ 完成 | V7/V8 同步修复；V7 基线 11,313%→6,284%；V8 75,687%→17,360% |
-| **TASK 9** | Phase C Spring 入场点 | 🔵 待开始 | Phase C = 0%，Spring 判定过严，丢失威科夫最高胜率入场点 |
-| **TASK 10** | Phase E 质量分层 | 🔵 待开始 | Phase E = 77.7%，趋势末端拥挤，需要质量过滤避免高频磨损 |
+| **TASK 9** | Phase C Spring 入场点 | ✅ 已关闭 | **根因确认为数据现实**：BTC 2022-2026 无 Spring（诊断 Spring 候选 = 0）。Phase C 守卫修复（`i > phase_c_start`）已合入，不改变 Phase C = 0% 的结果。Reaccumulation 需独立分支（替换 C2 年低条件），暂不实现，后续作为独立 TASK 评估。 |
+| **TASK 10** | Phase E 质量分层 | 🔵 进行中 | Phase E = 77.7%，趋势末端信号拥挤。方向：①Effort vs Result（量价不和谐）过滤；②ATH 距离分层（越接近 ATH down_wave 退出越敏感）。目标：在不降低 V8 总收益的前提下，提升胜率并减少高位假信号。 |
+| **TASK 11** | Reaccumulation 检测（可选） | ⏸️ 搁置 | 高位回撤 >25% ATH 触发新 SC 扫描。架构需新增独立分支替换 C2 硬条件（252日新低 → ATH 回撤 %）。工程量较大，优先级低于 TASK 10。2025 BTC $120k→$74k 回撤（-31%）是典型场景。 |
 
 ---
 
