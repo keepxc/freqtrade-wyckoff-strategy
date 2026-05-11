@@ -42,72 +42,36 @@ def fetch_all(conn: sqlite3.Connection, sql: str, params=()):
     return conn.execute(sql, params).fetchall()
 
 
-def get_pnf_metadata_lines(start: datetime, end: datetime) -> List[str]:
-    """从 dryrun.log 提取本周 PNF 元数据链统计。
+def get_pnf_section(conn: sqlite3.Connection, start: datetime, end: datetime) -> List[str]:
+    """V8 PNF 状态：从 regime_snapshots.daily_tr_exists 统计 TR Low 覆盖率。
 
-    解析日志中 `✅ P&F 目标位已锁定` 行，统计：
-    - 锁定记录数
-    - TR source 分布（daily_swing / rolling_window / swing_fallback）
-    - TR height 中位数和范围
+    V8 无独立 PNF 锁定日志；TR Low 覆盖率 = SC 已确认 + Phase B+ 已建立。
+    daily_tr_exists=1 意味着当前 bar 有有效 TR Low，PNF 目标位可用。
     """
-    log_path = Path("/home/gyan/freqtrade/logs/dryrun.log")
-    if not log_path.exists():
-        return []
+    start_s, end_s = start.isoformat(), end.isoformat()
+    row = conn.execute(
+        """
+        SELECT SUM(CASE WHEN daily_tr_exists = 1 THEN 1 ELSE 0 END) AS tr_bars,
+               COUNT(*) AS total
+        FROM regime_snapshots WHERE ts >= ? AND ts < ?
+        """,
+        (start_s, end_s),
+    ).fetchone()
 
-    # 正则：提取 source=xxx, height=xxxxx, open_date=YYYY-MM-DD HH:MM:SS
-    pnf_re = re.compile(
-        r'✅ P&F 目标位已锁定.*?open_date=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?'
-        r'height=([\d.]+).*?'
-        r'source=([a-z_]+)'
-    )
-
-    records = []
-    try:
-        with log_path.open("r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if "✅ P&F 目标位已锁定" not in line:
-                    continue
-                m = pnf_re.search(line)
-                if not m:
-                    continue
-                open_date_str = m.group(1)
-                height = float(m.group(2))
-                source = m.group(3)
-                try:
-                    open_dt = datetime.strptime(open_date_str, "%Y-%m-%d %H:%M:%S")
-                    open_dt = open_dt.replace(tzinfo=timezone.utc)
-                except ValueError:
-                    continue
-                if start <= open_dt < end:
-                    records.append({"source": source, "height": height})
-    except Exception:
-        return []
-
-    if not records:
-        return [
-            "## PNF 元数据链",
-            "- ⚠️ 本周无 PNF 锁定记录，元数据链未激活",
-            "",
-        ]
-
-    n = len(records)
-    heights = [r["height"] for r in records]
-    source_counts: dict = {}
-    for r in records:
-        source_counts[r["source"]] = source_counts.get(r["source"], 0) + 1
-
-    lines = ["## PNF 元数据链"]
-    lines.append(f"- 本周锁定记录：{n} 条")
-    lines.append(f"- TR 来源分布：{' | '.join(f'{k} {v}' for k, v in sorted(source_counts.items()))}")
-    lines.append(f"- TR Height 中位数：{median(heights):.0f} | 范围：{min(heights):.0f} – {max(heights):.0f}")
-
-    # 判定
-    rolling_pct = (source_counts.get("rolling_window", 0) + source_counts.get("swing_fallback", 0)) / n
-    if rolling_pct > 0.7:
-        lines.append("- ⚠️ TR 检测依赖回退机制（rolling_window + swing_fallback > 70%），SC 锚点覆盖率不足")
+    lines = ["## V8 PNF / TR Low 覆盖率"]
+    if row and row["total"]:
+        tr_bars = row["tr_bars"] or 0
+        total = row["total"]
+        pct = tr_bars / total
+        lines.append(f"- TR Low 有效 bars：{tr_bars} / {total} ({pct:.1%})")
+        if pct < 0.3:
+            lines.append("- ⚠️ TR Low 覆盖率偏低（< 30%），SC 锚点尚未建立或已失效，PNF 目标位不可用")
+        elif pct < 0.6:
+            lines.append("- 🔶 TR Low 覆盖率中等（30–60%），部分时段无 PNF 目标位")
+        else:
+            lines.append("- ✅ TR Low 覆盖率正常（≥ 60%），PNF 结构有效")
     else:
-        lines.append("- ✅ TR source 分布正常（daily_swing 为主）")
-
+        lines.append("- 本周无 regime 快照，无法统计 TR Low 覆盖率")
     lines.append("")
     return lines
 
@@ -115,8 +79,8 @@ def get_pnf_metadata_lines(start: datetime, end: datetime) -> List[str]:
 def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tuple[str, List[str], float]:
     start_s, end_s = start.isoformat(), end.isoformat()
 
-    # 🆕 PNF 元数据链：从 dryrun.log 提取
-    pnf_lines = get_pnf_metadata_lines(start, end)
+    # V8 PNF / TR Low 覆盖率（从 regime_snapshots）
+    pnf_lines = get_pnf_section(conn, start, end)
 
     trades = fetch_one(
         conn,
@@ -136,8 +100,7 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
         """
         SELECT COUNT(*) AS total_signals,
                SUM(CASE WHEN was_executed = 1 THEN 1 ELSE 0 END) AS executed_signals,
-               SUM(CASE WHEN regime_blocked = 1 THEN 1 ELSE 0 END) AS regime_blocked_n,
-               SUM(CASE WHEN p3_swing_up_er_weak = 1 AND p3_swing_down_er_exhaustion = 1 THEN 1 ELSE 0 END) AS conflict_n
+               SUM(CASE WHEN regime_blocked = 1 THEN 1 ELSE 0 END) AS regime_blocked_n
         FROM signals
         WHERE ts >= ? AND ts < ?
         """,
@@ -199,39 +162,47 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
         (start_s, end_s),
     )
 
-    # V1B-7: enter_tag drift 摘要（取前 4 个优先 tag）
-    priority_tags = ["wyckoff_axis_support", "wyckoff_spring", "wyckoff_sow", "wyckoff_divergence"]
+    # V8: enter_tag 汇总（v8_wave_start 为唯一入场标签）
     tag_rows = fetch_all(
         conn,
-        f"""
-        SELECT enter_tag,
+        """
+        SELECT COALESCE(enter_tag, 'unknown') AS enter_tag,
                COUNT(*) AS n,
                AVG(profit_pct) AS avg_pnl,
                SUM(CASE WHEN profit_pct > 0 THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*),0) AS win_rate
         FROM trades
         WHERE exit_time IS NOT NULL AND exit_time >= ? AND exit_time < ?
-          AND enter_tag IN ({','.join('?' for _ in priority_tags)})
         GROUP BY enter_tag ORDER BY n DESC
         """,
-        (start_s, end_s, *priority_tags),
+        (start_s, end_s),
     )
 
-    # P5-WS: enter_tag × regime 分桶（用于识别标签在不同环境下的稳定性）
-    tag_regime_rows = fetch_all(
+    # V8: Phase 入场分布（D/E/unknown 各自的胜率和收益）
+    phase_entry_rows = fetch_all(
         conn,
         """
-        SELECT
-            COALESCE(enter_tag, 'unknown') AS enter_tag,
-            COALESCE(macro_phase_enter, 'unknown') AS macro_phase,
-            COUNT(*) AS n,
-            AVG(profit_pct) AS avg_pnl,
-            SUM(CASE WHEN profit_pct > 0 THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*),0) AS win_rate
+        SELECT COALESCE(phase_context_tag_enter, 'unknown') AS phase,
+               COUNT(*) AS n,
+               AVG(profit_pct) AS avg_pnl,
+               SUM(CASE WHEN profit_pct > 0 THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*),0) AS win_rate
         FROM trades
-        WHERE exit_time IS NOT NULL
-          AND exit_time >= ? AND exit_time < ?
-        GROUP BY COALESCE(enter_tag, 'unknown'), COALESCE(macro_phase_enter, 'unknown')
-        ORDER BY n DESC, enter_tag, macro_phase
-        LIMIT 20
+        WHERE exit_time IS NOT NULL AND exit_time >= ? AND exit_time < ?
+        GROUP BY phase ORDER BY n DESC
+        """,
+        (start_s, end_s),
+    )
+
+    # V8: 退出原因分布（v8_down_wave / v8_structure_fail / v8_pnf_t2 / stop_loss 等）
+    exit_reason_rows = fetch_all(
+        conn,
+        """
+        SELECT COALESCE(exit_reason, 'unknown') AS exit_reason,
+               COUNT(*) AS n,
+               AVG(profit_pct) AS avg_pnl,
+               SUM(CASE WHEN profit_pct > 0 THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*),0) AS win_rate
+        FROM trades
+        WHERE exit_time IS NOT NULL AND exit_time >= ? AND exit_time < ?
+        GROUP BY exit_reason ORDER BY n DESC
         """,
         (start_s, end_s),
     )
@@ -243,7 +214,6 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
     executed = signals["executed_signals"] if signals and signals["executed_signals"] is not None else 0
     total_signals = signals["total_signals"] if signals and signals["total_signals"] is not None else 0
     regime_blocked_n = signals["regime_blocked_n"] if signals and signals["regime_blocked_n"] is not None else 0
-    conflict_n = signals["conflict_n"] if signals and signals["conflict_n"] is not None else 0
     execution_rate = (executed / total_signals) if total_signals else 0.0
     win_rate = trades["win_rate"] if trades and trades["win_rate"] is not None else 0.0
     avg_profit_pct = trades["avg_profit_pct"] if trades and trades["avg_profit_pct"] is not None else 0.0
@@ -297,8 +267,7 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
             lines.append(f"- [{row['event_family']}] {row['event_name']}: {row['event_count']} 次 (per-bar率 {rate:.4f})")
     else:
         lines.append("- 本周无 detector 事件")
-    lines.append(f"- 信号冲突数（up_er_weak ∩ down_er_exhaustion）：{conflict_n}")
-    lines.append(f"- Regime blocked 信号数（fallback 代理）：{regime_blocked_n}")
+    lines.append(f"- Regime blocked 信号数：{regime_blocked_n}")
     lines.append("")
 
     # V1B-7: Regime 分布摘要
@@ -320,26 +289,48 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
         lines.append(f"**bear_market_mode:** {bear_bars}/{bear_total} bars ({bear_pct:.2%})")
     lines.append("")
 
-    # V1B-7: Enter Tag Drift 摘要
+    # V8: Enter Tag 摘要
     lines.append("## Enter Tag 周报摘要")
     if tag_rows:
         for row in tag_rows:
             wr = row["win_rate"] or 0.0
             pnl = row["avg_pnl"] or 0.0
             lines.append(f"- {row['enter_tag']}: n={row['n']}, 胜率={wr:.2%}, avg_pnl={pnl:.4f}")
-        if len(tag_rows) < len(priority_tags):
-            missing = set(priority_tags) - {r['enter_tag'] for r in tag_rows}
-            for m in missing:
-                lines.append(f"- {m}: 本周无平仓数据")
     else:
-        lines.append("- 本周 priority enter_tag 无已平仓交易")
+        lines.append("- 本周无已平仓交易")
     lines.append("")
 
-    # 🆕 PNF 元数据链
+    # V8: Phase 入场分布
+    lines.append("## V8 Phase 入场分布")
+    if phase_entry_rows:
+        lines.append("| Phase | N | 胜率 | avg_pnl |")
+        lines.append("|-------|---|------|---------|")
+        for row in phase_entry_rows:
+            wr = row["win_rate"] or 0.0
+            pnl = row["avg_pnl"] or 0.0
+            lines.append(f"| {row['phase']} | {row['n']} | {wr:.2%} | {pnl:.4f} |")
+    else:
+        lines.append("- 本周无已平仓交易")
+    lines.append("")
+
+    # V8: 退出原因分布
+    lines.append("## V8 退出原因分布")
+    if exit_reason_rows:
+        lines.append("| 退出原因 | N | 胜率 | avg_pnl |")
+        lines.append("|----------|---|------|---------|")
+        for row in exit_reason_rows:
+            wr = row["win_rate"] or 0.0
+            pnl = row["avg_pnl"] or 0.0
+            lines.append(f"| {row['exit_reason']} | {row['n']} | {wr:.2%} | {pnl:.4f} |")
+    else:
+        lines.append("- 本周无已平仓交易")
+    lines.append("")
+
+    # V8 PNF / TR Low 覆盖率
     if pnf_lines:
         lines.extend(pnf_lines)
 
-    # V1B-7: 预警 & 样本不足提醒
+    # 预警 & 样本不足提醒
     lines.append("## 预警")
     if warnings:
         for w in warnings:
@@ -352,18 +343,6 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
         lines.append("> [WARN] **样本不足提醒**：本周已平仓交易小于 5 笔，所有统计结论仅供参考，不建议基于此做决策。")
         lines.append("")
 
-    lines.append("## Enter Tag × Regime 分桶")
-    if tag_regime_rows:
-        lines.append("| enter_tag | macro_phase | N | 胜率 | avg_pnl |")
-        lines.append("|-----------|-------------|---|------|---------|")
-        for row in tag_regime_rows:
-            wr = row["win_rate"] or 0.0
-            pnl = row["avg_pnl"] or 0.0
-            lines.append(
-                f"| {row['enter_tag']} | {row['macro_phase']} | {row['n']} | {wr:.2%} | {pnl:.4f} |"
-            )
-    else:
-        lines.append("- 本周无可用的 enter_tag × regime 已平仓样本")
     lines.append("")
 
     return "\n".join(lines), warnings, health_score
