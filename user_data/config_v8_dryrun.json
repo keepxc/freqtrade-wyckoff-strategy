@@ -1,0 +1,8 @@
+{
+  "minimal_roi": {
+    "0": 99.0
+  },
+  "stoploss": -0.12,
+  "bot_name": "WyckoffV8_DryRun",
+  "db_url": "sqlite:////home/gyan/freqtrade/user_data/tradesv3.v8dryrun.sqlite"
+}

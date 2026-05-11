@@ -147,6 +147,14 @@ class WyckoffV8(IStrategy):
         else:
             self.wave_analyzer = None
 
+        # ── P5 事件桥接器 ────────────────────────────────────
+        try:
+            from user_data.strategy_event_bridge import StrategyEventBridge
+            self.event_bridge = StrategyEventBridge(self, config)
+        except Exception as e:
+            self.event_bridge = None
+            logger.warning(f'[V8] StrategyEventBridge init failed: {e}')
+
     # ── Informative Pairs ────────────────────────────────────
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
@@ -255,14 +263,36 @@ class WyckoffV8(IStrategy):
                 logger.error(f'[V8-DIAG] {pair} entry_detector failed: {e}')
                 dataframe['v8_entry_long'] = False
 
+        # ── P5 字段适配：把 V8 专有列映射到 P5 期望的标准列名 ──
+        # phase_context_tag：V8 的 v8_phase (A/B/C/D/E/unknown) 对应 V7 的 phase_context_tag
+        dataframe['phase_context_tag'] = dataframe.get('v8_phase', pd.Series('unknown', index=dataframe.index)).fillna('unknown')
+        # daily_tr_exists：TR Low 有值即代表日线 TR 已锁定
+        dataframe['daily_tr_exists'] = dataframe.get('v8_tr_low', pd.Series(np.nan, index=dataframe.index)).notna()
+        # daily_choch_confirmed：SC 最终确认 ≈ 日线结构变化确认
+        dataframe['daily_choch_confirmed'] = dataframe.get('v8_sc_final', pd.Series(False, index=dataframe.index)).fillna(False)
+
+        # ── P5 事件发射 ──────────────────────────────────────
+        if self.event_bridge is not None:
+            self.event_bridge.emit_detector_events_from_dataframe(
+                pair=pair, timeframe=self.timeframe, dataframe=dataframe)
+            self.event_bridge.emit_regime_snapshot(
+                pair=pair, timeframe=self.timeframe, dataframe=dataframe)
+
         return dataframe
 
     def _fill_v8_defaults(self, dataframe: DataFrame) -> None:
+        bool_cols = {'v8_phase_allow_long', 'v8_sc_final', 'v8_entry_long'}
+        float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3', 'v8_sc_low'}
         for col in ['v8_phase', 'v8_phase_allow_long', 'v8_tr_high', 'v8_tr_low',
                     'v8_target_1', 'v8_target_2', 'v8_target_3',
                     'v8_sc_final', 'v8_sc_low', 'v8_entry_long']:
             if col not in dataframe.columns:
-                dataframe[col] = None if col not in ('v8_phase_allow_long', 'v8_sc_final', 'v8_entry_long') else False
+                if col in bool_cols:
+                    dataframe[col] = False
+                elif col in float_cols:
+                    dataframe[col] = np.nan  # np.isnan() 安全，不用 None
+                else:
+                    dataframe[col] = 'unknown'  # v8_phase
 
     # ── populate_entry_trend ─────────────────────────────────
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -270,6 +300,10 @@ class WyckoffV8(IStrategy):
             dataframe['v8_entry_long'].fillna(False),
             ['enter_long', 'enter_tag']
         ] = [1, 'v8_wave_start']
+
+        # P5：发射信号事件
+        if self.event_bridge is not None:
+            self.event_bridge.emit_signals_from_dataframe(dataframe, metadata)
 
         return dataframe
 
@@ -347,15 +381,38 @@ class WyckoffV8(IStrategy):
         # 1. 结构失败：当前价跌破 TR Low（日线结构破坏，紧急退出）
         if not np.isnan(tr_low) and tr_low > 0:
             if current_rate < tr_low:
+                self._emit_trade_close(trade, pair, 'v8_structure_fail', current_rate, current_time)
                 return 'v8_structure_fail'
 
         # 2. PNF T2 到达 → 辅助退出（down_wave 未触发时的利润目标保护）
         # 必须 T2 > entry_price，否则 Phase E 中 T2 < 入场价，first bar 立即触发
         entry_price = trade.open_rate
         if not np.isnan(target_2) and target_2 > entry_price and current_rate >= target_2:
+            self._emit_trade_close(trade, pair, 'v8_pnf_t2', current_rate, current_time)
             return 'v8_pnf_t2'
 
         return None
+
+    def _emit_trade_close(self, trade, pair: str, reason: str, exit_price: float, current_time) -> None:
+        if self.event_bridge is None:
+            return
+        try:
+            duration_min = int((current_time - trade.open_date_utc).total_seconds() / 60)
+            profit_pct = (exit_price - trade.open_rate) / trade.open_rate
+            self.event_bridge.emit_trade_close(
+                pair=pair,
+                trade_id=str(trade.id),
+                side='long',
+                exit_reason=reason,
+                exit_tag=reason,
+                exit_price=exit_price,
+                profit_pct=profit_pct,
+                profit_abs=profit_pct * trade.stake_amount,
+                duration_minutes=duration_min,
+                current_time=current_time,
+            )
+        except Exception as e:
+            logger.warning(f'[V8] P5 trade_close emit failed: {e}')
 
     # ── confirm_trade_entry（额外安全检查）──────────────────
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float,
@@ -371,5 +428,20 @@ class WyckoffV8(IStrategy):
         if pd.isna(last.get('v8_target_1', np.nan)):
             logger.info(f'{pair} entry rejected: no PNF target')
             return False
+
+        # P5：发射开仓事件
+        if self.event_bridge is not None:
+            trade_id = f"{pair}_{current_time.strftime('%Y%m%d%H%M%S')}"
+            self.event_bridge.emit_trade_open(
+                pair=pair,
+                trade_id=trade_id,
+                side=side,
+                enter_tag=entry_tag or 'v8_wave_start',
+                entry_price=rate,
+                stake_amount=amount,
+                leverage=1.0,
+                current_time=current_time,
+                dataframe=dataframe,
+            )
 
         return True

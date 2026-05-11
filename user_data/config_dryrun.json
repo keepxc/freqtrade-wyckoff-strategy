@@ -100,7 +100,9 @@
     "username": "freqtrade",
     "password": "CHANGE_THIS_PASSWORD"
   },
-  "bot_name": "WyckoffV7_DryRun",
+  "minimal_roi": {"0": 99.0},
+  "stoploss": -0.12,
+  "bot_name": "WyckoffV8_DryRun",
   "timeframe": "1h",
   "initial_state": "running",
   "force_entry_enable": false,
