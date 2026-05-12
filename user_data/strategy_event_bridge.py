@@ -180,6 +180,8 @@ class StrategyEventBridge:
                     p3_swing_down_er_exhaustion=bool(row.get('p3_swing_down_er_exhaustion', False)),
                     p3_swing_up_er_weak=bool(row.get('p3_swing_up_er_weak', False)),
                     wyckoff_warning=bool(row.get('wyckoff_warning', False)),
+                    above_t1=bool(row.get('v8_above_t1', False)),
+                    t2_exists=bool(row.get('v8_t2_exists', False)),
                 )
             
             logger.debug(f'Emitted {len(entry_signals)} signal events for {pair}')

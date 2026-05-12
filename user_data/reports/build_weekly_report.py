@@ -107,6 +107,29 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
         (start_s, end_s),
     )
 
+    # V8: T1位置入场统计（above_t1 / t2_exists 胜率分组）
+    t1_rows = fetch_all(
+        conn,
+        """
+        SELECT
+            s.above_t1,
+            s.t2_exists,
+            COUNT(t.id) AS n,
+            AVG(t.profit_pct) AS avg_pnl,
+            SUM(CASE WHEN t.profit_pct > 0 THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(t.id), 0) AS win_rate
+        FROM signals s
+        LEFT JOIN trades t ON t.pair = s.pair
+            AND t.enter_tag = s.signal_name
+            AND ABS(strftime('%s', t.open_date) - strftime('%s', s.ts)) < 3600
+            AND t.exit_time IS NOT NULL
+        WHERE s.ts >= ? AND s.ts < ?
+            AND s.was_executed = 1
+        GROUP BY s.above_t1, s.t2_exists
+        ORDER BY s.above_t1, s.t2_exists
+        """,
+        (start_s, end_s),
+    )
+
     # V1B-7: detector 激活率摘要
     detector_rows = fetch_all(
         conn,
@@ -257,6 +280,32 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
     lines.append(f"- 候选信号数：{total_signals}")
     lines.append(f"- 成交信号数：{executed}")
     lines.append(f"- 执行率：{execution_rate:.2%}")
+    lines.append("")
+
+    # V8: T1 位置入场统计
+    lines.append("## V8 T1位置入场分析")
+    if t1_rows and any(r["n"] for r in t1_rows):
+        lines.append("| above_t1 | t2_exists | N | 胜率 | avg_pnl | 建议 |")
+        lines.append("|----------|-----------|---|------|---------|------|")
+        overall_wr = win_rate  # 来自交易摘要
+        for row in t1_rows:
+            n = row["n"] or 0
+            wr = row["win_rate"] or 0.0
+            pnl = row["avg_pnl"] or 0.0
+            at1 = "✅高于T1" if row["above_t1"] else "⬇️低于T1"
+            t2e = "有T2" if row["t2_exists"] else "无T2"
+            # 决策建议逻辑
+            if n < 20:
+                advice = f"观察中（样本{n}<20）"
+            elif row["above_t1"] and not row["t2_exists"] and wr < 0.45:
+                advice = "⚠️ 建议加过滤"
+            elif row["above_t1"] and not row["t2_exists"] and wr < overall_wr - 0.10:
+                advice = "⚠️ 显著低于均值，关注"
+            else:
+                advice = "✅ 正常"
+            lines.append(f"| {at1} | {t2e} | {n} | {wr:.2%} | {pnl:.4f} | {advice} |")
+    else:
+        lines.append("- 本周信号未匹配到已平仓交易（样本不足，继续积累）")
     lines.append("")
 
     # V1B-7: Detector 激活率摘要

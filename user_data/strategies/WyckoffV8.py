@@ -301,6 +301,12 @@ class WyckoffV8(IStrategy):
             ['enter_long', 'enter_tag']
         ] = [1, 'v8_wave_start']
 
+        # 计算 T1/T2 相对位置，供 P5 信号记录和周报统计使用
+        t1 = dataframe.get('v8_target_1', pd.Series(np.nan, index=dataframe.index))
+        t2 = dataframe.get('v8_target_2', pd.Series(np.nan, index=dataframe.index))
+        dataframe['v8_above_t1'] = dataframe['close'] > t1.fillna(np.inf)
+        dataframe['v8_t2_exists'] = t2.notna()
+
         # P5：发射信号事件
         if self.event_bridge is not None:
             self.event_bridge.emit_signals_from_dataframe(dataframe, metadata)
