@@ -43,7 +43,7 @@
     "secret": "",
     "password": "",
     "_ft_has_params": {
-      "ws_enabled": true
+      "ws_enabled": false
     },
     "ccxt_config": {
       "enableRateLimit": true,
@@ -108,7 +108,7 @@
   "force_entry_enable": false,
   "markets_refresh_interval": 720,
   "internals": {
-    "process_throttle_secs": 5
+    "process_throttle_secs": 30
   },
   "db_url": "sqlite:////home/gyan/freqtrade/user_data/tradesv3.dryrun.sqlite"
 }

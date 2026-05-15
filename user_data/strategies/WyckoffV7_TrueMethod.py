@@ -2708,7 +2708,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             'blocked_quality': int((_ws_raw & bull_market & wyckoff_context_ok & harmony_ok & no_sot_warning & ~quality_ok).sum()),
             'final': int(wave_start_entry.sum()),
         }
-        _diag_file = '/freqtrade/user_data/ws_filter_diag.txt'
+        _diag_file = '/home/gyan/freqtrade/user_data/ws_filter_diag.txt'
         with open(_diag_file, 'a') as _df:
             _df.write(f'raw={_ws_counts["raw"]} bull={_ws_counts["blocked_bull_market"]} ctx={_ws_counts["blocked_context"]} harmony={_ws_counts["blocked_harmony"]} sot={_ws_counts["blocked_sot"]} quality={_ws_counts["blocked_quality"]} final={_ws_counts["final"]}\n')
         # === V8 诊断结束 ===
@@ -3122,7 +3122,7 @@ class WyckoffV7_TrueMethod(IStrategy):
         _fe_ws_counts['blocked_pnf'] = int((_ws_diag & ~pnf_target_valid_long).sum())
         _ws_diag = _ws_diag & pnf_target_valid_long
         _fe_ws_counts['final_survivors'] = int(_ws_diag.sum())
-        _df = open('/freqtrade/user_data/ws_final_diag.txt', 'a')
+        _df = open('/home/gyan/freqtrade/user_data/ws_final_diag.txt', 'a')
         _df.write(f'entered_fe={_fe_ws_before} ' + ' '.join(f'{k}={v}' for k,v in _fe_ws_counts.items()) + '\n')
         _df.close()
 
@@ -3157,7 +3157,7 @@ class WyckoffV7_TrueMethod(IStrategy):
             'ta_blk_dist_any': int((_ta_blocked & ~_nd).sum()),
             'ta_blk_trend_any': int((_ta_blocked & ~_ts).sum()),
         }
-        _ta_file = '/freqtrade/user_data/ta_factor_diag.txt'
+        _ta_file = '/home/gyan/freqtrade/user_data/ta_factor_diag.txt'
         with open(_ta_file, 'a') as _tf:
             _tf.write(' '.join(f'{k}={v}' for k, v in _ta_diag.items()) + '\n')
         # === 三因子拆解诊断结束 ===
