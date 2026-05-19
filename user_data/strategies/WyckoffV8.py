@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 try:
     from user_data.strategies.v8_modules.sc_detector import add_v8_sc_detection
     from user_data.strategies.v8_modules.phase_detector import add_v8_phase_detection
-    from user_data.strategies.v8_modules.pnf_calculator import add_v8_pnf_targets
+    from user_data.strategies.v8_modules.pnf_calculator import add_v8_pnf_targets, add_v8_short_pnf_targets
     from user_data.strategies.v8_modules.entry_detector import compute_entry_signal, entry_funnel_stats
     V8_MODULES_OK = True
     logger.info('V8 modules loaded: sc_detector / phase_detector / pnf_calculator / entry_detector')
@@ -54,6 +54,15 @@ try:
 except ImportError:
     WAVE_ANALYZER_OK = False
     logger.warning('WaveAnalyzer not available — wave_start signals will be empty')
+
+# ── DailyEventDetector 导入（TASK S-1：派发序列 BC→AR→UTAD→SOW）────
+try:
+    from wyckoff.daily_event_detector import DailyEventDetector
+    DAILY_EVENT_DETECTOR_OK = True
+    logger.info('DailyEventDetector loaded')
+except ImportError:
+    DAILY_EVENT_DETECTOR_OK = False
+    logger.warning('DailyEventDetector not available — short signals will be disabled')
 
 
 # ── WyckoffWave dataclass（与 V7 保持完全一致）──────────────
@@ -103,7 +112,7 @@ class WyckoffV8(IStrategy):
     # ── 基础配置 ─────────────────────────────────────────────
     INTERFACE_VERSION = 3
     timeframe = '1h'
-    can_short = False
+    can_short = True
 
     # down_wave 通过 exit_signal 向量化路径退出（比 ROI/custom_exit 更早触发）
     use_exit_signal = True
@@ -146,6 +155,11 @@ class WyckoffV8(IStrategy):
             self.wave_analyzer = WaveAnalyzer(self, WyckoffWave)
         else:
             self.wave_analyzer = None
+
+        if DAILY_EVENT_DETECTOR_OK:
+            self.daily_event_detector = DailyEventDetector()
+        else:
+            self.daily_event_detector = None
 
         # ── P5 事件桥接器 ────────────────────────────────────
         try:
@@ -210,6 +224,7 @@ class WyckoffV8(IStrategy):
                     df_1d = add_v8_sc_detection(df_1d)
                     df_1d = add_v8_phase_detection(df_1d)
                     df_1d = add_v8_pnf_targets(df_1d)
+                    df_1d = add_v8_short_pnf_targets(df_1d)  # TASK S-3
 
                     sc_count = int(df_1d.get('v8_sc_final', pd.Series(False)).sum())
                     phase_d = int((df_1d.get('v8_phase', pd.Series('')) == 'D').sum())
@@ -223,6 +238,8 @@ class WyckoffV8(IStrategy):
                         'v8_tr_high', 'v8_tr_low',
                         'v8_target_1', 'v8_target_2', 'v8_target_3',
                         'v8_sc_final', 'v8_sc_low',
+                        'target_short_conservative', 'target_short_standard',
+                        'target_short_aggressive', 'rr_short_standard',
                     ]
                     daily_cols = [c for c in daily_cols if c in df_1d.columns]
                     df_1d_slim = df_1d[daily_cols].copy()
@@ -244,6 +261,80 @@ class WyckoffV8(IStrategy):
 
                     merged_pnf = int(dataframe.get('v8_target_1', pd.Series(float('nan'))).notna().sum())
                     logger.info(f'[V8-DIAG] {pair} after merge: 1H rows with pnf_target={merged_pnf}/{len(dataframe)}')
+
+                    # ── TASK S-1: 派发序列探测（BC→AR→UTAD→SOW）────────
+                    if self.daily_event_detector is not None:
+                        try:
+                            df_1d = self.daily_event_detector.detect(df_1d)
+                        except Exception as _ded_err:
+                            logger.warning(f'[V8-DIAG] {pair} DailyEventDetector failed: {_ded_err}')
+                            for _col in ['daily_bc_detected', 'daily_bc_path', 'daily_ar_high',
+                                         'daily_ar_low', 'dist_sequence_progress',
+                                         'daily_utad_detected', 'daily_dist_sow_detected',
+                                         'buying_exhaustion', 'dist_cause_sufficient']:
+                                df_1d[_col] = False if 'detected' in _col or 'exhaustion' in _col or 'sufficient' in _col else (float('nan') if 'high' in _col or 'low' in _col else 'none')
+                    else:
+                        df_1d['daily_bc_detected']       = False
+                        df_1d['daily_bc_path']           = 'none'
+                        df_1d['daily_ar_high']           = float('nan')
+                        df_1d['daily_ar_low']            = float('nan')
+                        df_1d['dist_sequence_progress']  = 'none'
+                        df_1d['daily_utad_detected']     = False
+                        df_1d['daily_dist_sow_detected'] = False
+                        df_1d['buying_exhaustion']       = False
+                        df_1d['dist_cause_sufficient']   = False
+
+                    # 把派发序列字段追加进 merge slim
+                    dist_cols = ['date', 'daily_bc_detected', 'daily_bc_path',
+                                 'daily_ar_high', 'daily_ar_low', 'dist_sequence_progress',
+                                 'daily_utad_detected', 'daily_dist_sow_detected',
+                                 'buying_exhaustion', 'dist_cause_sufficient']
+                    dist_cols = [c for c in dist_cols if c in df_1d.columns]
+                    df_dist = df_1d[dist_cols].copy()
+                    df_dist['date'] = pd.to_datetime(df_dist['date'], utc=True) + pd.Timedelta(days=1)
+                    dataframe['date_utc2'] = pd.to_datetime(dataframe['date'], utc=True)
+                    dataframe = pd.merge_asof(
+                        dataframe.sort_values('date_utc2'),
+                        df_dist.rename(columns={'date': 'date_dist'}).sort_values('date_dist'),
+                        left_on='date_utc2', right_on='date_dist',
+                        direction='backward',
+                    )
+                    dataframe = dataframe.drop(columns=['date_utc2', 'date_dist'], errors='ignore')
+
+                    _bc_cnt  = int(dataframe.get('daily_bc_detected', pd.Series(False)).sum())
+                    _dcs_cnt = int(dataframe.get('dist_cause_sufficient', pd.Series(False)).sum())
+                    logger.info(f'[V8-DIAG] {pair} dist_seq: bc_bars={_bc_cnt} dist_cause_sufficient_bars={_dcs_cnt}')
+
+                    # ── TASK S-2: bear_market_mode + sustained_markdown ──
+                    # daily_choch_confirmed：复用 v8_sc_final 近似（SC 确认 = 结构改变）
+                    # 派发侧：用 daily_bc_detected 触发 choch
+                    _daily_choch = dataframe.get(
+                        'daily_bc_detected', pd.Series(False, index=dataframe.index)
+                    ).fillna(False).astype(bool)
+                    _dist_cause = dataframe.get(
+                        'dist_cause_sufficient', pd.Series(False, index=dataframe.index)
+                    ).fillna(False).astype(bool)
+                    dataframe['bear_market_mode'] = _daily_choch & _dist_cause
+
+                    # sustained_markdown：choch + close < daily_ema200×0.97 持续 30 根 1H
+                    _daily_ema200 = dataframe.get('v8_tr_low', pd.Series(float('nan'), index=dataframe.index))
+                    # 用 EMA200 估算：V8 无独立 daily_ema200，用 close 的 EMA200 代替
+                    _ema200_1h = dataframe['close'].ewm(span=200, adjust=False).mean()
+                    _sm_raw = (
+                        _daily_choch &
+                        (dataframe['close'] < _ema200_1h * 0.97)
+                    )
+                    dataframe['sustained_markdown'] = (
+                        _sm_raw.astype(int).rolling(30, min_periods=30).min().fillna(0).astype(bool)
+                    )
+                    dataframe['_short_bear_gate'] = (
+                        dataframe['bear_market_mode'] | dataframe['sustained_markdown']
+                    )
+
+                    _bm = int(dataframe['bear_market_mode'].sum())
+                    _sm = int(dataframe['sustained_markdown'].sum())
+                    logger.info(f'[V8-DIAG] {pair} S-2: bear_market_mode={_bm} sustained_markdown={_sm}')
+
                 else:
                     logger.warning(f'[V8-DIAG] {pair} 1d data insufficient ({len(df_1d) if df_1d is not None else 0} rows)')
                     self._fill_v8_defaults(dataframe)
@@ -281,18 +372,23 @@ class WyckoffV8(IStrategy):
         return dataframe
 
     def _fill_v8_defaults(self, dataframe: DataFrame) -> None:
-        bool_cols = {'v8_phase_allow_long', 'v8_sc_final', 'v8_entry_long'}
-        float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3', 'v8_sc_low'}
-        for col in ['v8_phase', 'v8_phase_allow_long', 'v8_tr_high', 'v8_tr_low',
-                    'v8_target_1', 'v8_target_2', 'v8_target_3',
-                    'v8_sc_final', 'v8_sc_low', 'v8_entry_long']:
+        bool_cols = {'v8_phase_allow_long', 'v8_sc_final', 'v8_entry_long',
+                     'daily_bc_detected', 'daily_utad_detected', 'daily_dist_sow_detected',
+                     'buying_exhaustion', 'dist_cause_sufficient',
+                     'bear_market_mode', 'sustained_markdown', '_short_bear_gate'}
+        float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3',
+                      'v8_sc_low', 'daily_ar_high', 'daily_ar_low',
+                      'target_short_conservative', 'target_short_standard', 'rr_short_standard'}
+        str_cols   = {'v8_phase', 'daily_bc_path', 'dist_sequence_progress'}
+        all_cols = bool_cols | float_cols | str_cols
+        for col in all_cols:
             if col not in dataframe.columns:
                 if col in bool_cols:
                     dataframe[col] = False
                 elif col in float_cols:
-                    dataframe[col] = np.nan  # np.isnan() 安全，不用 None
+                    dataframe[col] = np.nan
                 else:
-                    dataframe[col] = 'unknown'  # v8_phase
+                    dataframe[col] = 'unknown'
 
     # ── populate_entry_trend ─────────────────────────────────
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -307,6 +403,56 @@ class WyckoffV8(IStrategy):
         dataframe['v8_above_t1'] = dataframe['close'] > t1.fillna(np.inf)
         dataframe['v8_t2_exists'] = t2.notna()
 
+        # ── TASK S-4: enter_short ───────────────────────────────
+        # 触发条件（三路径）：
+        #   路径1 SOW：daily_dist_sow_detected（经典 BC→AR→SOW 或 ar→sow 直通）
+        #   路径2 UTAD：daily_utad_detected（UTAD 确认后提前入场）
+        #   路径3 BE：buying_exhaustion（渐进式分配顶，无单根 BC，2022型）
+        dataframe['enter_short'] = 0
+
+        sow_entry  = dataframe.get('daily_dist_sow_detected',
+                                   pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        utad_entry = dataframe.get('daily_utad_detected',
+                                   pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        be_entry   = dataframe.get('buying_exhaustion',
+                                   pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+
+        composite_intent = dataframe.get('composite_intent',
+                                         pd.Series('unclear', index=dataframe.index))
+        short_intent_ok = ~composite_intent.isin(['accumulating', 'trending_up', 'testing'])
+
+        rr_short_ok   = dataframe.get('rr_short_standard',
+                                      pd.Series(0.0, index=dataframe.index)).fillna(0.0) >= 1.0
+        _bear_gate    = (
+            dataframe.get('dist_cause_sufficient',
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) |
+            dataframe.get('sustained_markdown',
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        )
+        pnf_valid_short = dataframe.get('target_short_conservative',
+                                        pd.Series(0.0, index=dataframe.index)).fillna(0.0) > 0
+
+        # BE 路径：不要求 RR（无 BC 锚点时 RR 计算可能偏低），用 _bear_gate 门控
+        be_gate = (
+            be_entry & _bear_gate & pnf_valid_short & short_intent_ok
+        )
+
+        final_short_entry = (
+            (sow_entry | utad_entry) &
+            short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
+        ) | be_gate
+
+        # 优先级：UTAD > SOW > BE（UTAD/SOW 是更强的结构确认）
+        dataframe.loc[final_short_entry & be_entry,   'enter_tag'] = 'v8_short_be'
+        dataframe.loc[final_short_entry & sow_entry,  'enter_tag'] = 'v8_short_sow'
+        dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'
+        dataframe.loc[final_short_entry, 'enter_short'] = 1
+
+        _be_cnt  = int(be_gate.sum())
+        _sow_cnt = int((final_short_entry & sow_entry).sum())
+        _pair = metadata.get('pair', '')
+        logger.info(f'[V8-DIAG] {_pair} enter_short: sow={_sow_cnt} be={_be_cnt}')
+
         # P5：发射信号事件
         if self.event_bridge is not None:
             self.event_bridge.emit_signals_from_dataframe(dataframe, metadata)
@@ -315,7 +461,8 @@ class WyckoffV8(IStrategy):
 
     # ── populate_exit_trend（down_wave 主退出，向量化路径）──────
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe['exit_long'] = 0
+        dataframe['exit_long']  = 0
+        dataframe['exit_short'] = 0
 
         # rolling(4) 捕获最近4根K线内的 wave_start（与V7一致，避免实盘最后一根K线漏判）
         _recent_wave_start = dataframe['is_wave_start'].rolling(4, min_periods=1).max().astype(bool)
@@ -323,10 +470,21 @@ class WyckoffV8(IStrategy):
         is_down_wave = (
             _recent_wave_start &
             (dataframe['wave_direction'] == 'down') &
-            (dataframe['wave_efficiency'] > 0.001) &                         # 过滤弱下降波
-            (dataframe['wave_displacement'] > dataframe['close'] * 0.008)    # ≥0.8% 实质性位移
+            (dataframe['wave_efficiency'] > 0.001) &
+            (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
         )
         dataframe.loc[is_down_wave, ['exit_long', 'exit_tag']] = [1, 'v8_down_wave']
+
+        # ── TASK S-5: exit_short — 上升 wave_start 出现 → 空头平仓 ──
+        # 物理含义：up_wave ChoCh = 供应消耗完毕，空头逻辑失效，必须平仓
+        is_up_wave = (
+            _recent_wave_start &
+            (dataframe['wave_direction'] == 'up') &
+            (dataframe['wave_efficiency'] > 0.001) &
+            (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
+        )
+        dataframe.loc[is_up_wave, ['exit_short', 'exit_tag']] = [1, 'v8_up_wave_reverse']
+
         return dataframe
 
     # ── custom_stoploss（结构止损）───────────────────────────
@@ -344,9 +502,35 @@ class WyckoffV8(IStrategy):
         last = dataframe.iloc[-1]
         entry_price = trade.open_rate
         atr = last.get('atr14', np.nan)
+        be_offset = float(self.breakeven_offset.value)
+
+        # ── TASK S-6: 空头止损分支 ──────────────────────────────
+        if trade.is_short:
+            # 空头结构止损用派发侧 AR 高点；BE 路径无状态机锚点时 fallback 到近期 20 日高点
+            ar_high = last.get('daily_ar_high', np.nan)
+            if np.isnan(ar_high) or ar_high <= 0:
+                ar_high = float(dataframe['high'].tail(20).max())
+            target_short_cons = last.get('target_short_conservative', np.nan)
+
+            # T1 (conservative) 到达 → 移到保本（空头：入场价 × (1 - offset)）
+            if (not np.isnan(target_short_cons) and target_short_cons > 0
+                    and target_short_cons < entry_price
+                    and current_rate <= target_short_cons):
+                breakeven_price = entry_price * (1 - be_offset)
+                if current_rate < breakeven_price:
+                    return (entry_price * (1 + be_offset) / current_rate) - 1
+
+            # 结构止损：AR High + buffer（价格突破派发区顶部 = 结构失败）
+            if not np.isnan(ar_high) and ar_high > 0:
+                buffer = float(self.tr_low_buffer.value)
+                sl_price = ar_high * (1 + buffer)
+                return (sl_price / current_rate) - 1
+
+            return self.stoploss
+
+        # ── 多头止损分支（原逻辑）───────────────────────────────
         tr_low = last.get('v8_tr_low', np.nan)
         target_1 = last.get('v8_target_1', np.nan)
-        be_offset = float(self.breakeven_offset.value)
 
         # T1 到达 → 移到保本（只有T1在入场价上方时才有意义）
         if not np.isnan(target_1) and target_1 > entry_price and current_rate >= target_1:
@@ -355,8 +539,7 @@ class WyckoffV8(IStrategy):
                 sl_price = breakeven_price
                 return (sl_price / current_rate) - 1
 
-        # 结构止损：TR Low - buffer（Phase E时TR Low可能远低于当前价，不限制宽度）
-        # 威科夫逻辑：价格跌回TR内才是真正结构失败，不用距离约束
+        # 结构止损：TR Low - buffer（威科夫逻辑：价格跌回TR内才是结构失败）
         if not np.isnan(tr_low) and tr_low > 0:
             buffer = float(self.tr_low_buffer.value)
             sl_price = tr_low * (1 - buffer)
@@ -381,6 +564,33 @@ class WyckoffV8(IStrategy):
             return None
 
         last = dataframe.iloc[-1]
+        entry_price = trade.open_rate
+
+        # ── TASK S-6: 空头退出分支 ──────────────────────────────
+        if trade.is_short:
+            # 空头结构失败用派发侧 AR 高点；BE 路径无状态机锚点时 fallback 到近期 20 日高点
+            ar_high = last.get('daily_ar_high', np.nan)
+            if np.isnan(ar_high) or ar_high <= 0:
+                ar_high = float(dataframe['high'].tail(20).max())
+            target_short_std = last.get('target_short_standard', np.nan)
+
+            # 1. 结构失败：价格突破派发区 AR High（做空逻辑彻底失效）
+            if not np.isnan(ar_high) and ar_high > 0:
+                if current_rate > ar_high:
+                    self._emit_trade_close(trade, pair, 'v8_short_structure_fail', current_rate, current_time)
+                    return 'v8_short_structure_fail'
+
+            # 2. PNF standard 目标到达 → 辅助退出
+            # 必须 target < entry_price（做空盈利方向），避免首根 bar 立即触发
+            if (not np.isnan(target_short_std) and target_short_std > 0
+                    and target_short_std < entry_price
+                    and current_rate <= target_short_std):
+                self._emit_trade_close(trade, pair, 'v8_short_pnf_std', current_rate, current_time)
+                return 'v8_short_pnf_std'
+
+            return None
+
+        # ── 多头退出分支（原逻辑）───────────────────────────────
         tr_low = last.get('v8_tr_low', np.nan)
         target_2 = last.get('v8_target_2', np.nan)
 
@@ -392,7 +602,6 @@ class WyckoffV8(IStrategy):
 
         # 2. PNF T2 到达 → 辅助退出（down_wave 未触发时的利润目标保护）
         # 必须 T2 > entry_price，否则 Phase E 中 T2 < 入场价，first bar 立即触发
-        entry_price = trade.open_rate
         if not np.isnan(target_2) and target_2 > entry_price and current_rate >= target_2:
             self._emit_trade_close(trade, pair, 'v8_pnf_t2', current_rate, current_time)
             return 'v8_pnf_t2'

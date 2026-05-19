@@ -373,7 +373,9 @@ class DailyEventDetector:
         状态机：
           'none'  → 初始/重置状态
           'bc'    → BC 已发生，等待 AR 高点（3-15根窗口内）
-          'ar'    → AR 高点已确认，等待 UTAD（high>=ar_high×97%且量缩）
+          'ar'    → AR 高点已确认，等待 UTAD 或直通 SOW
+                    - 路径1（经典）：high>=ar_high×97% 且量缩 → utad
+                    - 路径2（直通）：close<ar_low + 放量阴线 → sow（跳过UTAD，2021型）
           'utad'  → UTAD 已确认，等待 SOW（跌破 AR 低点+放量阴线）
           'sow'   → SOW 已确认，派发序列完整
 
@@ -509,9 +511,10 @@ class DailyEventDetector:
                     # （宽松策略：允许 bc 状态延长，直到下一个 BC 重置）
 
             # ═══════════════════════════════════════════════════════════════
-            # 状态：'ar' → 等待 UTAD（high 接近 ar_high 且量缩）
+            # 状态：'ar' → 等待 UTAD 或直通 SOW
             # ═══════════════════════════════════════════════════════════════
             elif state == 'ar':
+                # 路径1（经典）：UTAD — high 接近 ar_high 且量缩
                 if (
                     not np.isnan(ar_high_val)
                     and high_v[i] >= ar_high_val * self.utad_high_pct
@@ -520,6 +523,18 @@ class DailyEventDetector:
                 ):
                     utad_arr[i] = True
                     state = 'utad'
+
+                # 路径2（直通）：ar→sow — 跌破 ar_low + 放量阴线（2021型，无UTAD）
+                elif (
+                    not np.isnan(ar_low_val)
+                    and close_v[i] < ar_low_val
+                    and not np.isnan(vol_sma20_v[i])
+                    and vol_sma20_v[i] > 0
+                    and volume_v[i] > vol_sma20_v[i] * self.sow_vol_mult
+                    and close_v[i] < open_v[i]
+                ):
+                    sow_arr[i] = True
+                    state = 'sow'
 
             # ═══════════════════════════════════════════════════════════════
             # 状态：'utad' → 等待 SOW（跌破 ar_low + 放量阴线）

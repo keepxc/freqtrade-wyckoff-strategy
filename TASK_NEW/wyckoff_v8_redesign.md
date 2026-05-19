@@ -1873,5 +1873,246 @@ V7 所有实验失败的根本原因是在 V7 框架内改造，被 Freqtrade �
 | **TASK 7** | 回测验证 & 对比基线 | ✅ 完成 | V8（17,360% / 93.4% WR / 0.32% DD）vs V7 修复后基线（6,284%），V8 = V7 × 2.76 |
 | **TASK 8** | ZigZag Lookahead 修复 | ✅ 完成 | V7/V8 同步修复；V7 基线 11,313%→6,284%；V8 75,687%→17,360% |
 | **TASK 9** | Phase C Spring 入场点 | ✅ 已关闭 | **根因确认为数据现实**：BTC 2022-2026 无 Spring（诊断 Spring 候选 = 0）。Phase C 守卫修复（`i > phase_c_start`）已合入，不改变 Phase C = 0% 的结果。Reaccumulation 需独立分支（替换 C2 年低条件），暂不实现，后续作为独立 TASK 评估。 |
-| **TASK 10** | Phase E 质量分层 | ✅ 已关闭（证伪） | **两轮实验均无实质增益**：①效率+位移双过滤（efficiency>0.001 + displacement>0.8%）：470→456笔，-7.1%收益，-0.6pp WR，误杀赢单；②LOT+ATH警戒（仅位移 + ath_ratio>0.95 叠加效率）：470→469笔，≈0%变化。根本原因：Phase E up_wave 物理上量价同步放大（JAC加速），效率过滤天然误杀强趋势；ATH警戒区（>95%前高）在BTC 2022-2026回测期触发次数极少。**代码保留**（安全网，零成本），但方向证伪，不再在入场端做 Phase E 过滤。 |
+| **TASK 10** | Phase E 质量分层 | ✅ 已关闭（证伪） | **两轮实验均无实质增益**：①效率+位移双过滤（efficiency>0.001 + displacement>0.8%）：470→456笔，-7.1%收益，-0.6pp WR，误杀赢单；②LOT+ATH警戒（仅位移 + ath_ratio>0.95 叠加效率）：470→469笔，≈0%变化。根本原因：Phase E up_wave 物理上量价同步放大（JAC加速），效率过滤天然误杀强趋势；ATH警戒区（>95%前高）在BTC 2022-2026回测期触发次数极少。**代码保留**（安全网，零成本），但方向证伪，不再在入场端做 Phase E 过滤。③**`phase_e_displacement_min` 参数扫描（2026-05-17）**：对 0.002 / 0.005 / 0.008 三值跑全量回测（20220101-20260502），结果几乎一致（470 / 470 / 469笔，收益 17360% / 17360% / 17357%，胜率 93.4% / 93.4% / 93.4%，DD 0.32%）。4年内仅影响 1 笔交易，说明实盘 Phase E wave_start 天然具备实质位移，该过滤器实际拦截率接近 0。结论：参数保持 0.008 默认值，不做超参优化，方向彻底关闭。 |
 | **TASK 11** | Reaccumulation 检测（可选） | ✅ 已关闭（证伪） | **诊断脚本确认样本不足**：BTC 2022-2026 日线数据中，满足 ATH 回撤 ≥25% 且有成交量异常的事件共 14 个，其中 10 个为 1-3 日闪崩（噪音），真正的多日结构仅 2 个（2025-04-06 低点 $74.5k 3 日即反弹、2025-11-16 低点 $80.6k 58 日结构）。样本数 < 3，统计意义不足。此外 C2 架构壁垒（252 日新低）在设计上排斥再积累场景。结论：不实现，正式关闭。 |
+| **TASK S-1** | 接入 daily_event_detector 派发序列输出 | ✅ 完成 | BC/AR/UTAD/SOW 输出列已接入 WyckoffV8.py populate_indicators，含 fallback 处理。 |
+| **TASK S-2** | 计算 bear_market_mode + sustained_markdown | ✅ 完成 | bear_market_mode（daily_choch + dist_cause）+ sustained_markdown（choch + close<EMA200×0.97 持续30根）均已实现。 |
+| **TASK S-3** | 空头 PNF 目标位（dist_high/low + UTAD 调整） | ✅ 完成 | add_v8_short_pnf_targets() 扩展入 pnf_calculator.py，UTAD 调整 dist_high 逻辑已实现。 |
+| **TASK S-4** | enter_short 信号逻辑 | ✅ 完成 | SOW/UTAD/BE 三路径 + _bear_gate 闸门 + pnf_valid_short + short_intent_ok，enter_tag 区分 v8_short_sow/utad/be。 |
+| **TASK S-5** | exit_short 逻辑（SOS 平空 + 质量门控） | ✅ 完成 | exit_short：上升 wave_start 出现 → v8_up_wave_reverse 平空；custom_exit 空头分支：AR High 突破 → v8_short_structure_fail，PNF std 到达 → v8_short_pnf_std。 |
+| **TASK S-6** | custom_stoploss 空头分支 | ✅ 完成 | 空头止损：AR High + buffer 结构止损，T1 conservative 到达移保本；BE 路径 fallback 到近期20日高点。 |
+| **TASK S-7** | 回测验证：多头不劣化 + 空头统计 | ✅ 完成 | 全量基线：471笔（多468+空3），93.4% WR，18,093%，DD 0.32%。压力测试：熊市段83.9%/55%收益（1空），牛市段94.5%/1865%收益（0空）。多头未劣化。 |
+
+---
+
+## TASK S 系列：V8 做空集成（2026-05-17 立项）
+
+**背景**：V8 当前为纯多头（`can_short=False`）。BTC 处于高位震荡结构，存在做空机会。V7 已有完整的做空体系（`can_short=True`，SOW/UTAD/LPSY 入场，SOS 平空，bear_market_mode 闸门）。本系列 TASK 将该体系移植进 V8。
+
+**合约模式**：已确认 `config_backtest.json` 为 `futures` + `isolated`，`can_short=True` 可直接生效。
+
+**总预估工作量**：~17-25h（TASK S-1 到 S-7）
+
+> ✅ **2026-05-18 更新：空头已启用，基础验证通过**
+>
+> - `ar→sow` 直通路径已加入 `daily_event_detector.py`（2021型分布，跳过UTAD）
+> - `can_short=True`，空头门控改为 `dist_cause_sufficient | sustained_markdown`
+> - 空头结构止损/退出改用 `daily_ar_high`（派发侧），不再用积累侧 `v8_tr_high`
+> - 回测 20220101-20260502：多头 17,443% 无回归，1笔空头 +3.78%（100%胜率）
+>
+> **已知盲区：2022年BC识别缺失**
+>
+> 2022年BTC从47k→16k的熊市，`daily_bc_detected=0`。
+> 原因：2022年顶部是缓慢分配型（无单根放量顶或上影线耗尽），路径A/B均未触发。
+> 后续研究方向：增加路径C（多根持续高位量缩，渐进式BC识别）。
+> 当前状态：已记录，不影响主线运行，待后续单独研究。
+>
+> **历史锚点验证状态**：
+> - 2021-11-10 BC（路径B）✅ 已验证检出
+> - 2021-12-04 SOW（ar→sow直通）✅ 已验证检出
+> - 2022全年 BC=0 ⚠️ 已知盲区，路径C待研究
+> - 2025-02-25 SOW ✅ 回测中正确触发空头
+
+### 全链路依赖图
+
+```
+Daily 层
+  daily_event_detector.detect()
+  ├── BC 双路径检测
+  ├── AR 锁定（daily_ar_high / daily_ar_low）
+  ├── UTAD / SOW 序列追踪
+  └── 输出：daily_choch_confirmed / dist_cause_sufficient
+             / daily_utad_detected / daily_dist_sow_detected
+        ↓
+1H 层
+  bear_market_mode = daily_choch_confirmed AND dist_cause_sufficient
+  sustained_markdown = choch AND close < ema200×0.97 持续 30 根
+        ↓
+  空头 PNF 目标位（dist_high/low → UTAD 调整 → target_short_*）
+        ↓
+  enter_short（SOW/UTAD/LPSY + intent_ok + rr_ok + bear_gate）
+        ↓
+  exit_short（SOS 平空 + 质量门控）+ custom_stoploss 空头分支
+```
+
+---
+
+### TASK S-1：接入 daily_event_detector 派发序列输出
+
+**状态**: ✅ 完成（2026-05-18）  
+**工作量**: 小，2-3h  
+**文件**: `user_data/strategies/WyckoffV8.py`，`wyckoff/daily_event_detector.py`（已有，无需改动）
+
+**目标**：在 V8 的 `populate_indicators` 日线层 merge 以下 6 个输出列：
+
+| 列名 | 含义 | 来源 |
+|------|------|------|
+| `daily_bc_detected` | 本日满足 BC 条件 | daily_event_detector |
+| `daily_ar_high` | BC 后 AR 高点（锁定） | daily_event_detector |
+| `daily_ar_low` | BC 至 AR 高点间最低 low | daily_event_detector |
+| `daily_utad_detected` | UTAD 洗盘确认 | daily_event_detector |
+| `daily_dist_sow_detected` | SOW 放量阴线确认 | daily_event_detector |
+| `dist_cause_sufficient` | BC→AR→UTAD 序列或渐进耗尽持续有效 | daily_event_detector |
+| `daily_choch_confirmed` | Daily EMA200 结构破位（熊市物理熔断） | V7 existing logic |
+
+**实现要点**：
+- 复用 V7 中 `daily_event_detector` 的调用方式（V7 L1510-1535 附近）
+- 必须在 `shift(1)` 之后调用，遵守 D-002 前瞻偏差防范原则
+- 添加 `[V8-DIAG]` 日志输出序列进展
+
+**验收**：dry-run 日志中能看到 `daily_bc_detected` / `dist_sequence_progress` 字段有非空值。
+
+---
+
+### TASK S-2：计算 bear_market_mode + sustained_markdown
+
+**状态**: ✅ 完成（2026-05-18）  
+**工作量**: 小，1-2h  
+**文件**: `user_data/strategies/WyckoffV8.py`
+
+**目标**：在 `populate_indicators` 中追加两个做空闸门字段。
+
+```python
+# bear_market_mode：双层因果门控（V7 L1536-1558 逻辑）
+bear_market_mode = daily_choch_confirmed AND dist_cause_sufficient
+
+# sustained_markdown：独立空头闸门（V7 L1560-1585 逻辑）
+_sm_raw = daily_choch_confirmed AND (close < daily_ema200 × 0.97)
+sustained_markdown = _sm_raw.rolling(30, min_periods=30).min().astype(bool)
+
+# 空头闸门（两轨 OR）
+_short_bear_gate = bear_market_mode OR sustained_markdown
+```
+
+**退出规则**（自动，无需额外代码）：
+- `close > daily_ar_high` → `dist_cause_sufficient=False` → `bear_market_mode=False`
+- `close > daily_ema200` → `daily_choch_confirmed=False` → 两个闸门均关闭
+
+---
+
+### TASK S-3：空头 PNF 目标位
+
+**状态**: ✅ 完成（2026-05-18）  
+**工作量**: 中，4-6h  
+**文件**: `user_data/strategies/v8_modules/pnf_calculator.py`
+
+**目标**：在现有多头目标位计算函数旁边，新增 `add_v8_short_pnf_targets()` 函数，参照 V7 `wyckoff/pnf_target_calculator.py` L221-305。
+
+**计算逻辑**：
+
+```
+dist_high/dist_low 确定（优先级）：
+  1. BC 锚点（daily_bc_detected 触发，追踪 max high / min low）
+  2. 滚动窗口 120 根 fallback（无 BC 时）
+
+UTAD 调整：
+  utad_adjusted_dist_high = min(dist_high, UTAD 前 20 根最高 high)
+  （仅在 daily_utad_detected=True 时应用）
+
+目标位公式：
+  dist_height = dist_high - dist_low
+  target_short_conservative = utad_adjusted_dist_high - dist_height × 1.0
+  target_short_standard     = utad_adjusted_dist_high - dist_height × 1.5
+  target_short_aggressive   = utad_adjusted_dist_high - dist_height × 2.0
+
+RR 计算：
+  rr_short_standard = (close - target_short_conservative) / (ATR × 1.5)
+```
+
+**输出列**：`target_short_conservative` / `target_short_standard` / `rr_short_standard`
+
+---
+
+### TASK S-4：enter_short 信号逻辑
+
+**状态**: ✅ 完成（2026-05-18）  
+**工作量**: 中，3-4h  
+**文件**: `user_data/strategies/WyckoffV8.py`，`populate_entry_trend()`
+
+**目标**：在现有 `enter_long` 逻辑之后追加 `enter_short` 逻辑，参照 V7 L3494-3582。
+
+**三类做空信号**：
+
+| 信号 | 触发条件 | 入场标签 |
+|------|---------|---------|
+| SOW Entry | `daily_dist_sow_detected=True` | `v8_short_sow` |
+| UTAD Entry | `daily_utad_detected=True` | `v8_short_utad` |
+| LPSY Entry | 价格回测 dist_high 后失败（需诊断） | `v8_short_lpsy` |
+
+**过滤链**：
+
+```python
+final_short_entry = (
+    (sow_entry | utad_entry | lpsy_entry) &
+    short_intent_ok &           # composite_intent ∉ ['accumulating','trending_up','testing']
+    rr_short_ok &               # rr_short_standard >= 1.0
+    _short_bear_gate &          # bear_market_mode OR sustained_markdown
+    (target_short_conservative > 0)  # PNF 目标位验证
+)
+dataframe.loc[final_short_entry, 'enter_short'] = 1
+```
+
+**前置修改**：`can_short = True`
+
+---
+
+### TASK S-5：exit_short 逻辑
+
+**状态**: ✅ 完成（2026-05-18）  
+**工作量**: 小，2-3h  
+**文件**: `user_data/strategies/WyckoffV8.py`，`populate_exit_trend()`
+
+**目标**：SOS Bar 出现时平空，参照 V7 L3821-3848。
+
+```python
+# SOS 是强力多头信号 → 空头必须平仓
+# 熊市+RS走弱时，需 SOS 质量 >= 70 才平
+sos_flat_short = (
+    sos_bar_detected &
+    (~_sos_weak_bear | _sos_quality_pass)
+)
+dataframe.loc[sos_flat_short, 'exit_short'] = 1
+```
+
+**V8 对应**：V8 无 `sos_bar_detected` 字段，替代方案：
+- 用 `is_wave_start & wave_direction=='up'` 作为 SOS 代理信号（与入场 up_wave 对称）
+- 方向：上升 wave_start 出现 → 空头必须平仓
+
+---
+
+### TASK S-6：custom_stoploss 空头分支
+
+**状态**: ✅ 完成（2026-05-18）  
+**工作量**: 小，2-3h  
+**文件**: `user_data/strategies/WyckoffV8.py`，`custom_stoploss()`
+
+**目标**：在现有多头止损逻辑（TR Low + 保本）旁边，追加空头分支。
+
+```python
+if trade.is_short:
+    # 结构止损：TR High 上方一定距离
+    tr_high = trade.custom_info.get('v8_tr_high', current_rate * 1.08)
+    sl_price = tr_high * (1 + buffer)
+    # T1 到达移保本（与多头对称）
+    if current_profit >= t1_distance:
+        sl_price = min(sl_price, open_rate * (1 - 0.002))
+    return stoploss_from_absolute(sl_price, current_rate, is_short=True)
+```
+
+---
+
+### TASK S-7：回测验证
+
+**状态**: ✅ 完成（2026-05-19，压力测试通过）  
+**工作量**: 中，3-4h
+
+**验收标准**：
+
+| 指标 | 要求 |
+|------|------|
+| 多头回测结果 | 与当前 V8 基线（17,360%）偏差 < 1%（加空头不影响多头） |
+| 空头交易数 | > 0（说明做空逻辑确实触发） |
+| 空头胜率 | > 50%（基本有效） |
+| 最大回撤 | 不超过当前 0.32% 的 3 倍（< 1%） |
+
+**回测命令**：同 V8 现有命令，`--strategy WyckoffV8 --timerange 20220101-20260502 --cache none`

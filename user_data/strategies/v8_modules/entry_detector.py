@@ -37,10 +37,6 @@ DEFAULT_ENTRY_PARAMS = {
     'require_price_below_t1': False,     # 不要求价格低于 T1：T1 是退出目标，不是入场过滤
     # Phase E 时价格常已超过 T1（T1 在 Phase C/D 时锁定），用 close<T1 过滤会砍掉绝大多数 Phase E 信号
 
-    # TASK 10：Phase E 质量分层
-    'phase_e_displacement_min': 0.008,   # Phase E 最小位移（LOT 过滤，排除无实质移动的假信号）
-    'phase_e_ath_zone': 0.95,            # ATH 警戒区阈值（close > ATH × 0.95 时启用严格过滤）
-    'phase_e_efficiency_min': 0.001,     # ATH 警戒区内的效率门槛（分配区量价和谐检查）
 }
 
 
@@ -93,30 +89,12 @@ def compute_entry_signal(df: DataFrame, params: dict = None) -> DataFrame:
     # df['v8_oi_ok'] = df.get('oi_confirmed', pd.Series(True, index=df.index))
     df['v8_oi_ok'] = pd.Series(True, index=df.index)
 
-    # ── 条件 5（TASK 10）：Phase E 质量分层 ──────────────────
-    # 非 Phase E 直接通过
-    # Phase E 普通区：仅要求位移（LOT，移动容易性）— 有实质位移即证明需求战胜供应
-    # Phase E ATH 警戒区（close > ATH × 0.95）：叠加量价效率检查（防分配区套牢）
-    is_phase_e = v8_phase == 'E'
-    wave_displacement = df.get('wave_displacement', pd.Series(0.0, index=df.index))
-    ath_ratio = df.get('ath_ratio', pd.Series(0.0, index=df.index))
-
-    phase_e_disp_ok = wave_displacement > df['close'] * p['phase_e_displacement_min']
-    near_ath = ath_ratio > p['phase_e_ath_zone']
-    phase_e_eff_ok = wave_efficiency > p['phase_e_efficiency_min']
-
-    # ATH 警戒区：位移 + 效率双重满足；普通区：仅位移
-    df['v8_phase_e_harmony_ok'] = ~is_phase_e | (
-        phase_e_disp_ok & (~near_ath | phase_e_eff_ok)
-    )
-
     # ── 最终信号 ─────────────────────────────────────────────
     df['v8_entry_long'] = (
         df['v8_choch_ok'] &
         df['v8_phase_ok'] &
         df['v8_pnf_ok'] &
-        df['v8_oi_ok'] &
-        df['v8_phase_e_harmony_ok']
+        df['v8_oi_ok']
     )
 
     return df

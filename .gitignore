@@ -75,6 +75,27 @@ temp_extract_ca/
 temp_extract_fixpack/
 P5/p5.db
 
+# Database files
+user_data/market.db
+user_data/*.db
+
+# Claude IDE local config
+.claude/
+
+# Diagnostic and study scripts (root level)
+diagnose_*.py
+extract_*.py
+study_*.py
+find_trades.py
+
+# Diagnostic output text files
+user_data/*_diag.txt
+user_data/*_log.txt
+user_data/v8_disp*.txt
+user_data/etf_*.txt
+user_data/ta_*.txt
+user_data/ws_*.txt
+
 # Temporary analysis and diagnostic files
 scripts/archived/
 temp_backtest_extract/
