@@ -181,6 +181,7 @@ class WyckoffV8(IStrategy):
         # ── ATR ─────────────────────────────────────────────
         dataframe['atr14'] = ta.ATR(dataframe, timeperiod=14)
         dataframe['atr_20'] = ta.ATR(dataframe, timeperiod=20)  # WaveAnalyzer 依赖
+        dataframe['swing_low_24'] = dataframe['low'].rolling(48, min_periods=1).min()
 
         # ── ATH 距离（TASK 10 Phase E 警戒区）─────────────
         # expanding().max() 保证只用历史数据，无前瞻偏差
@@ -392,10 +393,10 @@ class WyckoffV8(IStrategy):
 
     # ── populate_entry_trend ─────────────────────────────────
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['v8_entry_long'].fillna(False),
-            ['enter_long', 'enter_tag']
-        ] = [1, 'v8_wave_start']
+        entry_mask = dataframe['v8_entry_long'].fillna(False)
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        v8_phase = dataframe.get('v8_phase', pd.Series('unknown', index=dataframe.index)).fillna('unknown')
+        dataframe.loc[entry_mask, 'enter_tag'] = ('v8_ws_' + v8_phase.str.lower()).where(entry_mask, '')
 
         # 计算 T1/T2 相对位置，供 P5 信号记录和周报统计使用
         t1 = dataframe.get('v8_target_1', pd.Series(np.nan, index=dataframe.index))
@@ -528,23 +529,25 @@ class WyckoffV8(IStrategy):
 
             return self.stoploss
 
-        # ── 多头止损分支（原逻辑）───────────────────────────────
+        # ── 多头止损分支 ─────────────────────────────────────────
+        enter_tag = getattr(trade, 'enter_tag', '') or ''
+        is_phase_e_regime = enter_tag in ('v8_ws_e', 'v8_ws_unknown')
+
         tr_low = last.get('v8_tr_low', np.nan)
         target_1 = last.get('v8_target_1', np.nan)
 
-        # T1 到达 → 移到保本（只有T1在入场价上方时才有意义）
+        # T1 到达 → 移到保本（Phase D/E 均适用，只有T1在入场价上方时才有意义）
         if not np.isnan(target_1) and target_1 > entry_price and current_rate >= target_1:
             breakeven_price = entry_price * (1 + be_offset)
             if current_rate > breakeven_price:
-                sl_price = breakeven_price
-                return (sl_price / current_rate) - 1
+                return (breakeven_price / current_rate) - 1
 
-        # 结构止损：TR Low - buffer（威科夫逻辑：价格跌回TR内才是结构失败）
+        # Phase D/E/unknown 统一：TR Low 宏观锚点（"大因"止损）
+        # 审计结论：Phase E 用宽止损让 v8_down_wave 主导退出，复利链完整性最优
         if not np.isnan(tr_low) and tr_low > 0:
             buffer = float(self.tr_low_buffer.value)
             sl_price = tr_low * (1 - buffer)
             return (sl_price / current_rate) - 1
-
         return self.stoploss
 
     # ── custom_exit（PNF 目标位驱动退出）────────────────────
