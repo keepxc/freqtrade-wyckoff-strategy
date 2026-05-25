@@ -6,10 +6,8 @@
 
 | 子系统 | 定位 | 状态 |
 |--------|------|:---:|
-| **Wyckoff 策略** | 交易执行引擎（V7.1 生产 / V8 wave_start 频率优化中） | 🟡 V8 小范围优化 |
+| **Wyckoff 策略** | 交易执行引擎（V8 Dry Run 运行中） | 🟢 V8 封板，Dry Run |
 | **P5 智能层** | 统计、诊断、实验、治理底座（SQLite + JSONL） | 🟢 V1 已运行 |
-
-> AI 不改生产逻辑，只读数据和出分析报告。
 
 ---
 
@@ -45,46 +43,52 @@
 
 ## 当前基线
 
+### V7 历史基线（已归档）
+
 | 版本 | 收益率 | 交易数 | 胜率 | DD | 说明 |
 |------|--------|:------:|------|-----|------|
-| **V7.1** | 8,374% | — | — | — | 已被取代，移除 EMA200 独裁者 |
-| **V7.1 + 实验A** | 9,749% | 554 | 81.4% | 6.28% | wave_start 豁免 distributing，已固化 |
-| **V7.1 + A+B（含 lookahead，旧）** | ~~11,313%~~ | 561 | 81.5% | 6.28% | 未修复 ZigZag 回溯偏差 |
-| **V7.1 + A+B（修复后，当前基线）** | **6,284%** | 583 | 76.8% | 6.25% | ZigZag shift=min_bars 修复，真实基线 |
+| V7.1 | 8,374% | — | — | — | 移除 EMA200 独裁者 |
+| V7.1 + 实验A | 9,749% | 554 | 81.4% | 6.28% | wave_start 豁免 distributing |
+| V7.1 + A+B（修复后） | 6,284% | 583 | 76.8% | 6.25% | ZigZag lookahead 修复后真实值 |
 
-> ⚠️ ZigZag 回溯说明：WaveAnalyzer 在 bar N 确认转折，但实盘要到 N+min_bars 才能知道。
-> 修复方法：`is_wave_start` 向后 shift `min_bars` 根，消除未来数据泄露。
+### V8 当前基线（封板，2026-05-24，commit d05d2b3）
 
-回测范围：`20220101-20260502`
+| 指标 | 数值 |
+|------|------|
+| 收益率 | **19,449%**（20220101-20260525） |
+| 交易数 | 481 |
+| 胜率 | 93.6% |
+| 最大 DD | 0.32% |
+| Sharpe | 3.08 |
+| Sortino | 32.05 |
+| Profit Factor | 153.95 |
 
-策略文件：`user_data/strategies/WyckoffV7_TrueMethod.py`
+> 回测范围：`20220101-20260525`（随数据更新延伸）
+> 策略文件：`user_data/strategies/WyckoffV8.py`
 
 ---
 
-## V8 当前状态（2026-05-10，V8.5.2）
+## V8 当前状态（2026-05-25，封板版本 d05d2b3）
 
-**真 V8 架构确立**：新策略文件 `WyckoffV8.py` 从零实现，不引用 V7 代码。
+**V8 架构已完成并封板**：`WyckoffV8.py` 从零实现，Dry Run 运行中。
 
-### 核心设计原则（已纠正）
+### 核心设计原则
 ```
 日线层 = 趋势背景：Phase D/E 过滤 + PNF 因果结构 + TR Low 止损参考
-1H 层  = 交易执行：wave_start 入场 + down_wave 退出（主导）
+1H 层  = 交易执行：wave_start 入场（v8_ws_d/v8_ws_e）+ down_wave 退出（主导）
 PNF 目标位 = 辅助参考：T1→移保本止损，T2→辅助退出
+止损架构 = TR Low 统一（Phase D/E/unknown 全部使用，奥卡姆最优解）
 ```
-
-> 关键教训：PNF 目标位是日线宏观目标（月级别），不能作为1H交易的主要退出。
-> 用 PNF T2/T3 驱动退出 → 平均持仓86天，与1H逻辑矛盾。
-> 正确做法：down_wave（1H）主退出，PNF 提供方向和止损移动依据。
 
 ### 退出优先级
 ```
 1. 结构失败：current_rate < TR Low → v8_structure_fail（紧急）
-2. 1H down_wave 开始             → v8_down_wave（主要）
+2. 1H down_wave 开始             → v8_down_wave（主要，95.3% 占比）
 3. PNF T2 到达                   → v8_pnf_t2（辅助）
-custom_stoploss: TR Low 结构止损 + T1到达移保本
+custom_stoploss: TR Low 结构止损（统一）+ T1到达移保本
 ```
 
-### TASK 状态
+### TASK 完成状态
 | TASK | 内容 | 状态 |
 |------|------|:---:|
 | TASK 1 | `sc_detector.py` SC/BC 识别 | ✅ |
@@ -93,15 +97,19 @@ custom_stoploss: TR Low 结构止损 + T1到达移保本
 | TASK 4 | 1H 执行层（entry_detector.py） | ✅ |
 | TASK 5 | 退出层（down_wave主退出 + PNF辅助） | ✅ |
 | TASK 6 | `WyckoffV8.py` 集成 | ✅ |
-| TASK 7 | 回测验证 vs V7.1+A+B（11,313%） | 🔵 进行中 |
+| TASK 7 | 回测验证 | ✅ 19,449% / 93.6% WR |
+| TASK S-1~S-7 | 做空完整集成（SOW/UTAD/BE） | ✅ |
+| TASK 11 | 全链路延迟法医审计（51.5h确认税） | ✅ |
+| TASK 12 | 空头三路径审计 + LPSY 封板决策 | ✅ |
 
-V8 模块位置：`user_data/strategies/v8_modules/`
-V8 设计文档：`TASK_NEW/wyckoff_v8_redesign.md`
-
-### V8 回测命令
-```bash
-docker compose run --rm freqtrade backtesting --config user_data/config_backtest.json --config user_data/config_v8_backtest.json --strategy WyckoffV8 --timerange 20220101-20260502 --cache none
-```
+### 关键审计结论（已固化）
+| 结论 | 数据支撑 |
+|------|------|
+| Phase E 止损必须用 TR Low（不能用 ATR/Swing Low） | 复利悖论：0.175pp/笔差距 → 109,750× 复利差 |
+| down_wave 退出门槛（0.8% displacement）不需要调整 | 449笔 93.5% WR，6.5% 误触发为正常摩擦 |
+| LPSY 路径暂不补充 | 4.5年仅3笔空头，样本稀少，奥卡姆剃刀 |
+| 全链路入场延迟 51.5h，确认税 3.6% | 389个转折点统计，Alpha 物理真实性确认 |
+| 短窗口回测（<30天）无法触发交易 | PNF 门控需要长期历史预热，非系统缺陷 |
 
 ---
 
@@ -124,14 +132,17 @@ docker compose run --rm freqtrade backtesting --config user_data/config_backtest
 ## 常用命令
 
 ```bash
-# 回测（全量，--cache none 保证不走缓存）
-docker compose run --rm freqtrade backtesting --config user_data/config_backtest.json --strategy WyckoffV7_TrueMethod --timerange 20220101-20260502 --cache none
+# V8 回测（全量）
+docker compose run --rm "freqtrade" backtesting --config user_data/config_backtest.json --config user_data/config_v8_backtest.json --strategy WyckoffV8 --timerange 20220101-20260525 --cache none
+
+# 数据更新（1H + 1D）
+docker compose run --rm "freqtrade" download-data --config user_data/config_backtest.json --config user_data/config_v8_backtest.json --timerange 20260101- --timeframe 1h 1d
 
 # P5 全流程一键：回测 + 摄入 + 报表
 python scripts/run_backtest_pipeline.py --timerange 20260101-20260114
 
 # Dry Run 日志
-docker compose logs -f --tail=100 freqtrade
+docker compose logs -f --tail=100 "freqtrade"
 
 # 快速查数据库行数
 python -c "import sqlite3; conn=sqlite3.connect('user_data/market.db'); [print(f'{t}: {conn.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]}') for t in ['experiment_runs','signals','trades','detector_events','regime_snapshots','exit_decision_events','weekly_reports']]"
@@ -142,7 +153,7 @@ python -c "import sqlite3; conn=sqlite3.connect('user_data/market.db'); [print(f
 ## 修改策略代码的流程
 
 1. 先读 `TASK_NEW/wyckoff_v8_redesign.md` 确认改动是否与 V8 设计一致
-2. 备份当前 `WyckoffV7_TrueMethod.py`
-3. 改代码 → Docker 回测验证 → 对比基线
-4. 记录实验结果到修订记录中
-5. 如果结果劣化，回退并记录证伪结论
+2. 改代码 → Docker 回测验证（`--timerange 20220101-20260525 --cache none`）→ 对比基线
+3. 记录实验结果到 `wyckoff_v8_redesign.md`
+4. 如果结果劣化，回退并记录证伪结论
+5. commit 后 `git push origin main`
