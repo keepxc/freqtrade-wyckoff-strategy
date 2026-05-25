@@ -33,11 +33,11 @@
 
 ## 开始前必读
 
-1. `@AGENTS.md` — 项目整体说明、P5 架构、V1 范围
-2. `TASK_NEW/TASKS_with_checklist.md` — 当前任务状态、常用命令、已完成实验索引
-3. `TASK_NEW/TASKS.md` — 详细任务记录和实验数据
-4. `TASK_NEW/wyckoff_v8_redesign.md` — V8 重构设计文档（最重要，当前主线）
-5. `docs/P5-Data-Design.md` / `docs/P5-Event-Spec.md` — P5 数据底座设计
+1. `TASK_NEW/wyckoff_v8_redesign.md` — V8 设计主文档（最重要，含所有 TASK 记录和实验证伪结论）
+2. `AGENTS.md` — P5 架构说明（P5 智能层仍在运行）
+3. `docs/P5-Data-Design.md` / `docs/P5-Event-Spec.md` — P5 数据底座设计
+
+> `TASK_NEW/TASKS.md` 和 `TASK_NEW/TASKS_with_checklist.md` 为 V7 时代遗留文档，V8 阶段不再维护。
 
 ---
 
