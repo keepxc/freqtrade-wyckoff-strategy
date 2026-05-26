@@ -61,6 +61,11 @@ CREATE TABLE IF NOT EXISTS trades (
     mae_pct             REAL,
     funding_proxy_hours REAL,
 
+    -- 滑点审计 + T1 保本止损审计 (commit 57cfd24)
+    signal_bar_close    REAL,
+    t1_price            REAL,
+    t1_triggered        REAL,
+
     -- Phase-aware exit 预埋 (P5 V1.1)
     phase_context_tag_exit   TEXT,
     phase_exit_candidate     INTEGER DEFAULT 0,
