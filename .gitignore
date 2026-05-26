@@ -69,7 +69,9 @@ user_data/config_backtest.json
 wyckoff_backup_*/
 
 # �ز��¼���־����ʱ��������ϴ���
+# Runtime event logs — regenerated on every restart
 user_data/events/backtest/
+user_data/events/dry_run/
 user_data/backtest_*.txt
 temp_extract_ca/
 temp_extract_fixpack/
@@ -88,7 +90,8 @@ extract_*.py
 study_*.py
 find_trades.py
 
-# Diagnostic output text files
+# Diagnostic output and analysis files
+diagnostics/
 user_data/*_diag.txt
 user_data/*_log.txt
 user_data/v8_disp*.txt
