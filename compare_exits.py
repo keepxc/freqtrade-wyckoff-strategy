@@ -7,8 +7,8 @@ def load(path):
     data = json.loads(z.read(names[0]))
     return data['strategy'][list(data['strategy'].keys())[0]]
 
-v2 = load('/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_07-34-50.zip')
-v3 = load('/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_07-58-30.zip')
+v2 = load('/home/gyan/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_07-34-50.zip')
+v3 = load('/home/gyan/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_07-58-30.zip')
 
 print(f"{'Exit Reason':35s} {'V7.2(uni)':>8s} {'V7.3(diff)':>10s} {'Change':>8s}")
 print("-" * 65)

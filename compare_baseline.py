@@ -9,9 +9,9 @@ def read_backtest(path):
     return s
 
 # V7 基线 (3,512%)
-baseline = read_backtest('/freqtrade/user_data/backtest_results/backtest-result-2026-05-04_13-08-43.zip')
+baseline = read_backtest('/home/gyan/freqtrade/user_data/backtest_results/backtest-result-2026-05-04_13-08-43.zip')
 # 移除 bull_market
-new = read_backtest('/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_07-05-34.zip')
+new = read_backtest('/home/gyan/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_07-05-34.zip')
 
 print("=" * 60)
 print(f"{'指标':<25s} {'V7基线':>12s} {'移除bull_market':>15s} {'变化':>10s}")

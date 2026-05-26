@@ -30,7 +30,7 @@ print("📊 任务 1: 使用检测器监控面板分析回测数据")
 print("-" * 80)
 
 # 查找最新的回测结果
-backtest_dir = Path('/freqtrade/user_data/backtest_results')
+backtest_dir = Path('/home/gyan/freqtrade/user_data/backtest_results')
 meta_files = sorted(backtest_dir.glob('backtest-result-*.meta.json'), reverse=True)
 
 if not meta_files:
@@ -99,7 +99,7 @@ print()
 print(report)
 
 # 保存报告
-report_path = '/freqtrade/user_data/detector_monitoring_report.md'
+report_path = '/home/gyan/freqtrade/user_data/detector_monitoring_report.md'
 panel.save_report(results, report_path)
 print(f"💾 监控报告已保存到: {report_path}")
 print()
@@ -159,7 +159,7 @@ print()
 print(winrate_report)
 
 # 保存报告
-winrate_report_path = '/freqtrade/user_data/enter_tag_winrate_report.md'
+winrate_report_path = '/home/gyan/freqtrade/user_data/enter_tag_winrate_report.md'
 tracker.save_report(winrate_results, winrate_report_path)
 print(f"💾 胜率报告已保存到: {winrate_report_path}")
 print()

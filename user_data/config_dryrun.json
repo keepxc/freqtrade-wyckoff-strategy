@@ -75,7 +75,7 @@
     "enabled": true,
     "token": "8692280863:AAGUad9WhRLP_EIgGRleP4CqGWhO3EG93ns",
     "chat_id": "440579069",
-    "proxy_url": "socks5h://127.0.0.1:7890",
+    "proxy_url": "http://127.0.0.1:7890",
     "notification_settings": {
       "status": "on",
       "warning": "on",

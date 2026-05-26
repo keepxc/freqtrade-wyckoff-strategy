@@ -1,6 +1,6 @@
 import zipfile, json
 
-z = zipfile.ZipFile('/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_09-41-08.zip')
+z = zipfile.ZipFile('/home/gyan/freqtrade/user_data/backtest_results/backtest-result-2026-05-07_09-41-08.zip')
 data = json.loads(z.read('backtest-result-2026-05-07_09-41-08.json'))
 s = data['strategy'][list(data['strategy'].keys())[0]]
 

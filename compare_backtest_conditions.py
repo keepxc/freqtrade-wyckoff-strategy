@@ -2,7 +2,7 @@
 import zipfile, json, os, glob
 
 # 找到所有回测结果
-results_dir = '/freqtrade/user_data/backtest_results'
+results_dir = '/home/gyan/freqtrade/user_data/backtest_results'
 files = sorted(glob.glob(os.path.join(results_dir, 'backtest-result-*.zip')), reverse=True)
 
 print("=== 回测结果文件列表 ===")
