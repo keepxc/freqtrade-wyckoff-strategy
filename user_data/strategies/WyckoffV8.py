@@ -615,15 +615,11 @@ class WyckoffV8(IStrategy):
             # 1. 结构失败：价格突破派发区 AR High（做空逻辑彻底失效）
             if not np.isnan(ar_high) and ar_high > 0:
                 if current_rate > ar_high:
-                    self._emit_trade_close(trade, pair, 'v8_short_structure_fail', current_rate, current_time)
                     return 'v8_short_structure_fail'
 
-            # 2. PNF standard 目标到达 → 辅助退出
-            # 必须 target < entry_price（做空盈利方向），避免首根 bar 立即触发
             if (not np.isnan(target_short_std) and target_short_std > 0
                     and target_short_std < entry_price
                     and current_rate <= target_short_std):
-                self._emit_trade_close(trade, pair, 'v8_short_pnf_std', current_rate, current_time)
                 return 'v8_short_pnf_std'
 
             return None
@@ -635,13 +631,9 @@ class WyckoffV8(IStrategy):
         # 1. 结构失败：当前价跌破 TR Low（日线结构破坏，紧急退出）
         if not np.isnan(tr_low) and tr_low > 0:
             if current_rate < tr_low:
-                self._emit_trade_close(trade, pair, 'v8_structure_fail', current_rate, current_time)
                 return 'v8_structure_fail'
 
-        # 2. PNF T2 到达 → 辅助退出（down_wave 未触发时的利润目标保护）
-        # 必须 T2 > entry_price，否则 Phase E 中 T2 < 入场价，first bar 立即触发
         if not np.isnan(target_2) and target_2 > entry_price and current_rate >= target_2:
-            self._emit_trade_close(trade, pair, 'v8_pnf_t2', current_rate, current_time)
             return 'v8_pnf_t2'
 
         return None
@@ -666,6 +658,14 @@ class WyckoffV8(IStrategy):
             )
         except Exception as e:
             logger.warning(f'[V8] P5 trade_close emit failed: {e}')
+
+    # ── confirm_trade_exit（捕获向量化退出的 P5 close 事件）──
+    def confirm_trade_exit(self, pair: str, trade, order_type: str, amount: float,
+                           rate: float, time_in_force: str, exit_reason: str,
+                           current_time, **kwargs) -> bool:
+        if exit_reason and self.event_bridge is not None:
+            self._emit_trade_close(trade, pair, exit_reason, rate, current_time)
+        return True
 
     # ── confirm_trade_entry（额外安全检查）──────────────────
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float,
