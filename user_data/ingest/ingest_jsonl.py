@@ -131,6 +131,9 @@ TRADE_CLOSE_MAP = {
     "mfe_pct": "mfe_pct",
     "mae_pct": "mae_pct",
     "funding_proxy_hours": "funding_proxy_hours",
+    "signal_bar_close": "signal_bar_close",
+    "t1_price": "t1_price",
+    "t1_triggered": "t1_triggered",
 }
 
 

@@ -638,7 +638,8 @@ class WyckoffV8(IStrategy):
 
         return None
 
-    def _emit_trade_close(self, trade, pair: str, reason: str, exit_price: float, current_time) -> None:
+    def _emit_trade_close(self, trade, pair: str, reason: str, exit_price: float,
+                          current_time, **extra) -> None:
         if self.event_bridge is None:
             return
         try:
@@ -655,6 +656,7 @@ class WyckoffV8(IStrategy):
                 profit_abs=profit_pct * trade.stake_amount,
                 duration_minutes=duration_min,
                 current_time=current_time,
+                **extra,
             )
         except Exception as e:
             logger.warning(f'[V8] P5 trade_close emit failed: {e}')
@@ -664,7 +666,29 @@ class WyckoffV8(IStrategy):
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time, **kwargs) -> bool:
         if exit_reason and self.event_bridge is not None:
-            self._emit_trade_close(trade, pair, exit_reason, rate, current_time)
+            # 滑点审计：取信号触发 K 线（当前已分析 df 最后一根）的收盘价
+            signal_bar_close = None
+            t1_price = None
+            t1_triggered = None
+            try:
+                df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+                if df is not None and len(df) > 0:
+                    last = df.iloc[-1]
+                    signal_bar_close = float(last['close'])
+                    t1_price = float(last.get('v8_target_1', float('nan')))
+                    if np.isnan(t1_price):
+                        t1_price = None
+                    # T1 是否触发：当前 fill 价或信号价 >= T1
+                    if t1_price is not None:
+                        t1_triggered = 1.0 if (rate >= t1_price or signal_bar_close >= t1_price) else 0.0
+            except Exception:
+                pass
+            self._emit_trade_close(
+                trade, pair, exit_reason, rate, current_time,
+                signal_bar_close=signal_bar_close,
+                t1_price=t1_price,
+                t1_triggered=t1_triggered,
+            )
         return True
 
     # ── confirm_trade_entry（额外安全检查）──────────────────

@@ -281,12 +281,13 @@ class StrategyEventBridge:
         current_time: datetime,
         mfe_pct: Optional[float] = None,
         mae_pct: Optional[float] = None,
+        **extra,
     ) -> None:
         """
         发射交易平仓事件
-        
+
         在 custom_exit 或 custom_stoploss 中调用此方法
-        
+
         Args:
             pair: 交易对
             trade_id: 交易ID
@@ -300,10 +301,11 @@ class StrategyEventBridge:
             current_time: 当前时间
             mfe_pct: 最大有利偏移
             mae_pct: 最大不利偏移
+            **extra: 透传字段（signal_bar_close, t1_price, t1_triggered 等）
         """
         if self.event_emitter is None:
             return
-        
+
         try:
             self.event_emitter.emit_trade_close(
                 trade_id=trade_id,
@@ -318,8 +320,9 @@ class StrategyEventBridge:
                 ts=current_time,
                 mfe_pct=mfe_pct,
                 mae_pct=mae_pct,
+                **extra,
             )
-            
+
             logger.debug(f'Emitted trade_close event: {trade_id} ({pair})')
         except Exception as e:
             logger.warning(f'Failed to emit trade_close event: {e}')
