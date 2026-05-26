@@ -286,10 +286,38 @@ class WyckoffV8(IStrategy):
                         df_1d['dist_cause_sufficient']   = False
 
                     # 把派发序列字段追加进 merge slim
+                    # ── TASK 13 Fix 1: sm_v2 — BC独立熊市结构判断（日线级别）──
+                    # 条件：120日内最高点回撤 >= 20% AND close < EMA200*0.97 持续 5 根日线
+                    _1d_ema200 = df_1d['close'].ewm(span=200, adjust=False).mean()
+                    _1d_high_120d = df_1d['high'].rolling(120, min_periods=30).max()
+                    _1d_drawdown = (_1d_high_120d - df_1d['close']) / _1d_high_120d.replace(0, float('nan'))
+                    _sm_v2_raw = (_1d_drawdown >= 0.20) & (df_1d['close'] < _1d_ema200 * 0.97)
+                    df_1d['daily_sm_v2'] = (
+                        _sm_v2_raw.astype(int).rolling(5, min_periods=5).min().fillna(0).astype(bool)
+                    )
+
+                    # ── TASK 13 Fix 2: fallback SOW — sm_v2 激活时的结构性做空信号 ──
+                    # 替代 ar_low 的锚点：使用 20 日滚动最低价（shift(1) 防未来函数）
+                    _1d_vol_ma20 = df_1d['volume'].rolling(20, min_periods=10).mean()
+                    _1d_low_20d = df_1d['low'].rolling(20, min_periods=10).min().shift(1)
+                    _fallback_sow_raw = (
+                        df_1d['daily_sm_v2'] &
+                        (df_1d['close'] < df_1d['open']) &                              # 阴线
+                        ((df_1d['open'] - df_1d['close']) / df_1d['open'].replace(0, float('nan')) >= 0.02) &  # 跌幅 >= 2%
+                        (df_1d['volume'] > _1d_vol_ma20 * 1.5) &                       # 放量 1.5x
+                        (df_1d['close'] < _1d_low_20d)                                  # 创近期 20 日新低
+                    )
+                    df_1d['daily_fallback_sow'] = _fallback_sow_raw.fillna(False)
+
+                    _sm_v2_cnt = int(df_1d['daily_sm_v2'].sum())
+                    _fb_sow_cnt = int(df_1d['daily_fallback_sow'].sum())
+                    logger.info(f'[V8-DIAG] {pair} TASK13: daily_sm_v2={_sm_v2_cnt} daily_fallback_sow={_fb_sow_cnt}')
+
                     dist_cols = ['date', 'daily_bc_detected', 'daily_bc_path',
                                  'daily_ar_high', 'daily_ar_low', 'dist_sequence_progress',
                                  'daily_utad_detected', 'daily_dist_sow_detected',
-                                 'buying_exhaustion', 'dist_cause_sufficient']
+                                 'buying_exhaustion', 'dist_cause_sufficient',
+                                 'daily_sm_v2', 'daily_fallback_sow']
                     dist_cols = [c for c in dist_cols if c in df_1d.columns]
                     df_dist = df_1d[dist_cols].copy()
                     df_dist['date'] = pd.to_datetime(df_dist['date'], utc=True) + pd.Timedelta(days=1)
@@ -376,7 +404,8 @@ class WyckoffV8(IStrategy):
         bool_cols = {'v8_phase_allow_long', 'v8_sc_final', 'v8_entry_long',
                      'daily_bc_detected', 'daily_utad_detected', 'daily_dist_sow_detected',
                      'buying_exhaustion', 'dist_cause_sufficient',
-                     'bear_market_mode', 'sustained_markdown', '_short_bear_gate'}
+                     'bear_market_mode', 'sustained_markdown', '_short_bear_gate',
+                     'daily_sm_v2', 'daily_fallback_sow'}
         float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3',
                       'v8_sc_low', 'daily_ar_high', 'daily_ar_low',
                       'target_short_conservative', 'target_short_standard', 'rr_short_standard'}
@@ -411,8 +440,12 @@ class WyckoffV8(IStrategy):
         #   路径3 BE：buying_exhaustion（渐进式分配顶，无单根 BC，2022型）
         dataframe['enter_short'] = 0
 
-        sow_entry  = dataframe.get('daily_dist_sow_detected',
-                                   pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        sow_entry  = (
+            dataframe.get('daily_dist_sow_detected',
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) |
+            dataframe.get('daily_fallback_sow',                              # TASK 13: BC独立 fallback SOW
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        )
         utad_entry = dataframe.get('daily_utad_detected',
                                    pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
         be_entry   = dataframe.get('buying_exhaustion',
@@ -428,6 +461,8 @@ class WyckoffV8(IStrategy):
             dataframe.get('dist_cause_sufficient',
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) |
             dataframe.get('sustained_markdown',
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) |
+            dataframe.get('daily_sm_v2',                                      # TASK 13: BC独立熊市闸门
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
         )
         pnf_valid_short = dataframe.get('target_short_conservative',

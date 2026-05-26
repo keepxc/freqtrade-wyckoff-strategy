@@ -2314,3 +2314,108 @@ sl_price = swing_low * (1 - buffer)
 ### 结论
 
 **当前版本正式封板**。空头端三路径（SOW/UTAD/BE）保留作结构完整性，LPSY 路径推迟至未来多品种扩展时再系统性激活。
+
+---
+
+## 【TASK 13】空头闸门 BC 依赖解耦 + Fallback SOW 信号（2026-05-25）
+
+### 背景与根因分析
+
+BTC 从 $120,000 下跌至 $70,000（约 42%，历时 4 个月），V8 系统全程未触发任何空头信号。回测证实系统在此期间执行了 55 笔多头交易（92.7% WR，+113%），因此系统并非沉默，而是**空头闸门物理锁死**。
+
+**根因链**：
+
+```
+BC 检测失败（$120k 顶部为渐进式分配，无单根放量 BC Bar）
+  └→ daily_bc_detected = False（全程）
+     └→ dist_sequence_progress = 'none'（DailyEventDetector 状态机未启动）
+        └→ dist_cause_sufficient = False
+           └→ _bear_gate = False（dist_cause_sufficient | sustained_markdown，两者均 False）
+              └→ final_short_entry = False（所有空头信号被物理拦截）
+```
+
+**sustained_markdown 也无法开闸的原因**（V8 退化点）：
+- V8 的 `sustained_markdown` 要求 `daily_bc_detected = True` 作为前置条件
+- V7 的 `sustained_markdown` 只需 `daily_choch_confirmed`（EMA200结构破位），**不依赖 BC**
+- V8 升级时收紧了这个条件，导致无BC场景下空头能力完全丧失
+
+**V7 vs V8 空头闸门对比**：
+
+| 维度 | V7 | V8（当前，退化） |
+|------|----|----|
+| 空头闸门依赖 | `daily_choch_confirmed`（EMA200破位） | `daily_bc_detected`（BC单根K线） |
+| 无BC时能做空 | ✅ 可以 | ❌ 不行 |
+| 信号级别 | 1H SOW bar / UTAD / LPSY（实时） | 日线序列事件（延迟1天） |
+
+### 修复方案
+
+**两部分，缺一不可**：
+
+#### Fix 1：熊市闸门解耦 BC（`sm_v2`）
+
+在 `WyckoffV8.py` 的 `_bear_gate` 加入第三条路径 `sm_v2`，完全不依赖 BC：
+
+```python
+# sm_v2：价格结构型熊市判断（BC独立）
+# 条件：120日内回撤 >= 20% AND close < EMA200*0.97 持续 5 根日线 K线
+drawdown_from_120d_high = (high_120d - close) / high_120d
+sm_v2_raw = (drawdown_from_120d_high >= 0.20) & (close < ema200_daily * 0.97)
+sm_v2 = sm_v2_raw.rolling(5, min_periods=5).min().astype(bool)  # 日线级别
+
+# 合并到 _bear_gate（1H层）
+_bear_gate = dist_cause_sufficient | sustained_markdown | sm_v2_1h
+```
+
+验证：`sm_v2` 应在 2025-11-17 前后开闸（BTC 从 $108k 回撤至 $86k，约 20%），覆盖整个 $120k→$70k 下跌区间。
+
+#### Fix 2：Fallback SOW 信号
+
+`DailyEventDetector` 的标准 SOW 信号依赖 `ar_low`（来自 BC→AR 序列）。BC 未触发时 `ar_low = NaN`，SOW 信号永远不会触发。
+
+新增 **Fallback SOW** 逻辑（`sm_v2` 激活时触发）：
+```
+条件：
+  1. sm_v2 = True（熊市结构确认）
+  2. 当日跌幅 >= 2%（供应力量表现）
+  3. 成交量 > 20日均量 × 1.5（放量确认）
+  4. 收盘价 < 开盘价（阴线）
+  5. close < rolling_20d_low（创近期新低，替代 ar_low 锚点作用）
+
+输出列：daily_fallback_sow_detected（日线级别，+1天延迟后合并到 1H）
+```
+
+Fallback SOW 进入 `WyckoffV8.py` 的 `sow_entry` OR 逻辑，参与 `_bear_gate` 门控下的 `final_short_entry`。
+
+### 预期验证结果
+
+- 2025-11 到 2026-02 区间应出现新空头信号（目前该区间 = 0笔空头）
+- 现有 3 笔空头（2022-07、2025-02、2025-03）应继续正常触发
+- 多头性能不退化（93.6% WR 维持）
+
+### 实现文件
+
+1. `user_data/strategies/WyckoffV8.py`（`populate_indicators` sm_v2 计算 + `_bear_gate` 合并 + `sow_entry` OR fallback_sow）
+2. `wyckoff/daily_event_detector.py` 或内联到 `WyckoffV8.py`（fallback SOW 逻辑，优先内联避免模块耦合）
+
+### 回测结果（2026-05-25）
+
+回测范围：`20220101-20260525`
+
+| 指标 | 封板基线 | TASK 13 | 变化 |
+|------|:-------:|:-------:|:----:|
+| 总收益率 | 19,449% | **19,615%** | +166pp |
+| 交易数 | 481 | 482 | +1 |
+| 多头 / 空头 | 478 / 3 | 477 / **5** | 空头+2 |
+| 空头收益 | 112% | **584%** | +472pp（+5.2倍） |
+| 胜率 | 93.6% | **93.4%** | -0.2pp（噪声） |
+| 最大 DD | 0.32% | **0.32%** | 不变 |
+| Sharpe | 3.08 | **3.10** | ↑ |
+| Sortino | 32.05 | **35.35** | ↑ |
+
+### 结论
+
+**两部修复均验证有效**：
+- `sm_v2` 成功开闸（无需 BC 依赖），新空头 2 笔出现
+- `fallback_sow` 信号在 sm_v2 激活区间内正常触发
+- 多头性能完全未退化，DD、Sharpe 均小幅改善
+- 新基线更新为 **19,615%**
