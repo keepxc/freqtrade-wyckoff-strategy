@@ -409,6 +409,7 @@ class StrategyEventBridge:
                     dist_cause_sufficient=bool(row.get('dist_cause_sufficient', False)),
                     daily_tr_exists=bool(row.get('daily_tr_exists', False)),
                     daily_gate_score=row.get('daily_gate_score'),
+                    daily_sm_v2=bool(row.get('daily_sm_v2', False)),
                 )
                 emitted += 1
             logger.debug(f'[V1B-2] Emitted {emitted} regime snapshots for {pair}')

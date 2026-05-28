@@ -334,6 +334,7 @@ class EventEmitter:
         dist_cause_sufficient: bool = False,
         daily_tr_exists: bool = False,
         daily_gate_score: Optional[float] = None,
+        daily_sm_v2: bool = False,
     ) -> None:
         """Emit regime_snapshot."""
         snapshot_id = f"snap_{uuid.uuid4().hex[:12]}"
@@ -354,6 +355,7 @@ class EventEmitter:
             "dist_cause_sufficient": dist_cause_sufficient,
             "daily_tr_exists": daily_tr_exists,
             "daily_gate_score": daily_gate_score,
+            "daily_sm_v2": daily_sm_v2,
         }
         self._emit("regimes", event)
     

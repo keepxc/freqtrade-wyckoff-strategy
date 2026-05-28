@@ -384,12 +384,14 @@ class WyckoffV8(IStrategy):
                 dataframe['v8_entry_long'] = False
 
         # ── P5 字段适配：把 V8 专有列映射到 P5 期望的标准列名 ──
-        # phase_context_tag：V8 的 v8_phase (A/B/C/D/E/unknown) 对应 V7 的 phase_context_tag
         dataframe['phase_context_tag'] = dataframe.get('v8_phase', pd.Series('unknown', index=dataframe.index)).fillna('unknown')
-        # daily_tr_exists：TR Low 有值即代表日线 TR 已锁定
         dataframe['daily_tr_exists'] = dataframe.get('v8_tr_low', pd.Series(np.nan, index=dataframe.index)).notna()
-        # daily_choch_confirmed：SC 最终确认 ≈ 日线结构变化确认
-        dataframe['daily_choch_confirmed'] = dataframe.get('v8_sc_final', pd.Series(False, index=dataframe.index)).fillna(False)
+        # daily_choch_confirmed：Phase E = 积累结构的空头方向 ChoCh（上涨趋势延续中），
+        # 不等同于分发 ChoCh。用 phase in D/E 作为"结构已确认趋势方向"的代理指标。
+        _v8_phase = dataframe.get('v8_phase', pd.Series('unknown', index=dataframe.index)).fillna('unknown')
+        dataframe['daily_choch_confirmed'] = _v8_phase.isin(['D', 'E'])
+        # daily_sm_v2：TASK 13 BC 独立熊市闸门（直接透传）
+        dataframe['daily_sm_v2'] = dataframe.get('daily_sm_v2', pd.Series(False, index=dataframe.index)).fillna(False)
 
         # ── P5 事件发射 ──────────────────────────────────────
         if self.event_bridge is not None:

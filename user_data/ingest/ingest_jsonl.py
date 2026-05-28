@@ -235,7 +235,7 @@ INSERT_DIRECT_TABLES = {
     "regime_snapshots": [
         "snapshot_id", "run_id", "ts", "pair", "timeframe", "market_env", "htf_market_env",
         "macro_phase", "bear_market_mode", "phase_context_tag", "daily_choch_confirmed",
-        "dist_cause_sufficient", "daily_tr_exists", "daily_gate_score",
+        "dist_cause_sufficient", "daily_tr_exists", "daily_gate_score", "daily_sm_v2",
     ],
     "exit_decisions": [
         "decision_id", "run_id", "trade_id", "ts", "pair", "timeframe",
