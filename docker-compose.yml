@@ -43,3 +43,20 @@ services:
       --config /freqtrade/user_data/config.json
       --config /freqtrade/user_data/config_v8_dryrun.json
       --strategy WyckoffV8
+
+  freqtrade-hybrid:
+    image: freqtradeorg/freqtrade:stable
+    restart: unless-stopped
+    container_name: freqtrade-hybrid
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    environment:
+      - PYTHONPATH=/freqtrade
+    ports:
+      - "127.0.0.1:8081:8080"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/hybrid_dryrun.log
+      --config /freqtrade/user_data/config_dryrun.json
+      --config /freqtrade/user_data/config_hybrid_dryrun.json
+      --strategy HybridTraderV1

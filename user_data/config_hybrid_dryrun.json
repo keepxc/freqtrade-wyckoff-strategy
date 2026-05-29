@@ -1,0 +1,7 @@
+{
+  "minimal_roi": {"0": 99.0},
+  "stoploss": -0.08,
+  "bot_name": "HybridTrader_DryRun",
+  "timeframe": "30m",
+  "db_url": "sqlite:////freqtrade/user_data/tradesv3.hybrid_dryrun.sqlite"
+}
