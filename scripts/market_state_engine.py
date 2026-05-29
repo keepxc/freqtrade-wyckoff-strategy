@@ -3,17 +3,33 @@
 Market State Engine
 每15分钟扫描币种宇宙，输出结构质量标签，维护 watchlist。
 
+评分系统（设计文档 OI+CVD Hybrid Strategy，100分制）：
+  Price Acceptance  25  — 突破前高8 + 持续站稳7 + 回踩不破5 + 强收盘5
+  OI Expansion      25  — OI绝对值8 + OI加速度10 + 连续上升7
+  CVD Persistence   20  — 斜率正向8 + 连续3根7 + 更高高点5
+  Trend Structure   15  — 30m趋势5 + 4h对齐5 + 斜率正向5
+  Funding Health    10  — 中性10 / 略热5 / 极热0 / 极端-10
+  Liquidity Quality  5  — 24h量2 + OI规模2 + 价量比合理1
+
 Grade 定义：
-  A          — ≥3维度对齐，无陷阱信号，可入场
-  B          — 2维度对齐，观察
-  SQUEEZE    — OI收缩+价格压缩，等待方向
-  LONG_TRAP  — OI扩张 + CVD背离 + Funding过高，禁入
-  SHORT_TRAP — OI扩张 + CVD持续 + 价格拒绝，禁入
-  WEAK       — 无明显结构
+  A          — ≥85分，强趋势结构，多维度共振
+  B          — 75-85分，可交易结构
+  WATCH      — 65-75分，有潜力但不稳定
+  NOISE      — <65分，噪音概率高
+  BLOCKED    — 硬过滤器触发（Funding过热/价量背离/波动率爆炸/低流动性）
+  LONG_TRAP  — OI扩张 + CVD背离 + Funding过高
+  SHORT_TRAP — OI扩张 + CVD持续 + 价格拒绝
+  SQUEEZE    — OI收缩 + CVD不上升 + Funding正常，等待方向
 
 Watchlist规则：
   进入 — 连续3个15m周期 grade=A
   退出 — 连续2个15m周期 grade∉{A,B}
+
+Hard Filters（任一触发 → BLOCKED）：
+  Funding > 0.08%
+  OI涨但价格不动（吸收结构）
+  ATR > ATR_MA × 3（波动率爆炸）
+  OI < 20M
 """
 
 import sqlite3
@@ -33,24 +49,20 @@ SCAN_INTERVAL_SEC = 900   # 15 minutes
 MAX_WORKERS = 8
 PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
 
-LIQUIDITY = {
-    "min_24h_vol_usdt": 100_000_000,   # 100M USDT
-    "min_oi_usdt":       50_000_000,   #  50M USDT
-}
+MIN_24H_VOL_USDT = 100_000_000   # 100M USDT — universe volume gate
 
-SCORE_WEIGHTS = {
-    "oi_expand":    20,
-    "cvd_rising":   25,
-    "funding_ok":   20,
-    "trend_accept": 20,
-    "vol_surge":    15,
-}
+# ── Scoring Config (design doc: OI+CVD Hybrid Strategy, 100-point system) ──
+GRADE_A_MIN     = 85    # A级：强趋势结构
+GRADE_B_MIN     = 75    # B级：可交易结构
+GRADE_WATCH_MIN = 65    # 观察级：有潜力但不稳定，<65=忽略/噪音
 
-GRADE_A_MIN     = 70
-GRADE_B_MIN     = 45
-OI_EXPAND_MIN   = 0.005    # 0.5% in 4h
-FUNDING_MAX     = 0.0005   # 0.05%
-VOL_SURGE_MULT  = 1.2
+OI_EXPAND_MIN   = 0.005   # OI 4h 增幅 > 0.5%
+OI_ACCEL_MIN    = 0.002   # OI 加速度阈值
+FUNDING_MAX     = 0.0005  # 0.05%，中性偏多
+FUNDING_WARN    = 0.0008  # 0.08%，禁止追多
+VOL_SURGE_MULT  = 1.2     # 量能突增倍数
+VOL_EXPLOSION   = 3.0     # ATR > ATR_MA * 3
+MIN_OI_USDT     = 50_000_000
 
 WATCHLIST_ENTRY_N = 3   # consecutive A periods to enter
 WATCHLIST_EXIT_N  = 2   # consecutive non-A/B periods to exit
@@ -97,6 +109,57 @@ CREATE TABLE IF NOT EXISTS watchlist (
     score       REAL    NOT NULL,
     updated_ts  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS top10 (
+    rank         INTEGER PRIMARY KEY,
+    symbol       TEXT    NOT NULL,
+    grade        TEXT    NOT NULL,
+    score        REAL    NOT NULL,
+    oi_change_4h REAL,
+    funding_rate REAL,
+    cvd_rising   INTEGER,
+    trend_accept INTEGER,
+    vol_surge    INTEGER,
+    updated_ts   INTEGER NOT NULL
+);
+
+-- ── V2 scoring (design doc: Price Acceptance 25 + OI Expansion 25 + CVD 20 + Trend 15 + Funding 10 + Liquidity 5) ──
+CREATE TABLE IF NOT EXISTS coin_states_v2 (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol           TEXT    NOT NULL,
+    ts               INTEGER NOT NULL,
+    grade            TEXT    NOT NULL,
+    score            REAL    NOT NULL,
+    -- sub-scores
+    score_price_acc  REAL,   -- Price Acceptance (0-25)
+    score_oi_expand  REAL,   -- OI Expansion with acceleration (0-25)
+    score_cvd_pers   REAL,   -- CVD Persistence (0-20)
+    score_trend      REAL,   -- Trend Structure (0-15)
+    score_funding    REAL,   -- Funding Health (0-10, can be negative)
+    score_liquidity  REAL,   -- Liquidity Quality (0-5)
+    -- raw metrics
+    oi_usdt          REAL,
+    vol_24h_usdt     REAL,
+    oi_change_4h     REAL,
+    oi_acceleration  REAL,
+    funding_rate     REAL,
+    cvd_rising       INTEGER,
+    cvd_diverge      INTEGER,
+    cvd_continuous   INTEGER,  -- 连续3根CVD正向
+    trend_accept     INTEGER,
+    vol_surge        INTEGER,
+    dim_count        INTEGER,
+    -- trap flags
+    is_long_trap     INTEGER,
+    is_short_trap    INTEGER,
+    is_squeeze       INTEGER,
+    -- hard filter triggers
+    hf_funding_hot   INTEGER,
+    hf_oi_price_div  INTEGER,
+    hf_vol_explosion INTEGER,
+    hf_low_liquidity INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_cs2_sym_ts ON coin_states_v2(symbol, ts DESC);
 """
 
 
@@ -136,7 +199,7 @@ def fetch_universe() -> list[dict]:
         if not sym.endswith("USDT"):
             continue
         vol = float(t.get("quoteVolume", 0))
-        if vol < LIQUIDITY["min_24h_vol_usdt"]:
+        if vol < MIN_24H_VOL_USDT:
             continue
         candidates.append({"symbol": sym, "vol_24h_usdt": vol})
     candidates.sort(key=lambda x: -x["vol_24h_usdt"])
@@ -154,41 +217,74 @@ def fetch_oi_usdt(symbol: str) -> float | None:
     return qty * px if px else None
 
 
-def fetch_oi_change(symbol: str) -> float | None:
-    """4h OI change rate using 30m history (8 periods = 4h)."""
+def fetch_funding(symbol: str) -> float | None:
+    data = _get(f"{BINANCE}/fapi/v1/fundingRate", {"symbol": symbol, "limit": 1})
+    if not data:
+        return None
+    return float(data[0].get("fundingRate", 0))
+
+
+# ---------------------------------------------------------------------------
+# Data fetching
+# ---------------------------------------------------------------------------
+def fetch_oi_metrics(symbol: str) -> dict | None:
+    """Returns 4h OI change rate + acceleration."""
     data = _get(
         f"{BINANCE}/futures/data/openInterestHist",
-        {"symbol": symbol, "period": "30m", "limit": 10},
+        {"symbol": symbol, "period": "30m", "limit": 20},
     )
-    if not data or len(data) < 2:
+    if not data or len(data) < 10:
         return None
     vals = [float(d["sumOpenInterest"]) for d in data]
-    lookback = min(8, len(vals) - 1)
-    base = vals[-(lookback + 1)]
-    return (vals[-1] - base) / base if base else None
+    # current 4h = last 8 periods vs 8 periods ago
+    if len(vals) < 9:
+        return None
+    cur_base  = vals[-9]
+    cur_oi    = vals[-1]
+    oi_change = (cur_oi - cur_base) / cur_base if cur_base else 0.0
+    # previous 4h = periods -17 to -9
+    if len(vals) >= 18:
+        prev_base  = vals[-17]
+        prev_oi    = vals[-9]
+        prev_change = (prev_oi - prev_base) / prev_base if prev_base else 0.0
+        acceleration = oi_change - prev_change
+    else:
+        acceleration = 0.0
+    # consecutive OI up periods (last 3)
+    oi_series = pd.Series(vals)
+    oi_deltas = oi_series.diff().tail(3)
+    consecutive_up = int((oi_deltas > 0).all())
+    return {
+        "oi_change_4h":    oi_change,
+        "oi_acceleration": acceleration,
+        "oi_consecutive_up": consecutive_up,
+    }
 
 
-def fetch_cvd_metrics(symbol: str) -> dict | None:
-    """CVD rising/diverge, trend acceptance, volume surge from klines."""
+def fetch_price_cvd_metrics(symbol: str) -> dict | None:
+    """Kline analysis: returns CVD fields + price acceptance + CVD persistence sub-scores."""
     data = _get(
         f"{BINANCE}/fapi/v1/klines",
-        {"symbol": symbol, "interval": "30m", "limit": 60},
+        {"symbol": symbol, "interval": "30m", "limit": 80},
     )
-    if not data or len(data) < 20:
+    if not data or len(data) < 30:
         return None
 
+    opens   = np.array([float(r[1]) for r in data], dtype=float)
+    highs   = np.array([float(r[2]) for r in data], dtype=float)
+    lows    = np.array([float(r[3]) for r in data], dtype=float)
+    closes  = np.array([float(r[4]) for r in data], dtype=float)
     total_vol = np.array([float(r[5]) for r in data], dtype=float)
     taker_buy = np.array([float(r[9]) for r in data], dtype=float)
-    closes    = np.array([float(r[4]) for r in data], dtype=float)
 
+    n = len(data)
     vd  = 2 * taker_buy - total_vol
     cvd = pd.Series(vd).rolling(40, min_periods=10).sum().values
 
-    # CVD slope: last 6 bars
-    cvd_tail    = cvd[-6:]
-    cvd_rising  = bool(not np.isnan(cvd_tail).any() and cvd_tail[-1] > cvd_tail[0])
+    # ── v1 compatible fields ──
+    cvd_tail   = cvd[-6:]
+    cvd_rising = bool(not np.isnan(cvd_tail).any() and cvd_tail[-1] > cvd_tail[0])
 
-    # Top diverge: price near 20-bar high, CVD not at peak
     price_high  = np.max(closes[-20:])
     cvd_window  = cvd[-20:]
     cvd_valid   = cvd_window[~np.isnan(cvd_window)]
@@ -200,113 +296,320 @@ def fetch_cvd_metrics(symbol: str) -> dict | None:
         cvd[-1] < cvd_peak * 0.95
     )
 
-    # Trend acceptance: price above 20-bar mean and rising vs 5 bars ago
     vwap_approx  = float(np.mean(closes[-20:]))
     trend_accept = bool(closes[-1] > vwap_approx and closes[-1] > closes[-5])
 
-    # Volume surge vs 20-bar average
     avg_vol   = float(np.mean(total_vol[-20:]))
     vol_surge = bool(avg_vol > 0 and total_vol[-1] > avg_vol * VOL_SURGE_MULT)
 
+    # ── V2: Price Acceptance (25分) ──
+    # 1) breakout: close > previous range high (last 20 bars, excluding current)
+    range_high_20 = np.max(highs[-21:-1])  # exclude current bar
+    breakout      = closes[-1] > range_high_20
+
+    # 2) sustained: close > breakout level for 2+ consecutive bars
+    sustained_bars = int(closes[-1] > range_high_20)
+    for i in range(2, min(4, n)):
+        if closes[-i] > range_high_20:
+            sustained_bars += 1
+        else:
+            break
+    sustained = sustained_bars >= 3  # 当前+前2根 = 3根连续
+
+    # 3) pullback OK: recent pullback low doesn't break below breakout level
+    #    (breakout level = range_high_20; check last 5 bars' lows)
+    pullback_lows = lows[-5:]
+    pullback_ok   = bool(np.all(pullback_lows >= range_high_20 * 0.995))
+
+    # 4) strong close: close in upper 30% of bar range
+    bar_range = highs[-1] - lows[-1]
+    strong_close = bool(bar_range > 0 and (closes[-1] - lows[-1]) / bar_range >= 0.70)
+
+    # ── V2: CVD Persistence (20分) ──
+    # 1) CVD slope > 0
+    cvd_slope_pos = cvd_rising  # reuse
+
+    # 2) 连续3根CVD正向
+    cvd_deltas = pd.Series(vd).tail(3).values
+    cvd_continuous = bool(len(cvd_deltas) >= 3 and np.all(cvd_deltas > 0))
+
+    # 3) CVD higher high (last 6 bars)
+    cvd_tail6 = cvd[-6:]
+    cvd_valid6 = cvd_tail6[~np.isnan(cvd_tail6)]
+    cvd_higher_high = bool(
+        len(cvd_valid6) >= 2 and
+        not np.isnan(cvd[-1]) and
+        cvd[-1] > np.max(cvd_valid6[:-1])
+    )
+
+    # ── V2: Trend Structure (15分) ──
+    # 30m trend up: price > 20-bar mean
+    trend_30m_up = bool(closes[-1] > vwap_approx)
+    # 4h alignment: price > 40-bar mean (approximate 4h trend with 8x30m bars → use 40 for smoother)
+    if n >= 40:
+        ma40 = float(np.mean(closes[-40:]))
+        trend_4h_up = bool(closes[-1] > ma40)
+    else:
+        trend_4h_up = trend_30m_up
+    # slope positive: 5-bar linear slope > 0
+    if n >= 5:
+        x = np.arange(5)
+        y = closes[-5:]
+        slope = np.polyfit(x, y, 1)[0] if np.std(y) > 0 else 0.0
+        slope_pos = bool(slope > 0)
+    else:
+        slope_pos = trend_30m_up
+
+    # ── V2: Vol explosion check (ATR / ATR_MA) ──
+    tr_arr = np.maximum(
+        highs[1:] - lows[1:],
+        np.maximum(
+            np.abs(highs[1:] - closes[:-1]),
+            np.abs(lows[1:] - closes[:-1]),
+        )
+    )
+    atr14 = float(np.mean(tr_arr[-14:])) if len(tr_arr) >= 14 else float(np.mean(tr_arr))
+    atr_ma20 = float(np.mean(tr_arr[-20:])) if len(tr_arr) >= 20 else atr14
+    vol_explosion = bool(atr_ma20 > 0 and atr14 > atr_ma20 * VOL_EXPLOSION)
+
     return {
-        "cvd_rising":   cvd_rising,
-        "cvd_diverge":  top_diverge,
-        "trend_accept": trend_accept,
-        "vol_surge":    vol_surge,
+        # v1 compatible
+        "cvd_rising":    cvd_rising,
+        "cvd_diverge":   top_diverge,
+        "trend_accept":  trend_accept,
+        "vol_surge":     vol_surge,
+        # v2 price acceptance
+        "pa_breakout":      breakout,
+        "pa_sustained":     sustained,
+        "pa_pullback_ok":   pullback_ok,
+        "pa_strong_close":  strong_close,
+        # v2 CVD persistence
+        "cvd_slope_pos":    cvd_slope_pos,
+        "cvd_continuous":   cvd_continuous,
+        "cvd_higher_high":  cvd_higher_high,
+        # v2 trend
+        "trend_30m_up":   trend_30m_up,
+        "trend_4h_up":    trend_4h_up,
+        "trend_slope_pos": slope_pos,
+        # v2 risk
+        "vol_explosion": vol_explosion,
+        "atr14":         atr14,
     }
 
 
-def fetch_funding(symbol: str) -> float | None:
-    data = _get(f"{BINANCE}/fapi/v1/fundingRate", {"symbol": symbol, "limit": 1})
-    if not data:
-        return None
-    return float(data[0].get("fundingRate", 0))
-
-
 # ---------------------------------------------------------------------------
-# Scoring
+# Scoring (design doc: OI+CVD Hybrid Strategy, 100-point system)
 # ---------------------------------------------------------------------------
 def grade_coin(
     symbol: str,
     vol_24h: float,
     oi_usdt: float | None,
-    oi_change: float | None,
-    cvd: dict | None,
+    oi_metrics: dict | None,
+    pcvd: dict | None,
     funding: float | None,
 ) -> dict:
-    # Defaults when data unavailable
-    if cvd is None:
-        cvd = {"cvd_rising": False, "cvd_diverge": False,
-               "trend_accept": False, "vol_surge": False}
-    oi_change  = oi_change  or 0.0
-    funding    = funding    or 0.0
+    """
+    Design-doc scoring system:
+      Price Acceptance  25  — 市场接受新价格区间
+      OI Expansion      25  — 杠杆资金加速进入
+      CVD Persistence   20  — 主动买卖盘持续性
+      Trend Structure   15  — 大级别趋势背景
+      Funding Health    10  — 拥挤交易检测
+      Liquidity Quality  5  — 数据可信度
+    Grade: A(85+), B(75-85), Watch(65-75), Ignore(<65)
+    Plus trap detection (borrowed from v1).
+    """
+    # ── Defaults ──
+    if pcvd is None:
+        pcvd = {
+            "cvd_rising": False, "cvd_diverge": False,
+            "trend_accept": False, "vol_surge": False,
+            "pa_breakout": False, "pa_sustained": False,
+            "pa_pullback_ok": False, "pa_strong_close": False,
+            "cvd_slope_pos": False, "cvd_continuous": False,
+            "cvd_higher_high": False,
+            "trend_30m_up": False, "trend_4h_up": False,
+            "trend_slope_pos": False,
+            "vol_explosion": False, "atr14": 0.0,
+        }
+    if oi_metrics is None:
+        oi_metrics = {"oi_change_4h": 0.0, "oi_acceleration": 0.0, "oi_consecutive_up": 0}
+    funding = funding or 0.0
+    oi_usdt = oi_usdt or 0.0
 
-    oi_expand    = oi_change    > OI_EXPAND_MIN
-    cvd_rising   = cvd["cvd_rising"]
-    cvd_diverge  = cvd["cvd_diverge"]
-    funding_ok   = abs(funding) <= FUNDING_MAX
-    trend_accept = cvd["trend_accept"]
-    vol_surge    = cvd["vol_surge"]
+    # ── Sub-score 1: Price Acceptance (0-25) ──
+    score_pa = 0.0
+    if pcvd["pa_breakout"]:
+        score_pa += 8
+    if pcvd["pa_sustained"]:
+        score_pa += 7
+    if pcvd["pa_pullback_ok"]:
+        score_pa += 5
+    if pcvd["pa_strong_close"]:
+        score_pa += 5
 
-    score = 0.0
-    if oi_expand:    score += SCORE_WEIGHTS["oi_expand"]
-    if cvd_rising:   score += SCORE_WEIGHTS["cvd_rising"]
-    if funding_ok:   score += SCORE_WEIGHTS["funding_ok"]
-    if trend_accept: score += SCORE_WEIGHTS["trend_accept"]
-    if vol_surge:    score += SCORE_WEIGHTS["vol_surge"]
+    # ── Sub-score 2: OI Expansion (0-25) ──
+    oi_change = oi_metrics["oi_change_4h"]
+    oi_accel  = oi_metrics["oi_acceleration"]
+    score_oi = 0.0
+    # OI change absolute
+    if oi_change > OI_EXPAND_MIN:
+        score_oi += 8
+    elif oi_change > OI_EXPAND_MIN * 0.5:
+        score_oi += 4
+    # OI acceleration
+    if oi_accel > OI_ACCEL_MIN:
+        score_oi += 10
+    elif oi_accel > 0:
+        score_oi += 5
+    # consecutive OI up periods
+    if oi_metrics["oi_consecutive_up"]:
+        score_oi += 7
+    elif oi_change > 0:
+        score_oi += 3
 
-    dim_count = sum([oi_expand, cvd_rising, funding_ok, trend_accept, vol_surge])
+    # ── Sub-score 3: CVD Persistence (0-20) ──
+    score_cvd = 0.0
+    if pcvd["cvd_slope_pos"]:
+        score_cvd += 8
+    if pcvd["cvd_continuous"]:
+        score_cvd += 7
+    if pcvd["cvd_higher_high"]:
+        score_cvd += 5
 
-    # Trap detection takes priority
+    # ── Sub-score 4: Trend Structure (0-15) ──
+    score_trend = 0.0
+    if pcvd["trend_30m_up"]:
+        score_trend += 5
+    if pcvd["trend_4h_up"]:
+        score_trend += 5
+    if pcvd["trend_slope_pos"]:
+        score_trend += 5
+
+    # ── Sub-score 5: Funding Health (0-10, can go negative) ──
+    score_funding = 0.0
+    abs_fr = abs(funding)
+    if abs_fr <= FUNDING_MAX:
+        score_funding = 10       # 中性偏多
+    elif abs_fr <= FUNDING_WARN:
+        score_funding = 5        # 略热
+    elif abs_fr <= FUNDING_WARN * 3:
+        score_funding = 0        # 极热
+    else:
+        score_funding = -10      # 极端，惩罚
+
+    # ── Sub-score 6: Liquidity Quality (0-5) ──
+    score_liq = 0.0
+    if vol_24h > 100_000_000:
+        score_liq += 2
+    if oi_usdt > 50_000_000:
+        score_liq += 2
+    # spread proxy: if OI/volume ratio is reasonable (not a ghost coin)
+    if vol_24h > 0 and oi_usdt > 0:
+        oi_vol_ratio = oi_usdt / vol_24h
+        if 0.01 < oi_vol_ratio < 10:  # reasonable range
+            score_liq += 1
+
+    # ── Total score ──
+    total_score = score_pa + score_oi + score_cvd + score_trend + score_funding + score_liq
+
+    # ── Hard filters ──
+    hf_funding_hot   = int(abs_fr > FUNDING_WARN)
+    hf_oi_price_div  = int(
+        oi_change > OI_EXPAND_MIN and
+        not pcvd["pa_breakout"] and
+        not pcvd["pa_strong_close"]
+    )  # OI涨但价格不动 = 吸收结构
+    hf_vol_explosion = int(pcvd["vol_explosion"])
+    hf_low_liquidity = int(oi_usdt < MIN_OI_USDT)
+
+    hard_triggered = hf_funding_hot or hf_oi_price_div or hf_vol_explosion or hf_low_liquidity
+
+    # ── Trap detection ──
+    oi_expand   = oi_change > OI_EXPAND_MIN
+    cvd_rising  = pcvd["cvd_rising"]
+    cvd_diverge = pcvd["cvd_diverge"]
+    funding_ok  = abs_fr <= FUNDING_MAX
+    trend_acc   = pcvd["trend_accept"]
+
     long_trap  = oi_expand and cvd_diverge and not funding_ok
-    short_trap = oi_expand and cvd_rising and not trend_accept and score >= GRADE_B_MIN
+    short_trap = oi_expand and cvd_rising and not trend_acc and total_score >= GRADE_B_MIN
+    squeeze    = not oi_expand and not cvd_rising and funding_ok
 
-    if long_trap:
+    # ── Final grade ──
+    dim_count = sum([
+        score_pa >= 15,
+        score_oi >= 15,
+        score_cvd >= 12,
+        score_trend >= 10,
+        score_funding >= 5,
+        score_liq >= 3,
+    ])
+
+    if hard_triggered:
+        grade = "BLOCKED"
+    elif long_trap:
         grade = "LONG_TRAP"
     elif short_trap:
         grade = "SHORT_TRAP"
-    elif score >= GRADE_A_MIN and not cvd_diverge:
-        grade = "A"
-    elif score >= GRADE_B_MIN:
-        grade = "B"
-    elif not oi_expand and not cvd_rising and funding_ok:
+    elif squeeze:
         grade = "SQUEEZE"
+    elif total_score >= GRADE_A_MIN and not cvd_diverge:
+        grade = "A"
+    elif total_score >= GRADE_B_MIN:
+        grade = "B"
+    elif total_score >= GRADE_WATCH_MIN:
+        grade = "WATCH"
     else:
-        grade = "WEAK"
+        grade = "NOISE"
 
     return {
-        "symbol":       symbol,
-        "grade":        grade,
-        "score":        score,
-        "oi_usdt":      oi_usdt,
-        "vol_24h_usdt": vol_24h,
-        "oi_change_4h": oi_change,
-        "cvd_rising":   int(cvd_rising),
-        "cvd_diverge":  int(cvd_diverge),
-        "funding_rate": funding,
-        "funding_ok":   int(funding_ok),
-        "trend_accept": int(trend_accept),
-        "vol_surge":    int(vol_surge),
-        "dim_count":    dim_count,
+        "symbol":           symbol,
+        "grade":            grade,
+        "score":            total_score,
+        "score_price_acc":  score_pa,
+        "score_oi_expand":  score_oi,
+        "score_cvd_pers":   score_cvd,
+        "score_trend":      score_trend,
+        "score_funding":    score_funding,
+        "score_liquidity":  score_liq,
+        "oi_usdt":          oi_usdt,
+        "vol_24h_usdt":     vol_24h,
+        "oi_change_4h":     oi_change,
+        "oi_acceleration":  oi_accel,
+        "funding_rate":     funding,
+        "cvd_rising":       int(pcvd["cvd_rising"]),
+        "cvd_diverge":      int(pcvd["cvd_diverge"]),
+        "cvd_continuous":   int(pcvd["cvd_continuous"]),
+        "trend_accept":     int(pcvd["trend_accept"]),
+        "vol_surge":        int(pcvd["vol_surge"]),
+        "dim_count":        dim_count,
+        "is_long_trap":     int(long_trap),
+        "is_short_trap":    int(short_trap),
+        "is_squeeze":       int(squeeze),
+        "hf_funding_hot":   hf_funding_hot,
+        "hf_oi_price_div":  hf_oi_price_div,
+        "hf_vol_explosion": hf_vol_explosion,
+        "hf_low_liquidity": hf_low_liquidity,
     }
 
 
 # ---------------------------------------------------------------------------
-# Per-coin scan (called in thread pool)
+# Per-coin scan
 # ---------------------------------------------------------------------------
 def scan_coin(coin: dict) -> dict | None:
     symbol  = coin["symbol"]
     vol_24h = coin["vol_24h_usdt"]
 
     oi_usdt = fetch_oi_usdt(symbol)
-    if oi_usdt is not None and oi_usdt < LIQUIDITY["min_oi_usdt"]:
-        return None   # fails OI liquidity gate
+    if oi_usdt is not None and oi_usdt < MIN_OI_USDT:
+        return None
 
-    oi_change = fetch_oi_change(symbol)
-    cvd       = fetch_cvd_metrics(symbol)
-    funding   = fetch_funding(symbol)
+    oi_metrics = fetch_oi_metrics(symbol)
+    pcvd       = fetch_price_cvd_metrics(symbol)
+    funding    = fetch_funding(symbol)
 
-    return grade_coin(symbol, vol_24h, oi_usdt, oi_change, cvd, funding)
+    return grade_coin(symbol, vol_24h, oi_usdt, oi_metrics, pcvd, funding)
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +626,7 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
     a_grade_syms = {r["symbol"] for r in results if r["grade"] == "A"}
     for sym in a_grade_syms:
         rows = cur.execute(
-            "SELECT grade FROM coin_states WHERE symbol=? ORDER BY ts DESC LIMIT ?",
+            "SELECT grade FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
             (sym, WATCHLIST_ENTRY_N),
         ).fetchall()
         if len(rows) >= WATCHLIST_ENTRY_N and all(r[0] == "A" for r in rows):
@@ -340,7 +643,7 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
     in_watchlist = [r[0] for r in cur.fetchall()]
     for sym in in_watchlist:
         rows = cur.execute(
-            "SELECT grade FROM coin_states WHERE symbol=? ORDER BY ts DESC LIMIT ?",
+            "SELECT grade FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
             (sym, WATCHLIST_EXIT_N),
         ).fetchall()
         if len(rows) >= WATCHLIST_EXIT_N and all(r[0] not in ("A", "B") for r in rows):
@@ -349,6 +652,41 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
             log.info(f"WATCHLIST REMOVE: {sym:15s} recent={grades}")
 
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Top 10 persistence (always refreshed each scan, not cumulative)
+# ---------------------------------------------------------------------------
+def update_top10(conn: sqlite3.Connection, ts_now: int, results: list[dict]) -> None:
+    """Replace top10 table with current scan's top 10 by score."""
+    cur = conn.cursor()
+    cur.execute("DELETE FROM top10")
+
+    # Sort by score descending, take top 10
+    ranked = sorted(results, key=lambda r: -r["score"])[:10]
+    for i, r in enumerate(ranked, start=1):
+        cur.execute(
+            """INSERT INTO top10
+               (rank, symbol, grade, score, oi_change_4h, funding_rate,
+                cvd_rising, trend_accept, vol_surge, updated_ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (i, r["symbol"], r["grade"], r["score"],
+             r["oi_change_4h"], r["funding_rate"],
+             r["cvd_rising"], r["trend_accept"], r["vol_surge"],
+             ts_now),
+        )
+
+    conn.commit()
+
+    # Log top 10
+    log.info("Top 10 by score:")
+    for i, r in enumerate(ranked, start=1):
+        log.info(
+            f"  #{i:2d} {r['symbol']:12s} {r['grade']:10s} "
+            f"score={r['score']:5.0f} | OI4h={r['oi_change_4h']*100:+.2f}% "
+            f"FR={r['funding_rate']*100:.4f}% | "
+            f"CVD={r['cvd_rising']} TA={r['trend_accept']} VS={r['vol_surge']}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -372,30 +710,48 @@ def run_scan(conn: sqlite3.Connection) -> None:
             sym = futures[fut]
             try:
                 res = fut.result()
-                if res:
+                if res is not None:
                     results.append(res)
             except Exception as e:
                 log.warning(f"{sym}: {e}")
 
-    # Write coin_states
+    # ── Write coin_states_v2 ──
     cur = conn.cursor()
     for r in results:
         cur.execute(
-            """INSERT INTO coin_states
-               (symbol,ts,grade,score,oi_usdt,vol_24h_usdt,oi_change_4h,
-                cvd_rising,cvd_diverge,funding_rate,funding_ok,
-                trend_accept,vol_surge,dim_count)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO coin_states_v2
+               (symbol,ts,grade,score,
+                score_price_acc,score_oi_expand,score_cvd_pers,
+                score_trend,score_funding,score_liquidity,
+                oi_usdt,vol_24h_usdt,oi_change_4h,oi_acceleration,
+                funding_rate,cvd_rising,cvd_diverge,cvd_continuous,
+                trend_accept,vol_surge,dim_count,
+                is_long_trap,is_short_trap,is_squeeze,
+                hf_funding_hot,hf_oi_price_div,hf_vol_explosion,hf_low_liquidity)
+               VALUES (?,?,?,?,
+                       ?,?,?,
+                       ?,?,?,
+                       ?,?,?,?,
+                       ?,?,?,?,
+                       ?,?,?,
+                       ?,?,?,
+                       ?,?,?,?)""",
             (r["symbol"], ts_now, r["grade"], r["score"],
-             r["oi_usdt"], r["vol_24h_usdt"], r["oi_change_4h"],
-             r["cvd_rising"], r["cvd_diverge"], r["funding_rate"],
-             r["funding_ok"], r["trend_accept"], r["vol_surge"], r["dim_count"]),
+             r["score_price_acc"], r["score_oi_expand"], r["score_cvd_pers"],
+             r["score_trend"], r["score_funding"], r["score_liquidity"],
+             r["oi_usdt"], r["vol_24h_usdt"], r["oi_change_4h"], r["oi_acceleration"],
+             r["funding_rate"], r["cvd_rising"], r["cvd_diverge"], r["cvd_continuous"],
+             r["trend_accept"], r["vol_surge"], r["dim_count"],
+             r["is_long_trap"], r["is_short_trap"], r["is_squeeze"],
+             r["hf_funding_hot"], r["hf_oi_price_div"], r["hf_vol_explosion"], r["hf_low_liquidity"]),
         )
     conn.commit()
 
+    # Watchlist + Top10 from V2 results
     update_watchlist(conn, ts_now, results)
+    update_top10(conn, ts_now, results)
 
-    # Summary
+    # ── Summary ──
     grade_counts: dict[str, int] = {}
     for r in results:
         grade_counts[r["grade"]] = grade_counts.get(r["grade"], 0) + 1
@@ -403,14 +759,24 @@ def run_scan(conn: sqlite3.Connection) -> None:
     log.info(f"Results: {len(results)} coins | {grade_counts}")
     log.info(f"Watchlist: {wl_count} coins")
 
-    wl = conn.execute(
-        "SELECT symbol, grade, score, oi_change_4h, funding_rate FROM watchlist ORDER BY score DESC"
-    ).fetchall()
-    for sym, grade, score, oi_chg, fr in wl:
+    # Top 5 detail
+    top5 = sorted(results, key=lambda r: -r["score"])[:5]
+    log.info("Top 5:")
+    for r in top5:
         log.info(
-            f"  WL {sym:15s} {grade:10s} score={score:5.0f} "
-            f"OI4h={oi_chg*100:+.2f}% FR={fr*100:.4f}%"
+            f"  {r['symbol']:12s} {r['grade']:10s} total={r['score']:5.0f} | "
+            f"PA={r['score_price_acc']:3.0f} OI={r['score_oi_expand']:3.0f} "
+            f"CVD={r['score_cvd_pers']:3.0f} TR={r['score_trend']:3.0f} "
+            f"FR={r['score_funding']:3.0f} LQ={r['score_liquidity']:3.0f} | "
+            f"OI4h={r['oi_change_4h']*100:+.2f}% OIacc={r['oi_acceleration']*100:+.2f}%"
         )
+
+    # Watchlist detail
+    wl = conn.execute(
+        "SELECT symbol, grade, score FROM watchlist ORDER BY score DESC"
+    ).fetchall()
+    for sym, grade, score in wl:
+        log.info(f"  WL {sym:15s} {grade:10s} score={score:5.0f}")
 
 
 # ---------------------------------------------------------------------------

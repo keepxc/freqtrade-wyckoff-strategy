@@ -520,10 +520,13 @@ class HybridTraderV1(IStrategy):
         # t1_atr 供 custom_exit 在开仓时取入场 bar 的 ATR，固化 T1
         dataframe["t1_atr"] = dataframe["atr14"]
 
-        # ── Market State Engine watchlist 过滤（阶段5）────────
-        # 读取 market_state_engine 写入的 watchlist 表。
+        # ── Market State Engine top10 过滤（阶段5）────────
+        # 读取 market_state_engine 写入的 top10 表。
         # 若 DB 不存在或 market_state_engine 未运行，默认放行（不阻断回测和初始 dry run）。
-        dataframe["mse_ok"] = self._query_watchlist(binance_symbol)
+        mse_in_top10, mse_rank, mse_score = self._query_top10(binance_symbol)
+        dataframe["mse_ok"]   = mse_in_top10
+        dataframe["mse_rank"] = mse_rank
+        dataframe["mse_score"] = mse_score
 
         return dataframe
 
@@ -531,19 +534,25 @@ class HybridTraderV1(IStrategy):
     _DB_PATH = Path(__file__).parent.parent / "market.db"
 
     @classmethod
-    def _query_watchlist(cls, binance_symbol: str) -> bool:
-        """Return True if symbol is in MSE watchlist, or if DB/table not available (fallback=pass)."""
+    def _query_top10(cls, binance_symbol: str) -> tuple[bool, int, float]:
+        """
+        查询 MSE top10 表。
+        Returns (in_top10: bool, rank: int, score: float).
+        DB 不存在或引擎未运行时返回 (True, 0, 0)=放行。
+        """
         try:
             if not cls._DB_PATH.exists():
-                return True
+                return True, 0, 0.0
             with sqlite3.connect(str(cls._DB_PATH), timeout=2) as conn:
                 row = conn.execute(
-                    "SELECT 1 FROM watchlist WHERE symbol=? LIMIT 1",
+                    "SELECT rank, score FROM top10 WHERE symbol=? LIMIT 1",
                     (binance_symbol,),
                 ).fetchone()
-            return row is not None
+            if row:
+                return True, int(row[0]), float(row[1])
+            return False, 0, 0.0
         except Exception:
-            return True   # fallback: don't block when engine not running
+            return True, 0, 0.0   # fallback: don't block when engine not running
 
     # ── 入场 ─────────────────────────────────────────────
 
