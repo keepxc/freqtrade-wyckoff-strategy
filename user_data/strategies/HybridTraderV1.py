@@ -7,12 +7,14 @@
 
 import time
 import threading
+import sqlite3
 import numpy as np
 import pandas as pd
 import requests
 from freqtrade.strategy import IStrategy, DecimalParameter, IntParameter
 from pandas import DataFrame
 from functools import reduce
+from pathlib import Path
 
 
 class HybridTraderV1(IStrategy):
@@ -518,7 +520,30 @@ class HybridTraderV1(IStrategy):
         # t1_atr 供 custom_exit 在开仓时取入场 bar 的 ATR，固化 T1
         dataframe["t1_atr"] = dataframe["atr14"]
 
+        # ── Market State Engine watchlist 过滤（阶段5）────────
+        # 读取 market_state_engine 写入的 watchlist 表。
+        # 若 DB 不存在或 market_state_engine 未运行，默认放行（不阻断回测和初始 dry run）。
+        dataframe["mse_ok"] = self._query_watchlist(binance_symbol)
+
         return dataframe
+
+    # ── Market State Engine DB 查询 ──────────────────────
+    _DB_PATH = Path(__file__).parent.parent / "market.db"
+
+    @classmethod
+    def _query_watchlist(cls, binance_symbol: str) -> bool:
+        """Return True if symbol is in MSE watchlist, or if DB/table not available (fallback=pass)."""
+        try:
+            if not cls._DB_PATH.exists():
+                return True
+            with sqlite3.connect(str(cls._DB_PATH), timeout=2) as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM watchlist WHERE symbol=? LIMIT 1",
+                    (binance_symbol,),
+                ).fetchone()
+            return row is not None
+        except Exception:
+            return True   # fallback: don't block when engine not running
 
     # ── 入场 ─────────────────────────────────────────────
 
@@ -557,6 +582,9 @@ class HybridTraderV1(IStrategy):
         oi_ok      = dataframe["oi_rising"].fillna(True).astype(bool)
         funding_ok = dataframe["funding_ok"].fillna(True).astype(bool)
 
+        # MSE watchlist 过滤（实盘有效；DB不存在时 fallback=True，回测不受影响）
+        mse_ok = dataframe["mse_ok"].fillna(True).astype(bool)
+
         conditions_long = [
             dataframe["st_dir"] == 1,                    # Supertrend 上升趋势
             dataframe["st_dir"].shift(2) == 1,            # 持续至少 3 根
@@ -569,6 +597,7 @@ class HybridTraderV1(IStrategy):
             oi_ok,                                        # OI 上升=真实多头建仓（阶段3）
             funding_ok,                                   # 资金费率未过热（阶段3）
             dataframe["confidence"] >= self.CONF_MIN,     # 置信度门控 ≥80（阶段4）
+            mse_ok,                                       # MSE watchlist：A级结构（阶段5）
             dataframe["volume"] > 0,
         ]
         dataframe.loc[
