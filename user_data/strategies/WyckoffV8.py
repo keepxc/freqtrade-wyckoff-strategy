@@ -392,6 +392,16 @@ class WyckoffV8(IStrategy):
         dataframe['daily_choch_confirmed'] = _v8_phase.isin(['D', 'E'])
         # daily_sm_v2：TASK 13 BC 独立熊市闸门（直接透传）
         dataframe['daily_sm_v2'] = dataframe.get('daily_sm_v2', pd.Series(False, index=dataframe.index)).fillna(False)
+        # macro_phase：V8 phase A-E 直接映射（V7 markup/markdown 概念在 V8 里用 phase 表达）
+        dataframe['macro_phase'] = _v8_phase
+        # market_env：基于 bear_market_mode + phase 推导字符串环境标签
+        _bear_mode = dataframe.get('bear_market_mode', pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        dataframe['market_env'] = np.where(_bear_mode, 'bearish',
+                                  np.where(_v8_phase.isin(['D', 'E']), 'markup', 'accumulation'))
+        # daily_gate_score：V8 无 TR gate score；用 dist_cause_sufficient 作代理（1.0=因果充足）
+        dataframe['daily_gate_score'] = dataframe.get(
+            'dist_cause_sufficient', pd.Series(False, index=dataframe.index)
+        ).fillna(False).astype(float)
 
         # ── P5 事件发射 ──────────────────────────────────────
         if self.event_bridge is not None:
