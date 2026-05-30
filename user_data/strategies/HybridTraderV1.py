@@ -20,6 +20,9 @@ from functools import reduce
 from pathlib import Path
 
 
+PROXIES = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+
+
 class HybridTraderV1(IStrategy):
     """
     Hybrid Trader V1 — 15m 趋势跟踪系统
@@ -197,7 +200,7 @@ class HybridTraderV1(IStrategy):
         url = "https://fapi.binance.com/fapi/v1/klines"
         params = {"symbol": symbol, "interval": interval, "limit": limit}
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params=params, proxies=PROXIES, timeout=10)
             resp.raise_for_status()
             rows = resp.json()
         except Exception as e:
@@ -311,7 +314,7 @@ class HybridTraderV1(IStrategy):
         url = "https://fapi.binance.com/futures/data/openInterestHist"
         params = {"symbol": symbol, "period": "15m", "limit": limit}
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params=params, proxies=PROXIES, timeout=10)
             resp.raise_for_status()
             rows = resp.json()
         except Exception:
@@ -354,7 +357,7 @@ class HybridTraderV1(IStrategy):
         url = "https://fapi.binance.com/fapi/v1/fundingRate"
         params = {"symbol": symbol, "limit": limit}
         try:
-            resp = requests.get(url, params=params, timeout=10)
+            resp = requests.get(url, params=params, proxies=PROXIES, timeout=10)
             resp.raise_for_status()
             rows = resp.json()
         except Exception:

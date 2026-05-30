@@ -15,6 +15,17 @@
     "username": "freqtrade",
     "password": "CHANGE_THIS_PASSWORD"
   },
+  "exchange": {
+    "name": "binance",
+    "key": "",
+    "secret": "",
+    "ccxt_config": {},
+    "ccxt_async_config": {
+      "aiohttp_proxy": "http://127.0.0.1:7890",
+      "aiohttp_timeout": 60
+    },
+    "proxy_url": "http://127.0.0.1:7890"
+  },
   "telegram": {
     "enabled": false
   },
