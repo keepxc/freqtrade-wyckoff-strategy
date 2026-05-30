@@ -36,7 +36,7 @@ class HybridTraderV1(IStrategy):
     timeframe = "15m"
 
     # ── 基础设置 ──────────────────────────────────────────
-    can_short = False          # 阶段1 只做多
+    can_short = True           # 多空双向
     use_custom_stoploss = True
     stoploss = -0.08           # 硬止损兜底（Supertrend 失效时）
     trailing_stop = False
@@ -850,24 +850,54 @@ class HybridTraderV1(IStrategy):
             "enter_long"
         ] = 1
 
+        # ── 做空条件（做多的镜像）─────────────────────────
+        # CVD 下降 或 顶背离 = 空头确认
+        cvd_ok_short = (
+            (~dataframe["cvd_rising"].fillna(False).astype(bool)) |
+            (dataframe["top_diverge"].fillna(False).astype(bool))
+        )
+        conditions_short = [
+            dataframe["st_dir"] == -1,                   # Supertrend 下降趋势
+            dataframe["hma_fast"] < dataframe["hma_slow"],# HMA 空头对齐
+            dataframe["rsi"] >= 32,                       # 不高不低
+            dataframe["rsi"] <= 60,
+            cvd_ok_short,                                 # CVD 下降 或 顶背离
+            oi_ok,                                        # OI 方向不区分为空头
+            funding_ok,
+            dataframe["confidence"] >= self.CONF_MIN,
+            mse_ok,
+            dataframe["volume"] > 0,
+        ]
+        dataframe.loc[
+            reduce(lambda a, b: a & b, conditions_short),
+            "enter_short"
+        ] = 1
+
         return dataframe
 
     # ── 出场 ─────────────────────────────────────────────
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        平多条件（任一满足，以结构性信号为主）：
-        1. Supertrend 方向翻转为 -1（最强信号，代表趋势结束）
-        2. HMA 死叉 + RSI 已超过 65（高位死叉）
-        不使用 MACD 单独触发出场，避免趋势中途震荡误出
+        平多条件（任一满足）：
+        1. Supertrend 翻转为 -1
+        2. HMA 死叉 + RSI > 65（高位死叉）
+
+        平空条件（任一满足，做多镜像）：
+        1. Supertrend 翻转为 +1
+        2. HMA 金叉 + RSI < 35（低位金叉）
         """
         exit_long = (
-            # 主出场：Supertrend 结构翻转
             (dataframe["st_dir"] == -1) |
-            # 次出场：高位 HMA 死叉（RSI > 65 过热时才响应）
             (dataframe["hma_cross_down"] & (dataframe["rsi"] > 65))
         )
         dataframe.loc[exit_long & (dataframe["volume"] > 0), "exit_long"] = 1
+
+        exit_short = (
+            (dataframe["st_dir"] == 1) |
+            (dataframe["hma_cross_up"] & (dataframe["rsi"] < 35))
+        )
+        dataframe.loc[exit_short & (dataframe["volume"] > 0), "exit_short"] = 1
 
         return dataframe
 
@@ -884,13 +914,13 @@ class HybridTraderV1(IStrategy):
         **kwargs,
     ) -> float:
         """
-        动态止损 = Supertrend 线位置
-        当 Supertrend 线上移时止损跟随上移（追踪），但永远不下移。
+        动态止损 = Supertrend 线位置（多空通用）
+        多头：止损在 Supertrend 下轨下方；空头：止损在上轨上方。
         Kill Switch 激活时 → 立即以 -0.1% 止损强制平仓。
         """
         # P2: Kill Switch → 强制退出
         if self._is_kill_switch_active():
-            return -0.001  # 0.1% 极紧止损，快速平仓
+            return -0.001
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if dataframe.empty:
             return self.stoploss
@@ -901,9 +931,11 @@ class HybridTraderV1(IStrategy):
         if pd.isna(st_line) or st_line <= 0:
             return self.stoploss
 
-        # 转换为相对于当前价格的比例（freqtrade 要求负数）
         stop_ratio = (st_line - current_rate) / current_rate
-        # 确保不超过硬止损兜底
+        # 多头：st_line 在下轨（< current_rate），stop_ratio 为负 ✓
+        # 空头：st_line 在上轨（> current_rate），stop_ratio 为正 → 取负
+        if stop_ratio > 0:
+            stop_ratio = -abs(stop_ratio)
         return max(stop_ratio, self.stoploss)
 
     # ── Partial Close（T1 到达平 55%）────────────────────
@@ -935,16 +967,18 @@ class HybridTraderV1(IStrategy):
             dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if dataframe.empty:
                 return None
-            # 找入场时刻对应的最后一根已收盘 bar
             open_bar_mask = dataframe["date"] <= pd.Timestamp(trade.open_date_utc)
             if not open_bar_mask.any():
                 return None
             open_bar = dataframe.loc[open_bar_mask].iloc[-1]
-            trade.set_custom_data("t1_target", float(
-                open_bar["close"] + open_bar["t1_atr"] * self.PARTIAL_T1_ATR_MUL
-            ))
+            atr_dist = open_bar["t1_atr"] * self.PARTIAL_T1_ATR_MUL
+            if trade.is_short:
+                trade.set_custom_data("t1_target", float(open_bar["close"] - atr_dist))
+            else:
+                trade.set_custom_data("t1_target", float(open_bar["close"] + atr_dist))
 
-        if current_rate >= trade.get_custom_data("t1_target"):
+        t1 = trade.get_custom_data("t1_target")
+        if (not trade.is_short and current_rate >= t1) or (trade.is_short and current_rate <= t1):
             return "t1_partial_close"
 
         # P2: 时间止损 — 持仓超过 MAX_HOLDING_HOURS 强制平仓
