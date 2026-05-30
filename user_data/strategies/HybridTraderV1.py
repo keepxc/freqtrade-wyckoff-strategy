@@ -687,13 +687,14 @@ class HybridTraderV1(IStrategy):
         Gate 4: 最大同时持仓数（P0）
         任一触发 → 拒绝开仓。
         """
-        # Auto-record PnL from recently closed trades
-        for t in self.trades:
-            tid = getattr(t, "id", id(t))
-            if not t.is_open and tid not in self._pnl_recorded:
-                pnl = t.realized_profit if t.realized_profit else 0.0
-                self._record_trade_pnl(pnl, t.pair)
-                self._pnl_recorded.add(tid)
+        # Auto-record PnL from recently closed trades (dry-run only; backtest skips)
+        if hasattr(self, "trades"):
+            for t in self.trades:
+                tid = getattr(t, "id", id(t))
+                if not t.is_open and tid not in self._pnl_recorded:
+                    pnl = t.realized_profit if t.realized_profit else 0.0
+                    self._record_trade_pnl(pnl, t.pair)
+                    self._pnl_recorded.add(tid)
 
         # Gate 0: Kill Switch（P2 — 最高优先级）
         if self._is_kill_switch_active():
@@ -733,15 +734,16 @@ class HybridTraderV1(IStrategy):
             )
             return False
 
-        # Gate 4: 最大同时持仓数
-        open_count = len([t for t in self.trades if t.is_open])
-        if open_count >= self.MAX_OPEN_TRADES:
-            self.log_once(
-                f"RISK GATE: max open trades ({self.MAX_OPEN_TRADES}) reached, "
-                f"blocking {pair}",
-                log_level="warning",
-            )
-            return False
+        # Gate 4: 最大同时持仓数（dry-run 时生效，回测由 max_open_trades 控制）
+        if hasattr(self, "trades"):
+            open_count = len([t for t in self.trades if t.is_open])
+            if open_count >= self.MAX_OPEN_TRADES:
+                self.log_once(
+                    f"RISK GATE: max open trades ({self.MAX_OPEN_TRADES}) reached, "
+                    f"blocking {pair}",
+                    log_level="warning",
+                )
+                return False
 
         return True
 
@@ -751,12 +753,13 @@ class HybridTraderV1(IStrategy):
         """
         P1: 检查最近是否存在异常价格跳变。
         用 5m K 线：若最新 bar 涨跌幅 ≥ ABNORMAL_MOVE_PCT → 熔断。
+        回测时 5m 数据可能不可用，fallback=False（不阻断）。
         """
         try:
-            df, _ = self.dp.get_analyzed_dataframe(pair, "5m")
-            if df.empty:
+            dataframe, _ = self.dp.get_analyzed_dataframe(pair, "5m")
+            if dataframe is None or dataframe.empty:
                 return False
-            recent = df.tail(3)
+            recent = dataframe.tail(3)
             if recent.empty:
                 return False
             for _, bar in recent.iterrows():
