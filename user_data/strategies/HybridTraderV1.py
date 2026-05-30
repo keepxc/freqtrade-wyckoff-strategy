@@ -40,8 +40,8 @@ class HybridTraderV1(IStrategy):
     use_custom_stoploss = True
     stoploss = -0.08           # 硬止损兜底（Supertrend 失效时）
     trailing_stop = True
-    trailing_stop_positive = 0.02   # 盈利 2% 后启动追踪
-    trailing_stop_positive_offset = 0.01  # 回撤 1% 触发
+    trailing_stop_positive = 0.01        # 盈利 1% 后启动追踪止损
+    trailing_stop_positive_offset = 0.02  # 从最高点回撤 2% 触发
     trailing_only_offset_is_reached = True
 
     # ROI：主要靠 custom_exit，这里设宽松兜底
