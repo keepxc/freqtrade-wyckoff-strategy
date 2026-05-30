@@ -29,7 +29,7 @@ class HybridTraderV1(IStrategy):
     """
 
     INTERFACE_VERSION = 3
-    timeframe = "30m"
+    timeframe = "15m"
 
     # ── 基础设置 ──────────────────────────────────────────
     can_short = False          # 阶段1 只做多
@@ -53,12 +53,12 @@ class HybridTraderV1(IStrategy):
     rsi_high   = IntParameter(55, 75,  default=65, space="buy",  optimize=False)
 
     # CVD 参数
-    CVD_WINDOW         = 40    # 30m × 40 = 20 小时滚动窗口
-    CVD_SLOPE_N        = 6     # CVD 斜率判断用 6 根（3h）
+    CVD_WINDOW         = 80    # 15m × 80 = 20 小时滚动窗口
+    CVD_SLOPE_N        = 12    # CVD 斜率判断用 12 根（3h）
     CVD_DIVERGE_THRESH = 0.95  # 价格创高但 CVD < 历史峰值 95% → 顶背离
 
     # OI 参数
-    OI_WINDOW    = 8           # OI 变化率窗口（8 × 30m = 4h）
+    OI_WINDOW    = 16          # OI 变化率窗口（16 × 15m = 4h）
     OI_RISE_MIN  = 0.005       # OI 4h 增幅 > 0.5% 才算有效多头建仓
     FUNDING_MAX  = 0.0005      # 资金费率 > 0.05% 视为多头过热，不入场
 
@@ -188,7 +188,7 @@ class HybridTraderV1(IStrategy):
 
     # ── CVD 数据获取与计算 ────────────────────────────────
 
-    def _fetch_binance_taker(self, symbol: str, interval: str = "30m", limit: int = 600) -> pd.DataFrame:
+    def _fetch_binance_taker(self, symbol: str, interval: str = "15m", limit: int = 600) -> pd.DataFrame:
         """
         调用 Binance USD-M Futures /fapi/v1/klines 获取含 taker 分量的 K 线。
         返回带 [timestamp, taker_buy_vol, volume, volume_delta] 的 DataFrame。
@@ -309,7 +309,7 @@ class HybridTraderV1(IStrategy):
         返回带 [date, oi, oi_change_pct, oi_rising] 的 DataFrame。
         """
         url = "https://fapi.binance.com/futures/data/openInterestHist"
-        params = {"symbol": symbol, "period": "30m", "limit": limit}
+        params = {"symbol": symbol, "period": "15m", "limit": limit}
         try:
             resp = requests.get(url, params=params, timeout=10)
             resp.raise_for_status()
