@@ -38,7 +38,7 @@ class HybridTraderV1(IStrategy):
     # ── 基础设置 ──────────────────────────────────────────
     can_short = True           # 多空双向
     use_custom_stoploss = True
-    stoploss = -0.05           # 收紧硬止损 -8%→-5%，减少单笔亏损
+    stoploss = -0.08           # 硬止损兜底
     trailing_stop = False
 
     # ROI：主要靠 custom_exit，这里设宽松兜底
@@ -487,6 +487,9 @@ class HybridTraderV1(IStrategy):
         rs    = gain / loss.replace(0, np.nan)
         dataframe["rsi"] = 100 - (100 / (1 + rs))
 
+        # SMA200 — 大趋势过滤（15m×200=50h≈2天），只在大趋势方向上入场
+        dataframe["sma200"] = dataframe["close"].rolling(200).mean()
+
         # ATR(14) — 止损计算辅助
         tr = pd.concat([
             dataframe["high"] - dataframe["low"],
@@ -835,7 +838,8 @@ class HybridTraderV1(IStrategy):
 
         conditions_long = [
             dataframe["st_dir"] == 1,                    # Supertrend 上升趋势
-            dataframe["hma_fast"] > dataframe["hma_slow"], # HMA 趋势对齐（去HMA: WR 63%→77%, DD 4%→9%）
+            dataframe["hma_fast"] > dataframe["hma_slow"], # HMA 趋势对齐
+            dataframe["close"] > dataframe["sma200"],    # 大趋势向上
             dataframe["rsi"] >= 40,
             dataframe["rsi"] <= 68,
             cvd_ok,                                       # CVD 买盘确认
@@ -858,6 +862,7 @@ class HybridTraderV1(IStrategy):
         conditions_short = [
             dataframe["st_dir"] == -1,                   # Supertrend 下降趋势
             dataframe["hma_fast"] < dataframe["hma_slow"],# HMA 空头对齐
+            dataframe["close"] < dataframe["sma200"],    # 大趋势向下
             dataframe["rsi"] >= 32,
             dataframe["rsi"] <= 60,
             cvd_ok_short,                                 # CVD 下降 或 顶背离
