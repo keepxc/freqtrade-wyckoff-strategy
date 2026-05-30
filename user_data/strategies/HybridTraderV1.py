@@ -51,7 +51,7 @@ class HybridTraderV1(IStrategy):
     # ── 可调参数 ──────────────────────────────────────────
     hma_fast   = IntParameter(40, 80,  default=55, space="buy",  optimize=False)
     hma_slow   = IntParameter(55, 100, default=63, space="buy",  optimize=False)
-    st_period  = IntParameter(7,  20,  default=8,  space="buy",  optimize=False)  # test: 10→8
+    st_period  = IntParameter(7,  20,  default=10, space="buy",  optimize=False) # 回退到10
     st_mult    = DecimalParameter(2.0, 4.0, default=3.0, decimals=1, space="buy", optimize=False)
     rsi_low    = IntParameter(35, 55,  default=45, space="buy",  optimize=False)
     rsi_high   = IntParameter(55, 75,  default=65, space="buy",  optimize=False)
@@ -835,7 +835,6 @@ class HybridTraderV1(IStrategy):
 
         conditions_long = [
             dataframe["st_dir"] == 1,                    # Supertrend 上升趋势
-            dataframe["hma_fast"] > dataframe["hma_slow"], # HMA 趋势对齐
             dataframe["rsi"] >= 40,
             dataframe["rsi"] <= 68,
             cvd_ok,                                       # CVD 买盘确认
