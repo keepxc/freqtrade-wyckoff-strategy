@@ -1,9 +1,10 @@
 # HybridTraderV1 — 独立策略，与 WyckoffV8 无关联
-# 基于：EMA144/169 替换为 HMA55/63 + Supertrend(10,3)
+# 基于：HMA55/63 + Supertrend(10,3)，15m K 线
 # 阶段1：HMA + Supertrend + RSI 框架
-# 阶段2：CVD（Binance taker volume，20h 窗口）
+# 阶段2：CVD（Binance taker volume，10h 窗口）
 # 阶段3：OI 建仓确认 + Funding Rate 过热过滤
-# 阶段4：置信度评分（≥80入场）+ Partial Close（T1 平50%）
+# 阶段4：置信度评分（≥80入场）+ Partial Close（T1 平55%）
+# 阶段5：MSE top10 市场结构过滤
 
 import time
 import threading
@@ -21,7 +22,7 @@ from pathlib import Path
 
 class HybridTraderV1(IStrategy):
     """
-    Hybrid Trader V1 — 30m 趋势跟踪系统
+    Hybrid Trader V1 — 15m 趋势跟踪系统
     趋势层：Supertrend(10,3) — 方向 + 动态止损参考
     执行层：HMA55 / HMA63 金叉/死叉
     动量过滤：RSI(14)
@@ -221,7 +222,7 @@ class HybridTraderV1(IStrategy):
     def _get_cvd_df(self, symbol: str) -> pd.DataFrame:
         """
         带缓存的 CVD 数据获取。
-        缓存 TTL = 10 分钟（30m 策略不需要更频繁刷新）。
+        缓存 TTL = 10 分钟（15m 策略不需要更频繁刷新）。
         回测时 Binance API 不可用，返回空 DataFrame（CVD 条件会被跳过）。
         """
         ttl = 600
@@ -243,12 +244,12 @@ class HybridTraderV1(IStrategy):
         # CVD 斜率（过去 CVD_SLOPE_N 根）
         raw["cvd_rising"]   = raw["cvd"] > raw["cvd"].shift(self.CVD_SLOPE_N)
 
-        # 顶背离：价格在 20h 高点附近但 CVD 未创新高
-        raw["price_20h_high"] = raw.index.map(
+        # 顶背离：价格在 10h 高点附近但 CVD 未创新高
+        raw["price_10h_high"] = raw.index.map(
             lambda _: np.nan  # 占位，merge 后用 OHLCV 计算
         )
-        # CVD 20h 峰值
-        raw["cvd_20h_peak"] = raw["cvd"].rolling(n).max()
+        # CVD 10h 峰值
+        raw["cvd_10h_peak"] = raw["cvd"].rolling(n).max()
 
         with self._cvd_lock:
             self._cvd_cache[symbol] = {"ts": time.time(), "df": raw}
@@ -266,8 +267,8 @@ class HybridTraderV1(IStrategy):
             dataframe["top_diverge"] = False
             return dataframe
 
-        cvd_reset = cvd_df[["cvd", "cvd_rising", "cvd_20h_peak"]].reset_index()
-        cvd_reset.columns = ["date_cvd", "cvd", "cvd_rising", "cvd_20h_peak"]
+        cvd_reset = cvd_df[["cvd", "cvd_rising", "cvd_10h_peak"]].reset_index()
+        cvd_reset.columns = ["date_cvd", "cvd", "cvd_rising", "cvd_10h_peak"]
         # 统一去除时区（merge_asof 要求两侧类型完全一致）
         cvd_reset["date_cvd"] = pd.to_datetime(cvd_reset["date_cvd"]).dt.tz_localize(None)
 
@@ -288,11 +289,11 @@ class HybridTraderV1(IStrategy):
         )
         merged = merged.set_index(dataframe.index)
 
-        # 顶背离：收盘在 20h 高点 99.9% 以上，但 CVD < 峰值 95%
-        merged["price_20h_high"] = merged["high"].rolling(40).max()
+        # 顶背离：收盘在 10h 高点 99.9% 以上，但 CVD < 峰值 95%
+        merged["price_10h_high"] = merged["high"].rolling(40).max()
         merged["top_diverge"] = (
-            (merged["close"] >= merged["price_20h_high"] * 0.999) &
-            (merged["cvd"]   <  merged["cvd_20h_peak"]  * HybridTraderV1.CVD_DIVERGE_THRESH)
+            (merged["close"] >= merged["price_10h_high"] * 0.999) &
+            (merged["cvd"]   <  merged["cvd_10h_peak"]  * HybridTraderV1.CVD_DIVERGE_THRESH)
         )
 
         for col in ["cvd", "cvd_rising", "top_diverge"]:
@@ -304,7 +305,7 @@ class HybridTraderV1(IStrategy):
 
     def _fetch_oi(self, symbol: str, limit: int = 100) -> pd.DataFrame:
         """
-        Binance /futures/data/openInterestHist — 历史 OI，30m 周期。
+        Binance /futures/data/openInterestHist — 历史 OI，15m 周期。
         返回带 [date, oi, oi_change_pct, oi_rising] 的 DataFrame。
         """
         url = "https://fapi.binance.com/futures/data/openInterestHist"
@@ -763,46 +764,19 @@ class HybridTraderV1(IStrategy):
         except Exception:
             return False  # fallback: don't block when data unavailable
 
-    # ── PnL 记录：平仓时自动调用 ──────────────────────────
-
-    def custom_exit_price(
-        self,
-        pair: str,
-        trade,
-        current_time,
-        proposed_rate: float,
-        current_profit: float,
-        exit_tag: str | None,
-        **kwargs,
-    ) -> float:
-        return proposed_rate
-
-    def custom_stake_amount(
-        self,
-        pair: str,
-        current_time,
-        current_rate: float,
-        proposed_stake: float,
-        min_stake: float | None,
-        max_stake: float,
-        leverage: float,
-        entry_tag: str | None,
-        side: str,
-        **kwargs,
-    ) -> float:
-        return proposed_stake
-
     # ── 入场 ─────────────────────────────────────────────
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
         做多条件（全部满足）：
-        1. Supertrend 方向 = +1（上升趋势，持续多根）
-        2. HMA55 > HMA63，且 HMA55 在过去 5 根内曾发生金叉（确认刚突破）
-        4. RSI 在 40–68 范围内（避免超买追高，避免过度弱势）
+        1. Supertrend 方向 = +1（上升趋势）
+        2. HMA55 > HMA63（趋势对齐）
+        3. RSI 在 40–68 范围内（避免超买追高，避免过度弱势）
+        4. CVD 买盘确认 + OI 建仓 + Funding 正常
+        5. 置信度 ≥80 + MSE top10 过滤
         """
 
-        # HMA 斜率向上（快线本身在上涨，不只是快>慢）
+        # HMA 斜率向上（快线本身在上涨，用于置信度评分）
         dataframe["hma_fast_rising"] = (
             dataframe["hma_fast"] > dataframe["hma_fast"].shift(2)
         )
@@ -825,16 +799,14 @@ class HybridTraderV1(IStrategy):
 
         conditions_long = [
             dataframe["st_dir"] == 1,                    # Supertrend 上升趋势
-            dataframe["st_dir"].shift(2) == 1,            # 持续至少 3 根
             dataframe["hma_fast"] > dataframe["hma_slow"], # HMA 趋势对齐
-            dataframe["hma_fast_rising"],                 # HMA 快线斜率向上
             dataframe["rsi"] >= 40,
             dataframe["rsi"] <= 68,
-            cvd_ok,                                       # CVD 买盘确认（阶段2）
-            oi_ok,                                        # OI 上升=真实多头建仓（阶段3）
-            funding_ok,                                   # 资金费率未过热（阶段3）
-            dataframe["confidence"] >= self.CONF_MIN,     # 置信度门控 ≥80（阶段4）
-            mse_ok,                                       # MSE watchlist：A级结构（阶段5）
+            cvd_ok,                                       # CVD 买盘确认
+            oi_ok,                                        # OI 建仓确认
+            funding_ok,                                   # 资金费率未过热
+            dataframe["confidence"] >= self.CONF_MIN,     # 置信度门控 ≥80
+            mse_ok,                                       # MSE top10 结构过滤
             dataframe["volume"] > 0,
         ]
         dataframe.loc[
