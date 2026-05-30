@@ -78,7 +78,7 @@ class HybridTraderV1(IStrategy):
 
     # Partial Close 参数
     PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%
-    PARTIAL_T1_ATR_MUL = 2.0    # T1 = 入场价 + ATR14 × 2.0
+    PARTIAL_T1_ATR_MUL = 3.0    # T1 = 入场价 + ATR14 × 3.0（2→3，给利润空间）
 
     # ── Risk Gates（借鉴 TradeCat fail-closed 设计）──────
     MAX_OPEN_TRADES     = 5       # 最大同时持仓数
@@ -839,7 +839,6 @@ class HybridTraderV1(IStrategy):
         conditions_long = [
             dataframe["st_dir"] == 1,                    # Supertrend 上升趋势
             dataframe["hma_fast"] > dataframe["hma_slow"], # HMA 趋势对齐
-            dataframe["close"] > dataframe["sma200"],    # 大趋势向上
             dataframe["rsi"] >= 40,
             dataframe["rsi"] <= 68,
             cvd_ok,                                       # CVD 买盘确认
@@ -862,7 +861,6 @@ class HybridTraderV1(IStrategy):
         conditions_short = [
             dataframe["st_dir"] == -1,                   # Supertrend 下降趋势
             dataframe["hma_fast"] < dataframe["hma_slow"],# HMA 空头对齐
-            dataframe["close"] < dataframe["sma200"],    # 大趋势向下
             dataframe["rsi"] >= 32,
             dataframe["rsi"] <= 60,
             cvd_ok_short,                                 # CVD 下降 或 顶背离
