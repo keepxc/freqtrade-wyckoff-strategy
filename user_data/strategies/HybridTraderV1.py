@@ -1,6 +1,6 @@
 # HybridTraderV1 — 独立策略，与 WyckoffV8 无关联
 # 基于：EMA144/169 替换为 HMA55/63 + Supertrend(10,3)
-# 阶段1：HMA + Supertrend + MACD + RSI 框架
+# 阶段1：HMA + Supertrend + RSI 框架
 # 阶段2：CVD（Binance taker volume，20h 窗口）
 # 阶段3：OI 建仓确认 + Funding Rate 过热过滤
 # 阶段4：置信度评分（≥80入场）+ Partial Close（T1 平50%）
@@ -24,7 +24,7 @@ class HybridTraderV1(IStrategy):
     Hybrid Trader V1 — 30m 趋势跟踪系统
     趋势层：Supertrend(10,3) — 方向 + 动态止损参考
     执行层：HMA55 / HMA63 金叉/死叉
-    动量过滤：MACD(12,26,9) + RSI(14)
+    动量过滤：RSI(14)
     止损：Supertrend 线（ATR 自适应）
     """
 
@@ -67,10 +67,9 @@ class HybridTraderV1(IStrategy):
     CONF_MIN          = 80
     CONF_W_SUPERTREND = 25   # Supertrend 持续方向
     CONF_W_HMA        = 20   # HMA 趋势对齐 + 斜率
-    CONF_W_MACD       = 15   # MACD 动量翻正
     CONF_W_RSI        = 10   # RSI 位置合理
-    CONF_W_CVD        = 15   # CVD 买盘净流入
-    CONF_W_OI         = 10   # OI 真实建仓
+    CONF_W_CVD        = 25   # CVD 买盘净流入（实时资金流）
+    CONF_W_OI         = 15   # OI 真实建仓（实时持仓变化）
     CONF_W_FUNDING    = 5    # Funding Rate 未过热
 
     # Partial Close 参数
@@ -454,12 +453,6 @@ class HybridTraderV1(IStrategy):
             dataframe, self.st_period.value, self.st_mult.value
         )
 
-        # MACD(12,26,9)
-        ema12 = dataframe["close"].ewm(span=12, adjust=False).mean()
-        ema26 = dataframe["close"].ewm(span=26, adjust=False).mean()
-        dataframe["macd"]        = ema12 - ema26
-        dataframe["macd_signal"] = dataframe["macd"].ewm(span=9, adjust=False).mean()
-        dataframe["macd_hist"]   = dataframe["macd"] - dataframe["macd_signal"]
 
         # RSI(14)
         delta = dataframe["close"].diff()
@@ -516,14 +509,6 @@ class HybridTraderV1(IStrategy):
             np.where(dataframe["hma_fast"] > dataframe["hma_slow"],
                      self.CONF_W_HMA * 0.5, 0)
         )
-        # MACD：刚翻正得满分，hist>0 但非刚翻得一半
-        macd_just_turned = (
-            (dataframe["macd_hist"] > 0) & (dataframe["macd_hist"].shift(1) <= 0)
-        )
-        score += np.where(macd_just_turned.rolling(4).max().fillna(0).astype(bool),
-                          self.CONF_W_MACD,
-                          np.where(dataframe["macd_hist"] > 0,
-                                   self.CONF_W_MACD * 0.5, 0))
         # RSI：40-60 最优区间满分，40-68 得一半
         score += np.where((dataframe["rsi"] >= 40) & (dataframe["rsi"] <= 60),
                           self.CONF_W_RSI,
@@ -814,17 +799,8 @@ class HybridTraderV1(IStrategy):
         做多条件（全部满足）：
         1. Supertrend 方向 = +1（上升趋势，持续多根）
         2. HMA55 > HMA63，且 HMA55 在过去 5 根内曾发生金叉（确认刚突破）
-        3. MACD hist 由负转正（动量刚开始向上，不追高）
         4. RSI 在 40–68 范围内（避免超买追高，避免过度弱势）
         """
-        # MACD hist 由负转正（动量时机触发器）：过去 4 根内刚翻正
-        dataframe["macd_turning_up"] = (
-            (dataframe["macd_hist"] > 0) &
-            (dataframe["macd_hist"].shift(1) <= 0)
-        )
-        dataframe["macd_recently_turned"] = (
-            dataframe["macd_turning_up"].rolling(4).max().fillna(0).astype(bool)
-        )
 
         # HMA 斜率向上（快线本身在上涨，不只是快>慢）
         dataframe["hma_fast_rising"] = (
@@ -852,7 +828,6 @@ class HybridTraderV1(IStrategy):
             dataframe["st_dir"].shift(2) == 1,            # 持续至少 3 根
             dataframe["hma_fast"] > dataframe["hma_slow"], # HMA 趋势对齐
             dataframe["hma_fast_rising"],                 # HMA 快线斜率向上
-            dataframe["macd_recently_turned"],            # MACD 动量时机触发
             dataframe["rsi"] >= 40,
             dataframe["rsi"] <= 68,
             cvd_ok,                                       # CVD 买盘确认（阶段2）
