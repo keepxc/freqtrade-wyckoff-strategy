@@ -95,6 +95,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("mse")
 
+# ── 历史回放模式 ─────────────────────────────────────────
+# 设置 MSE_SIMULATE_TS=unix_timestamp 后，所有 API 调用使用 endTime 获取历史数据
+SIMULATE_TS: int | None = None
+_sim_ts = os.environ.get("MSE_SIMULATE_TS", "")
+if _sim_ts:
+    SIMULATE_TS = int(_sim_ts)
+    log.info(f"Simulate mode: endTime={SIMULATE_TS} ({time.strftime('%Y-%m-%d %H:%M', time.localtime(SIMULATE_TS))})")
+
 # ---------------------------------------------------------------------------
 # DB schema
 # ---------------------------------------------------------------------------
@@ -192,6 +200,10 @@ _session.proxies.update(PROXY)
 
 
 def _get(url: str, params: dict = None, timeout: int = 10):
+    if params is None:
+        params = {}
+    if SIMULATE_TS and "endTime" not in params:
+        params["endTime"] = SIMULATE_TS * 1000  # Binance uses ms
     try:
         r = _session.get(url, params=params, timeout=timeout)
         r.raise_for_status()
@@ -208,6 +220,17 @@ def fetch_universe() -> list[dict]:
     """Top 50 USDT perp symbols passing 24h volume filter."""
     tickers = _get(f"{BINANCE}/fapi/v1/ticker/24hr")
     if not tickers:
+        if SIMULATE_TS:
+            # 24hr ticker doesn't support endTime; use static top-30 universe for replay
+            STATIC_UNIVERSE = [
+                "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT","DOGEUSDT",
+                "AVAXUSDT","LINKUSDT","DOTUSDT","MATICUSDT","UNIUSDT","ATOMUSDT",
+                "LTCUSDT","ETCUSDT","FILUSDT","APTUSDT","ARBUSDT","OPUSDT",
+                "NEARUSDT","INJUSDT","SUIUSDT","SEIUSDT","TIAUSDT","WLDUSDT",
+                "PEPEUSDT","WIFUSDT","BONKUSDT","RNDRUSDT","FETUSDT",
+            ]
+            log.info(f"Simulate: using static universe ({len(STATIC_UNIVERSE)} coins)")
+            return [{"symbol": s, "vol_24h_usdt": 0} for s in STATIC_UNIVERSE]
         return []
     candidates = []
     for t in tickers:
@@ -224,6 +247,8 @@ def fetch_universe() -> list[dict]:
 
 def fetch_oi_usdt(symbol: str) -> float | None:
     """Current OI converted to USDT."""
+    if SIMULATE_TS:
+        return 100_000_000  # dummy value, skip OI check in replay
     oi_data = _get(f"{BINANCE}/fapi/v1/openInterest", {"symbol": symbol})
     px_data = _get(f"{BINANCE}/fapi/v1/premiumIndex", {"symbol": symbol})
     if not oi_data or not px_data:
