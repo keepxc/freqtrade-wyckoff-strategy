@@ -39,10 +39,7 @@ class HybridTraderV1(IStrategy):
     can_short = False          # 阶段1 只做多
     use_custom_stoploss = True
     stoploss = -0.08           # 硬止损兜底（Supertrend 失效时）
-    trailing_stop = True
-    trailing_stop_positive = 0.01        # 盈利 1% 后启动追踪止损
-    trailing_stop_positive_offset = 0.02  # 从最高点回撤 2% 触发
-    trailing_only_offset_is_reached = True
+    trailing_stop = False
 
     # ROI：主要靠 custom_exit，这里设宽松兜底
     minimal_roi = {"0": 0.30, "1440": 0.15, "4320": 0.05}
@@ -87,7 +84,7 @@ class HybridTraderV1(IStrategy):
     MAX_OPEN_TRADES     = 5       # 最大同时持仓数
     MAX_DAILY_LOSS_USDT = 50.0    # 日亏损上限（USDT），触发后当日不再开新仓
     ABNORMAL_MOVE_PCT   = 0.05    # P1: 5min 价格跳变 ≥5% → 熔断，禁止入场
-    MAX_HOLDING_HOURS   = 48      # P2: 持仓超过 48h 强制平仓
+    MAX_HOLDING_HOURS   = 12      # P2: 持仓超过 12h 强制平仓（48h 测试=7笔全亏）
     SYMBOL_BLOCK_LOSS   = -20.0   # P1: 币种累计亏损 ≤ -20 USDT → 自动加入黑名单
 
     # 日亏损追踪（class-level，按自然日重置，持久化到 JSON）
