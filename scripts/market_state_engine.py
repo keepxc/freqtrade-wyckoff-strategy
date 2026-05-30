@@ -767,7 +767,7 @@ def update_top10(conn: sqlite3.Connection, ts_now: int, results: list[dict]) -> 
 # One scan cycle
 # ---------------------------------------------------------------------------
 def run_scan(conn: sqlite3.Connection) -> None:
-    ts_now = int(time.time())
+    ts_now = SIMULATE_TS if SIMULATE_TS else int(time.time())
     log.info("=" * 60)
     log.info("Scan start")
 
