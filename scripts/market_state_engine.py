@@ -67,7 +67,9 @@ MIN_OI_USDT     = 50_000_000
 
 WATCHLIST_ENTRY_N = 3   # consecutive WATCH periods to enter
 WATCHLIST_EXIT_N  = 2   # consecutive non-WATCH periods to exit
-WATCHLIST_MIN_GAP = 600  # min seconds between valid consecutive scans (10 min)
+# Gap must be within ±30% of SCAN_INTERVAL_SEC for genuine consecutive scans
+WATCHLIST_GAP_MIN = int(SCAN_INTERVAL_SEC * 0.7)   # ~630s
+WATCHLIST_GAP_MAX = int(SCAN_INTERVAL_SEC * 1.3)   # ~1170s
 
 BINANCE = "https://fapi.binance.com"
 
@@ -642,7 +644,7 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
 
     # --- Entry check ---
     # Accept any grade >= WATCH_MIN: WATCH, B, A
-    # Also validate scan timestamps are genuinely spaced (not back-to-back cache hits)
+    # Validate scan timestamps are from the regular 15-min cycle (±30% tolerance)
     WATCH_GRADES = {"WATCH", "B", "A"}
     a_grade_syms = {r["symbol"] for r in results if r["grade"] in WATCH_GRADES}
     for sym in a_grade_syms:
@@ -651,22 +653,31 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
             (sym, WATCHLIST_ENTRY_N),
         ).fetchall()
         if len(rows) >= WATCHLIST_ENTRY_N and all(r[0] in WATCH_GRADES for r in rows):
-            # Verify genuine time spacing: each consecutive scan must be ≥ WATCHLIST_MIN_GAP apart
+            # Verify genuine scan cycle gaps (not back-to-back cache hits)
             timestamps = [r[1] for r in rows]
             gaps_ok = True
             for i in range(len(timestamps) - 1):
-                if timestamps[i] - timestamps[i + 1] < WATCHLIST_MIN_GAP:
+                gap = timestamps[i] - timestamps[i + 1]
+                if gap < WATCHLIST_GAP_MIN or gap > WATCHLIST_GAP_MAX:
                     gaps_ok = False
                     break
             if not gaps_ok:
-                continue  # too close together, not genuine consecutive scans
+                gaps = [timestamps[i] - timestamps[i+1] for i in range(len(timestamps)-1)]
+                log.debug(
+                    f"WATCHLIST SKIP  : {sym:15s} gaps={gaps}s "
+                    f"(need {WATCHLIST_GAP_MIN}-{WATCHLIST_GAP_MAX}s)"
+                )
+                continue
             r = by_sym[sym]
             cur.execute(
                 """INSERT OR REPLACE INTO watchlist(symbol,added_ts,grade,score,updated_ts)
                    VALUES (?,?,?,?,?)""",
                 (sym, ts_now, r["grade"], r["score"], ts_now),
             )
-            log.info(f"WATCHLIST ADD   : {sym:15s} grade={r['grade']} score={r['score']:.0f}")
+            log.info(
+                f"WATCHLIST ADD   : {sym:15s} grade={r['grade']} score={r['score']:.0f} "
+                f"@ {time.strftime('%H:%M', time.localtime(ts_now))}"
+            )
 
     # --- Exit check ---
     KEEP_GRADES = {"WATCH", "B", "A", "SQUEEZE"}
