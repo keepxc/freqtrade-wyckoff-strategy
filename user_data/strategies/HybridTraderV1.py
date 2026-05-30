@@ -77,7 +77,7 @@ class HybridTraderV1(IStrategy):
     CONF_W_FUNDING    = 5    # Funding Rate 未过热
 
     # Partial Close 参数
-    PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%（t1=100% WR，剩余45%全被止损吃掉）
+    PARTIAL_CLOSE_PCT  = 1.0   # T1 100% 全平（15% 剩仓被止损吃光）
     PARTIAL_T1_ATR_MUL = 2.0    # T1 = 入场价 + ATR14 × 2.0
 
     # ── Risk Gates（借鉴 TradeCat fail-closed 设计）──────
