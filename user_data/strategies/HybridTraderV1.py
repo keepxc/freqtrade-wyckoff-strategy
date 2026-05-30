@@ -893,15 +893,15 @@ class HybridTraderV1(IStrategy):
         if self._is_kill_switch_active():
             return "kill_switch"
 
-        if not trade.custom_data:
-            trade.custom_data = {}
+        if not trade.get_custom_data():
+            trade.set_custom_data({})
 
         # 已触发过直接跳过
-        if trade.custom_data.get("t1_hit"):
+        if trade.get_custom_data().get("t1_hit"):
             return None
 
         # 首次调用时在入场 bar 固化 T1 目标价（只算一次，不随行情漂移）
-        if "t1_target" not in trade.custom_data:
+        if "t1_target" not in trade.get_custom_data():
             dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             if dataframe.empty:
                 return None
@@ -910,11 +910,13 @@ class HybridTraderV1(IStrategy):
             if not open_bar_mask.any():
                 return None
             open_bar = dataframe.loc[open_bar_mask].iloc[-1]
-            trade.custom_data["t1_target"] = float(
+            cd = trade.get_custom_data()
+            cd["t1_target"] = float(
                 open_bar["close"] + open_bar["t1_atr"] * self.PARTIAL_T1_ATR_MUL
             )
+            trade.set_custom_data(cd)
 
-        if current_rate >= trade.custom_data["t1_target"]:
+        if current_rate >= trade.get_custom_data()["t1_target"]:
             return "t1_partial_close"
 
         # P2: 时间止损 — 持仓超过 MAX_HOLDING_HOURS 强制平仓
@@ -944,10 +946,10 @@ class HybridTraderV1(IStrategy):
         返回负数 stake = 减少仓位；None = 不操作。
         """
         # 只在 T1 触发且尚未执行减仓时操作
-        if not trade.custom_data:
-            trade.custom_data = {}
+        if not trade.get_custom_data():
+            trade.set_custom_data({})
 
-        if trade.custom_data.get("t1_hit"):
+        if trade.get_custom_data().get("t1_hit"):
             return None
 
         # 检查是否已触发 T1 部分平仓
@@ -959,7 +961,9 @@ class HybridTraderV1(IStrategy):
             return None
 
         # 标记已触发，避免重复
-        trade.custom_data["t1_hit"] = True
+        cd = trade.get_custom_data()
+        cd["t1_hit"] = True
+        trade.set_custom_data(cd)
 
         # 减仓金额 = 当前仓位价值 × 55%
         reduce_stake = trade.stake_amount * self.PARTIAL_CLOSE_PCT
