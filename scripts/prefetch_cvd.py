@@ -71,6 +71,8 @@ def fetch_and_save(symbol: str, start_ms: int, end_ms: int):
     df = pd.DataFrame(all_rows)
     df = df.sort_values("timestamp")
     df["cvd"] = df["volume_delta"].rolling(CVD_WINDOW, min_periods=max(10, CVD_WINDOW//4)).sum()
+    df["cvd_rising"] = df["cvd"] > df["cvd"].shift(6)      # CVD_SLOPE_N=6
+    df["cvd_10h_peak"] = df["cvd"].rolling(CVD_WINDOW).max()  # 40bar peak
 
     df = df.set_index("timestamp")
     df.to_feather(out_path)

@@ -226,7 +226,7 @@ class HybridTraderV1(IStrategy):
     def _load_cvd_local(cls, symbol: str) -> pd.DataFrame | None:
         """
         从本地预取的 CVD feather 文件加载数据（用于回测）。
-        文件路径: user_data/data/binance/futures/{SYM}-15m-cvd.feather
+        文件路径: user_data/data/cvd/{SYM}-15m-cvd.feather
         不存在时返回 None，调用方回退到 API。
         """
         cvd_file = cls._DB_PATH.parent / "data" / "cvd" / f"{symbol}-15m-cvd.feather"
@@ -234,14 +234,12 @@ class HybridTraderV1(IStrategy):
             if not cvd_file.exists():
                 return None
             df = pd.read_feather(str(cvd_file))
-            if df.empty:
+            if df.empty or "cvd" not in df.columns:
                 return None
-            # feather 索引是 timestamp (ms int), 转为 datetime
-            df["date"] = pd.to_datetime(df["timestamp"] if "timestamp" in df.columns else df.index, unit="ms", utc=True)
+            # feather 索引是 timestamp (ms int), 转为 datetime 索引
+            ts_col = df.index if df.index.name == "timestamp" or df.index.dtype == "int64" else df["timestamp"]
+            df["date"] = pd.to_datetime(ts_col, unit="ms", utc=True)
             df = df.set_index("date")
-            # 确保有 cvd 列
-            if "cvd" not in df.columns:
-                return None
             return df
         except Exception:
             return None
