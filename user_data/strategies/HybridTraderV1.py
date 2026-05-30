@@ -68,14 +68,13 @@ class HybridTraderV1(IStrategy):
 
     # 置信度评分权重（满分 100）
     # 每个条件满足时得对应分数，≥ CONF_MIN 才允许入场
-    CONF_MIN          = 60   # 纯资金流无趋势分，降门槛
-    CONF_W_SUPERTREND = 0    # 去趋势
-    CONF_W_HMA        = 0    # 去趋势
-    CONF_W_RSI        = 10   # RSI 位置合理
-    CONF_W_CVD        = 35   # CVD 买盘净流入（核心）
-    CONF_W_OI         = 30   # OI 真实建仓（核心）
-    CONF_W_FUNDING    = 5    # Funding Rate 未过热
-    # 加上 Price Acceptance 隐含在 CVD 评分中，总分 ~80
+    CONF_MIN          = 80
+    CONF_W_SUPERTREND = 25
+    CONF_W_HMA        = 20
+    CONF_W_RSI        = 10
+    CONF_W_CVD        = 25
+    CONF_W_OI         = 15
+    CONF_W_FUNDING    = 5
 
     # Partial Close 参数
     PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%
@@ -838,13 +837,14 @@ class HybridTraderV1(IStrategy):
         mse_ok = dataframe["mse_ok"].fillna(True).astype(bool)
 
         conditions_long = [
-            # 纯资金流：去 Supertrend/HMA，只看实时信号
-            cvd_ok,                                       # CVD 买盘净流入
-            oi_ok,                                        # OI 真实建仓
-            funding_ok,                                   # 资金费率正常
-            dataframe["rsi"] >= 40,                       # 不过热
-            dataframe["rsi"] <= 75,                       # 放宽上限
-            dataframe["confidence"] >= 60,                # 降低门槛（趋势分没了）
+            dataframe["st_dir"] == 1,
+            dataframe["hma_fast"] > dataframe["hma_slow"],
+            dataframe["rsi"] >= 40,
+            dataframe["rsi"] <= 68,
+            cvd_ok,
+            oi_ok,
+            funding_ok,
+            dataframe["confidence"] >= self.CONF_MIN,
             mse_ok,
             dataframe["volume"] > 0,
         ]
@@ -859,12 +859,14 @@ class HybridTraderV1(IStrategy):
             (dataframe["top_diverge"].fillna(False).astype(bool))
         )
         conditions_short = [
-            cvd_ok_short,                                 # CVD 下降/顶背离
+            dataframe["st_dir"] == -1,
+            dataframe["hma_fast"] < dataframe["hma_slow"],
+            dataframe["rsi"] >= 32,
+            dataframe["rsi"] <= 60,
+            cvd_ok_short,
             oi_ok,
             funding_ok,
-            dataframe["rsi"] >= 25,                       # 不过低
-            dataframe["rsi"] <= 60,
-            dataframe["confidence"] >= 60,
+            dataframe["confidence"] >= self.CONF_MIN,
             mse_ok,
             dataframe["volume"] > 0,
         ]
