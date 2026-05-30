@@ -498,21 +498,25 @@ def grade_coin(
     oi_change = oi_metrics["oi_change_4h"]
     oi_accel  = oi_metrics["oi_acceleration"]
     score_oi = 0.0
-    # OI change absolute
-    if oi_change > OI_EXPAND_MIN:
-        score_oi += 8
-    elif oi_change > OI_EXPAND_MIN * 0.5:
-        score_oi += 4
-    # OI acceleration
-    if oi_accel > OI_ACCEL_MIN:
-        score_oi += 10
-    elif oi_accel > 0:
-        score_oi += 5
-    # consecutive OI up periods
-    if oi_metrics["oi_consecutive_up"]:
-        score_oi += 7
-    elif oi_change > 0:
-        score_oi += 3
+    # 历史回放模式下 OI 接口可能不可用 → 满分放行
+    if SIMULATE_TS and oi_change == 0.0 and oi_accel == 0.0:
+        score_oi = 25
+    else:
+        # OI change absolute
+        if oi_change > OI_EXPAND_MIN:
+            score_oi += 8
+        elif oi_change > OI_EXPAND_MIN * 0.5:
+            score_oi += 4
+        # OI acceleration
+        if oi_accel > OI_ACCEL_MIN:
+            score_oi += 10
+        elif oi_accel > 0:
+            score_oi += 5
+        # consecutive OI up periods
+        if oi_metrics["oi_consecutive_up"]:
+            score_oi += 7
+        elif oi_change > 0:
+            score_oi += 3
 
     # ── Sub-score 3: CVD Persistence (0-20) ──
     score_cvd = 0.0
@@ -535,7 +539,10 @@ def grade_coin(
     # ── Sub-score 5: Funding Health (0-10, can go negative) ──
     score_funding = 0.0
     abs_fr = abs(funding)
-    if abs_fr <= FUNDING_MAX:
+    # 历史回放模式下 Funding 接口可能不可用 → 满分放行
+    if SIMULATE_TS and funding == 0.0:
+        score_funding = 10
+    elif abs_fr <= FUNDING_MAX:
         score_funding = 10       # 中性偏多
     elif abs_fr <= FUNDING_WARN:
         score_funding = 5        # 略热
