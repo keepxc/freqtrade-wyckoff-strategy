@@ -850,8 +850,7 @@ class HybridTraderV1(IStrategy):
             "enter_long"
         ] = 1
 
-        # ── 做空条件（做多的镜像）─────────────────────────
-        # CVD 下降 或 顶背离 = 空头确认
+        # ── 做空条件（做多的镜像，CVD 放宽：顶背离即满足）───
         cvd_ok_short = (
             (~dataframe["cvd_rising"].fillna(False).astype(bool)) |
             (dataframe["top_diverge"].fillna(False).astype(bool))
@@ -859,12 +858,12 @@ class HybridTraderV1(IStrategy):
         conditions_short = [
             dataframe["st_dir"] == -1,                   # Supertrend 下降趋势
             dataframe["hma_fast"] < dataframe["hma_slow"],# HMA 空头对齐
-            dataframe["rsi"] >= 32,                       # 不高不低
+            dataframe["rsi"] >= 32,
             dataframe["rsi"] <= 60,
             cvd_ok_short,                                 # CVD 下降 或 顶背离
-            oi_ok,                                        # OI 方向不区分为空头
+            oi_ok,
             funding_ok,
-            dataframe["confidence"] >= self.CONF_MIN,
+            dataframe["confidence"] >= self.CONF_MIN - 5, # 空头放宽 5 分
             mse_ok,
             dataframe["volume"] > 0,
         ]
