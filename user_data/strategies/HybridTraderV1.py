@@ -581,7 +581,11 @@ class HybridTraderV1(IStrategy):
         查询 MSE watchlist 表（需连续3次≥WATCH才进入）。
         Returns (in_watchlist: bool, rank: int, score: float).
         DB 不存在或引擎未运行时返回 (True, 0, 0)=放行。
+        设置 HYBRID_NO_MSE=1 环境变量跳过 MSE 过滤（用于对照回测）。
         """
+        import os
+        if os.environ.get("HYBRID_NO_MSE") == "1":
+            return True, 0, 0.0
         try:
             if not cls._DB_PATH.exists():
                 return True, 0, 0.0
