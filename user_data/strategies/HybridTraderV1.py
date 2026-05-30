@@ -38,7 +38,7 @@ class HybridTraderV1(IStrategy):
     # ── 基础设置 ──────────────────────────────────────────
     can_short = True           # 多空双向
     use_custom_stoploss = True
-    stoploss = -0.08           # 硬止损兜底（Supertrend 失效时）
+    stoploss = -0.05           # 收紧硬止损 -8%→-5%，减少单笔亏损
     trailing_stop = False
 
     # ROI：主要靠 custom_exit，这里设宽松兜底
@@ -77,7 +77,7 @@ class HybridTraderV1(IStrategy):
     CONF_W_FUNDING    = 5    # Funding Rate 未过热
 
     # Partial Close 参数
-    PARTIAL_CLOSE_PCT  = 1.0   # T1 100% 全平（15% 剩仓被止损吃光）
+    PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%
     PARTIAL_T1_ATR_MUL = 2.0    # T1 = 入场价 + ATR14 × 2.0
 
     # ── Risk Gates（借鉴 TradeCat fail-closed 设计）──────
