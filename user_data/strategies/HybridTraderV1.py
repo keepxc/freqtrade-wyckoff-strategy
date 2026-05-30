@@ -80,11 +80,21 @@ class HybridTraderV1(IStrategy):
     # ── Risk Gates（借鉴 TradeCat fail-closed 设计）──────
     MAX_OPEN_TRADES     = 5       # 最大同时持仓数
     MAX_DAILY_LOSS_USDT = 50.0    # 日亏损上限（USDT），触发后当日不再开新仓
+    ABNORMAL_MOVE_PCT   = 0.05    # P1: 5min 价格跳变 ≥5% → 熔断，禁止入场
+    MAX_HOLDING_HOURS   = 48      # P2: 持仓超过 48h 强制平仓
+    SYMBOL_BLOCK_LOSS   = -20.0   # P1: 币种累计亏损 ≤ -20 USDT → 自动加入黑名单
 
     # 日亏损追踪（class-level，按自然日重置，持久化到 JSON）
     _risk_state: dict = {"date": "", "realized_pnl": 0.0}
     _risk_lock = threading.Lock()
     _RISK_FILE  = Path(__file__).parent / ".hybrid_risk_state.json"
+
+    # P1 币种黑名单（持久化）
+    _blocked_symbols: set = set()
+    _BLOCK_FILE = Path(__file__).parent / ".hybrid_blocked_symbols.json"
+
+    # P2 Kill Switch 文件路径
+    _KILL_SWITCH = Path(__file__).parent / ".hybrid_kill_switch"
 
     # 数据缓存（按交易对，TTL=10min）
     _cvd_cache: dict = {}
@@ -606,12 +616,61 @@ class HybridTraderV1(IStrategy):
             return cls._risk_state["realized_pnl"] <= -cls.MAX_DAILY_LOSS_USDT
 
     @classmethod
-    def _record_trade_pnl(cls, profit_usdt: float):
-        """记录一笔已平仓交易的 PnL 到日累计。"""
+    def _record_trade_pnl(cls, profit_usdt: float, symbol: str = ""):
+        """记录一笔已平仓交易的 PnL 到日累计，同时更新币种亏损追踪。"""
         cls._load_risk_state()
         with cls._risk_lock:
             cls._risk_state["realized_pnl"] += profit_usdt
         cls._save_risk_state()
+        # P1: 币种亏损追踪 → 自动拉黑
+        if symbol and profit_usdt < 0:
+            cls._track_symbol_loss(symbol, profit_usdt)
+
+    # ── P1: 币种亏损自过滤 ───────────────────────────────
+
+    @classmethod
+    def _load_blocked_symbols(cls):
+        """加载币种黑名单。"""
+        try:
+            if cls._BLOCK_FILE.exists():
+                cls._blocked_symbols = set(json.loads(cls._BLOCK_FILE.read_text()))
+        except Exception:
+            cls._blocked_symbols = set()
+
+    @classmethod
+    def _save_blocked_symbols(cls):
+        """持久化币种黑名单。"""
+        cls._BLOCK_FILE.write_text(json.dumps(list(cls._blocked_symbols)))
+
+    @classmethod
+    def _track_symbol_loss(cls, symbol: str, loss_usdt: float):
+        """
+        追踪币种亏损。累计亏损超过阈值 → 自动加入黑名单。
+        """
+        cls._load_blocked_symbols()
+        key = f"{symbol}_loss"
+        state_file = cls._RISK_FILE  # 复用同一个状态文件
+        try:
+            state = json.loads(state_file.read_text()) if state_file.exists() else {}
+        except Exception:
+            state = {}
+        total = state.get(key, 0.0) + loss_usdt
+        state[key] = total
+        state_file.write_text(json.dumps(state))
+        if total <= cls.SYMBOL_BLOCK_LOSS:
+            cls._blocked_symbols.add(symbol)
+            cls._save_blocked_symbols()
+            import logging
+            logging.getLogger(__name__).warning(
+                f"SYMBOL BLOCKED: {symbol} cumulative loss={total:.1f} USDT"
+            )
+
+    # ── P2: Kill Switch ──────────────────────────────────
+
+    @classmethod
+    def _is_kill_switch_active(cls) -> bool:
+        """检查 kill switch 文件是否存在。"""
+        return cls._KILL_SWITCH.exists()
 
     # ── Risk Gate：开仓前检查 ────────────────────────────
 
@@ -631,10 +690,12 @@ class HybridTraderV1(IStrategy):
         **kwargs,
     ) -> bool:
         """
-        借鉴 TradeCat 的 deterministic risk gates：
-        1. 自动记录已平仓交易的 PnL
-        2. 日亏损上限检查
-        3. 最大同时持仓数检查
+        TradeCat-style deterministic risk gates（按优先级排序）：
+        Gate 0: Kill Switch（P2）
+        Gate 1: 币种黑名单（P1）
+        Gate 2: 异常波动熔断（P1）
+        Gate 3: 日亏损上限（P0）
+        Gate 4: 最大同时持仓数（P0）
         任一触发 → 拒绝开仓。
         """
         # Auto-record PnL from recently closed trades
@@ -642,10 +703,37 @@ class HybridTraderV1(IStrategy):
             tid = getattr(t, "id", id(t))
             if not t.is_open and tid not in self._pnl_recorded:
                 pnl = t.realized_profit if t.realized_profit else 0.0
-                self._record_trade_pnl(pnl)
+                self._record_trade_pnl(pnl, t.pair)
                 self._pnl_recorded.add(tid)
 
-        # Gate 1: 日亏损上限
+        # Gate 0: Kill Switch（P2 — 最高优先级）
+        if self._is_kill_switch_active():
+            self.log_once(
+                f"RISK GATE: kill switch active ({self._KILL_SWITCH}), blocking all entries",
+                log_level="critical",
+            )
+            return False
+
+        # Gate 1: 币种黑名单（P1）
+        self._load_blocked_symbols()
+        # 提取裸币种名（不含 /USDT:USDT 后缀）
+        base = pair.split("/")[0]
+        if base in self._blocked_symbols:
+            self.log_once(
+                f"RISK GATE: {base} is blocked (cumulative loss), rejecting {pair}",
+                log_level="warning",
+            )
+            return False
+
+        # Gate 2: 异常波动熔断（P1）
+        if self._abnormal_move_check(pair, rate):
+            self.log_once(
+                f"RISK GATE: abnormal price move detected for {pair}, blocking entry",
+                log_level="warning",
+            )
+            return False
+
+        # Gate 3: 日亏损上限
         if self._check_daily_loss_limit():
             self._load_risk_state()
             pnl = self._risk_state["realized_pnl"]
@@ -656,7 +744,7 @@ class HybridTraderV1(IStrategy):
             )
             return False
 
-        # Gate 2: 最大同时持仓数
+        # Gate 4: 最大同时持仓数
         open_count = len([t for t in self.trades if t.is_open])
         if open_count >= self.MAX_OPEN_TRADES:
             self.log_once(
@@ -667,6 +755,28 @@ class HybridTraderV1(IStrategy):
             return False
 
         return True
+
+    # ── P1: 异常波动检查（实例方法，可访问 dataprovider）───
+
+    def _abnormal_move_check(self, pair: str, current_rate: float) -> bool:
+        """
+        P1: 检查最近是否存在异常价格跳变。
+        用 5m K 线：若最新 bar 涨跌幅 ≥ ABNORMAL_MOVE_PCT → 熔断。
+        """
+        try:
+            df, _ = self.dp.get_analyzed_dataframe(pair, "5m")
+            if df.empty:
+                return False
+            recent = df.tail(3)
+            if recent.empty:
+                return False
+            for _, bar in recent.iterrows():
+                move = abs(bar["close"] - bar["open"]) / bar["open"] if bar["open"] > 0 else 0
+                if move >= self.ABNORMAL_MOVE_PCT:
+                    return True
+            return False
+        except Exception:
+            return False  # fallback: don't block when data unavailable
 
     # ── PnL 记录：平仓时自动调用 ──────────────────────────
 
@@ -793,7 +903,11 @@ class HybridTraderV1(IStrategy):
         """
         动态止损 = Supertrend 线位置
         当 Supertrend 线上移时止损跟随上移（追踪），但永远不下移。
+        Kill Switch 激活时 → 立即以 -0.1% 止损强制平仓。
         """
+        # P2: Kill Switch → 强制退出
+        if self._is_kill_switch_active():
+            return -0.001  # 0.1% 极紧止损，快速平仓
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if dataframe.empty:
             return self.stoploss
@@ -823,11 +937,12 @@ class HybridTraderV1(IStrategy):
         """
         T1 目标位到达时平仓 55%，剩余 45% 继续持有直到 Supertrend 翻转。
         T1 = 入场时 close + ATR14 × 2.0（在 populate_indicators 里预计算）
-
-        Freqtrade partial exit 通过返回字符串 exit_reason 触发，
-        仓位百分比通过 trade.custom_data 传递给 adjust_trade_position。
-        这里直接返回 exit_reason，由 adjust_trade_position 执行减仓。
+        Kill Switch 激活时 → 立即全平。
         """
+        # P2: Kill Switch → 强制退出
+        if self._is_kill_switch_active():
+            return "kill_switch"
+
         if not trade.custom_data:
             trade.custom_data = {}
 
@@ -851,6 +966,12 @@ class HybridTraderV1(IStrategy):
 
         if current_rate >= trade.custom_data["t1_target"]:
             return "t1_partial_close"
+
+        # P2: 时间止损 — 持仓超过 MAX_HOLDING_HOURS 强制平仓
+        from datetime import timezone
+        hold_hours = (current_time.replace(tzinfo=timezone.utc) - trade.open_date_utc).total_seconds() / 3600
+        if hold_hours >= self.MAX_HOLDING_HOURS:
+            return "time_stop"
 
         return None
 
