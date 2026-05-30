@@ -37,8 +37,8 @@ class HybridTraderV1(IStrategy):
 
     # ── 基础设置 ──────────────────────────────────────────
     can_short = True           # 多空双向
-    use_custom_stoploss = True
-    stoploss = -0.08           # 硬止损兜底
+    use_custom_stoploss = False  # 关闭 Supertrend 动态止损
+    stoploss = -0.03             # 固定 3% 止损（1:1 盈亏比）
     trailing_stop = False
 
     # ROI：主要靠 custom_exit，这里设宽松兜底
@@ -820,15 +820,11 @@ class HybridTraderV1(IStrategy):
             dataframe["hma_fast"] > dataframe["hma_fast"].shift(2)
         )
 
-        # CVD 过滤：买盘持续净流入（上升 + 高于 20 周期均线）
+        # CVD 过滤：买盘真实支撑 + 无顶背离
         cvd_ok = (
-            dataframe["cvd_rising"].fillna(False).astype(bool) &
+            dataframe["cvd_rising"].fillna(True).astype(bool) &
             (~dataframe["top_diverge"].fillna(False).astype(bool))
         )
-        # 加强版：CVD 高于自身 20 周期均线（持续积累，非短暂脉冲）
-        dataframe["cvd_ma20"] = dataframe["cvd"].rolling(20, min_periods=5).mean()
-        dataframe["cvd_strong"] = dataframe["cvd"] > dataframe["cvd_ma20"]
-        cvd_ok = cvd_ok & dataframe["cvd_strong"].fillna(False).astype(bool)
 
         # OI + Funding 过滤（实盘有效，回测 fallback=True 不影响）
         oi_ok      = dataframe["oi_rising"].fillna(True).astype(bool)
