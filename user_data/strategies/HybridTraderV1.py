@@ -222,6 +222,30 @@ class HybridTraderV1(IStrategy):
         df["date"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df.set_index("date")
 
+    @classmethod
+    def _load_cvd_local(cls, symbol: str) -> pd.DataFrame | None:
+        """
+        从本地预取的 CVD feather 文件加载数据（用于回测）。
+        文件路径: user_data/data/binance/futures/{SYM}-15m-cvd.feather
+        不存在时返回 None，调用方回退到 API。
+        """
+        cvd_file = cls._DB_PATH.parent / "data" / "cvd" / f"{symbol}-15m-cvd.feather"
+        try:
+            if not cvd_file.exists():
+                return None
+            df = pd.read_feather(str(cvd_file))
+            if df.empty:
+                return None
+            # feather 索引是 timestamp (ms int), 转为 datetime
+            df["date"] = pd.to_datetime(df["timestamp"] if "timestamp" in df.columns else df.index, unit="ms", utc=True)
+            df = df.set_index("date")
+            # 确保有 cvd 列
+            if "cvd" not in df.columns:
+                return None
+            return df
+        except Exception:
+            return None
+
     def _get_cvd_df(self, symbol: str) -> pd.DataFrame:
         """
         带缓存的 CVD 数据获取。
@@ -487,9 +511,13 @@ class HybridTraderV1(IStrategy):
         pair = metadata.get("pair", "")
         binance_symbol = pair.split("/")[0] + pair.split("/")[1].split(":")[0]
 
-        # ── CVD（阶段2）────────────────────────────────────
-        cvd_df = self._get_cvd_df(binance_symbol)
-        dataframe = self._merge_cvd(dataframe, cvd_df)
+        # ── CVD（阶段2）─ 优先读本地预取文件，回退 API ────
+        cvd_df = self._load_cvd_local(binance_symbol)
+        if cvd_df is not None:
+            dataframe = self._merge_cvd(dataframe, cvd_df)
+        else:
+            cvd_df = self._get_cvd_df(binance_symbol)
+            dataframe = self._merge_cvd(dataframe, cvd_df)
 
         # ── OI + Funding Rate（阶段3）──────────────────────
         oi_df = self._get_oi_df(binance_symbol)
