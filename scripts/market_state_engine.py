@@ -622,23 +622,25 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
     by_sym = {r["symbol"]: r for r in results}
 
     # --- Entry check ---
-    # For each symbol in current scan with grade WATCH, check last N records
-    a_grade_syms = {r["symbol"] for r in results if r["grade"] == "WATCH"}
+    # Accept any grade >= WATCH_MIN: WATCH, B, A
+    WATCH_GRADES = {"WATCH", "B", "A"}
+    a_grade_syms = {r["symbol"] for r in results if r["grade"] in WATCH_GRADES}
     for sym in a_grade_syms:
         rows = cur.execute(
             "SELECT grade FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
             (sym, WATCHLIST_ENTRY_N),
         ).fetchall()
-        if len(rows) >= WATCHLIST_ENTRY_N and all(r[0] == "WATCH" for r in rows):
+        if len(rows) >= WATCHLIST_ENTRY_N and all(r[0] in WATCH_GRADES for r in rows):
             r = by_sym[sym]
             cur.execute(
                 """INSERT OR REPLACE INTO watchlist(symbol,added_ts,grade,score,updated_ts)
                    VALUES (?,?,?,?,?)""",
                 (sym, ts_now, r["grade"], r["score"], ts_now),
             )
-            log.info(f"WATCHLIST ADD   : {sym:15s} score={r['score']:.0f}")
+            log.info(f"WATCHLIST ADD   : {sym:15s} grade={r['grade']} score={r['score']:.0f}")
 
     # --- Exit check ---
+    KEEP_GRADES = {"WATCH", "B", "A", "SQUEEZE"}
     cur.execute("SELECT symbol FROM watchlist")
     in_watchlist = [r[0] for r in cur.fetchall()]
     for sym in in_watchlist:
@@ -646,7 +648,7 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
             "SELECT grade FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
             (sym, WATCHLIST_EXIT_N),
         ).fetchall()
-        if len(rows) >= WATCHLIST_EXIT_N and all(r[0] not in ("WATCH", "SQUEEZE") for r in rows):
+        if len(rows) >= WATCHLIST_EXIT_N and all(r[0] not in KEEP_GRADES for r in rows):
             cur.execute("DELETE FROM watchlist WHERE symbol=?", (sym,))
             grades = [r[0] for r in rows]
             log.info(f"WATCHLIST REMOVE: {sym:15s} recent={grades}")
