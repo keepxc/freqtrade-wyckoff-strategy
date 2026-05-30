@@ -78,7 +78,7 @@ class HybridTraderV1(IStrategy):
 
     # Partial Close 参数
     PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%
-    PARTIAL_T1_ATR_MUL = 3.0    # T1 = 入场价 + ATR14 × 3.0（2→3，给利润空间）
+    PARTIAL_T1_ATR_MUL = 2.0    # T1 = 入场价 + ATR14 × 2.0（3x 更差）
 
     # ── Risk Gates（借鉴 TradeCat fail-closed 设计）──────
     MAX_OPEN_TRADES     = 5       # 最大同时持仓数
