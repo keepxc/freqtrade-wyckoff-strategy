@@ -533,11 +533,11 @@ class HybridTraderV1(IStrategy):
         # t1_atr 供 custom_exit 在开仓时取入场 bar 的 ATR，固化 T1
         dataframe["t1_atr"] = dataframe["atr14"]
 
-        # ── Market State Engine top10 过滤（阶段5）────────
-        # 读取 market_state_engine 写入的 top10 表。
+        # ── Market State Engine watchlist 过滤（阶段5）────────
+        # 读取 market_state_engine 写入的 watchlist 表（需连续3次≥WATCH才进入）。
         # 若 DB 不存在或 market_state_engine 未运行，默认放行（不阻断回测和初始 dry run）。
-        mse_in_top10, mse_rank, mse_score = self._query_top10(binance_symbol)
-        dataframe["mse_ok"]   = mse_in_top10
+        mse_in_watchlist, mse_rank, mse_score = self._query_watchlist(binance_symbol)
+        dataframe["mse_ok"]   = mse_in_watchlist
         dataframe["mse_rank"] = mse_rank
         dataframe["mse_score"] = mse_score
 
@@ -547,10 +547,10 @@ class HybridTraderV1(IStrategy):
     _DB_PATH = Path(__file__).parent.parent / "market.db"
 
     @classmethod
-    def _query_top10(cls, binance_symbol: str) -> tuple[bool, int, float]:
+    def _query_watchlist(cls, binance_symbol: str) -> tuple[bool, int, float]:
         """
-        查询 MSE top10 表。
-        Returns (in_top10: bool, rank: int, score: float).
+        查询 MSE watchlist 表（需连续3次≥WATCH才进入）。
+        Returns (in_watchlist: bool, rank: int, score: float).
         DB 不存在或引擎未运行时返回 (True, 0, 0)=放行。
         """
         try:
@@ -558,11 +558,11 @@ class HybridTraderV1(IStrategy):
                 return True, 0, 0.0
             with sqlite3.connect(str(cls._DB_PATH), timeout=2) as conn:
                 row = conn.execute(
-                    "SELECT rank, score FROM top10 WHERE symbol=? LIMIT 1",
+                    "SELECT score FROM watchlist WHERE symbol=? LIMIT 1",
                     (binance_symbol,),
                 ).fetchone()
             if row:
-                return True, int(row[0]), float(row[1])
+                return True, 0, float(row[0])   # watchlist 无 rank 概念
             return False, 0, 0.0
         except Exception:
             return True, 0, 0.0   # fallback: don't block when engine not running
