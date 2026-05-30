@@ -37,8 +37,8 @@ class HybridTraderV1(IStrategy):
 
     # ── 基础设置 ──────────────────────────────────────────
     can_short = True           # 多空双向
-    use_custom_stoploss = False  # 关闭 Supertrend 动态止损
-    stoploss = -0.03             # 固定 3% 止损（1:1 盈亏比）
+    use_custom_stoploss = True
+    stoploss = -0.08
     trailing_stop = False
 
     # ROI：主要靠 custom_exit，这里设宽松兜底
