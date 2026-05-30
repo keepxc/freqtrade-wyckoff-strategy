@@ -820,14 +820,15 @@ class HybridTraderV1(IStrategy):
             dataframe["hma_fast"] > dataframe["hma_fast"].shift(2)
         )
 
-        # CVD 过滤：买盘真实支撑 + 无顶背离
-        # cvd_rising = True 时表示 CVD 斜率向上（真实买盘净流入）
-        # top_diverge = True 时表示价格创高但 CVD 弱（背离，不入场）
-        # 当 CVD 数据不可用（回测/API 失败）时 cvd_rising=True top_diverge=False，不影响回测
+        # CVD 过滤：买盘持续净流入（上升 + 高于 20 周期均线）
         cvd_ok = (
-            dataframe["cvd_rising"].fillna(True).astype(bool) &
+            dataframe["cvd_rising"].fillna(False).astype(bool) &
             (~dataframe["top_diverge"].fillna(False).astype(bool))
         )
+        # 加强版：CVD 高于自身 20 周期均线（持续积累，非短暂脉冲）
+        dataframe["cvd_ma20"] = dataframe["cvd"].rolling(20, min_periods=5).mean()
+        dataframe["cvd_strong"] = dataframe["cvd"] > dataframe["cvd_ma20"]
+        cvd_ok = cvd_ok & dataframe["cvd_strong"].fillna(False).astype(bool)
 
         # OI + Funding 过滤（实盘有效，回测 fallback=True 不影响）
         oi_ok      = dataframe["oi_rising"].fillna(True).astype(bool)
