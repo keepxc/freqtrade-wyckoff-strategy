@@ -8,9 +8,11 @@
 import time
 import threading
 import sqlite3
+import json
 import numpy as np
 import pandas as pd
 import requests
+from datetime import date
 from freqtrade.strategy import IStrategy, DecimalParameter, IntParameter
 from pandas import DataFrame
 from functools import reduce
@@ -74,6 +76,15 @@ class HybridTraderV1(IStrategy):
     # Partial Close 参数
     PARTIAL_CLOSE_PCT  = 0.55   # T1 到达时平仓 55%
     PARTIAL_T1_ATR_MUL = 2.0    # T1 = 入场价 + ATR14 × 2.0
+
+    # ── Risk Gates（借鉴 TradeCat fail-closed 设计）──────
+    MAX_OPEN_TRADES     = 5       # 最大同时持仓数
+    MAX_DAILY_LOSS_USDT = 50.0    # 日亏损上限（USDT），触发后当日不再开新仓
+
+    # 日亏损追踪（class-level，按自然日重置，持久化到 JSON）
+    _risk_state: dict = {"date": "", "realized_pnl": 0.0}
+    _risk_lock = threading.Lock()
+    _RISK_FILE  = Path(__file__).parent / ".hybrid_risk_state.json"
 
     # 数据缓存（按交易对，TTL=10min）
     _cvd_cache: dict = {}
@@ -559,6 +570,132 @@ class HybridTraderV1(IStrategy):
             return False, 0, 0.0
         except Exception:
             return True, 0, 0.0   # fallback: don't block when engine not running
+
+    # ── Risk State（日亏损追踪，借鉴 TradeCat fail-closed）──
+
+    @classmethod
+    def _load_risk_state(cls):
+        """加载持久化的风险状态，跨日期自动重置。"""
+        today = str(date.today())
+        try:
+            if cls._RISK_FILE.exists():
+                state = json.loads(cls._RISK_FILE.read_text())
+                if state.get("date") != today:
+                    state = {"date": today, "realized_pnl": 0.0}
+            else:
+                state = {"date": today, "realized_pnl": 0.0}
+        except Exception:
+            state = {"date": today, "realized_pnl": 0.0}
+        with cls._risk_lock:
+            cls._risk_state = state
+
+    @classmethod
+    def _save_risk_state(cls):
+        """持久化风险状态。"""
+        with cls._risk_lock:
+            cls._RISK_FILE.write_text(json.dumps(cls._risk_state))
+
+    @classmethod
+    def _check_daily_loss_limit(cls) -> bool:
+        """
+        检查是否触发日亏损上限。
+        Returns True = 已触发（禁止开仓），False = 未触发。
+        """
+        cls._load_risk_state()
+        with cls._risk_lock:
+            return cls._risk_state["realized_pnl"] <= -cls.MAX_DAILY_LOSS_USDT
+
+    @classmethod
+    def _record_trade_pnl(cls, profit_usdt: float):
+        """记录一笔已平仓交易的 PnL 到日累计。"""
+        cls._load_risk_state()
+        with cls._risk_lock:
+            cls._risk_state["realized_pnl"] += profit_usdt
+        cls._save_risk_state()
+
+    # ── Risk Gate：开仓前检查 ────────────────────────────
+
+    # 已记录 PnL 的交易 ID 集合（避免重复计算）
+    _pnl_recorded: set[int] = set()
+
+    def confirm_trade_entry(
+        self,
+        pair: str,
+        order_type: str,
+        amount: float,
+        rate: float,
+        time_in_force: str,
+        current_time,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> bool:
+        """
+        借鉴 TradeCat 的 deterministic risk gates：
+        1. 自动记录已平仓交易的 PnL
+        2. 日亏损上限检查
+        3. 最大同时持仓数检查
+        任一触发 → 拒绝开仓。
+        """
+        # Auto-record PnL from recently closed trades
+        for t in self.trades:
+            tid = getattr(t, "id", id(t))
+            if not t.is_open and tid not in self._pnl_recorded:
+                pnl = t.realized_profit if t.realized_profit else 0.0
+                self._record_trade_pnl(pnl)
+                self._pnl_recorded.add(tid)
+
+        # Gate 1: 日亏损上限
+        if self._check_daily_loss_limit():
+            self._load_risk_state()
+            pnl = self._risk_state["realized_pnl"]
+            self.log_once(
+                f"RISK GATE: daily loss limit hit (PnL={pnl:.1f} <= -{self.MAX_DAILY_LOSS_USDT}), "
+                f"blocking new entries for {pair}",
+                log_level="warning",
+            )
+            return False
+
+        # Gate 2: 最大同时持仓数
+        open_count = len([t for t in self.trades if t.is_open])
+        if open_count >= self.MAX_OPEN_TRADES:
+            self.log_once(
+                f"RISK GATE: max open trades ({self.MAX_OPEN_TRADES}) reached, "
+                f"blocking {pair}",
+                log_level="warning",
+            )
+            return False
+
+        return True
+
+    # ── PnL 记录：平仓时自动调用 ──────────────────────────
+
+    def custom_exit_price(
+        self,
+        pair: str,
+        trade,
+        current_time,
+        proposed_rate: float,
+        current_profit: float,
+        exit_tag: str | None,
+        **kwargs,
+    ) -> float:
+        return proposed_rate
+
+    def custom_stake_amount(
+        self,
+        pair: str,
+        current_time,
+        current_rate: float,
+        proposed_stake: float,
+        min_stake: float | None,
+        max_stake: float,
+        leverage: float,
+        entry_tag: str | None,
+        side: str,
+        **kwargs,
+    ) -> float:
+        return proposed_stake
 
     # ── 入场 ─────────────────────────────────────────────
 
