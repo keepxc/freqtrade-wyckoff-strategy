@@ -835,6 +835,7 @@ class HybridTraderV1(IStrategy):
 
         conditions_long = [
             dataframe["st_dir"] == 1,                    # Supertrend 上升趋势
+            dataframe["hma_fast"] > dataframe["hma_slow"], # HMA 趋势对齐（去HMA: WR 63%→77%, DD 4%→9%）
             dataframe["rsi"] >= 40,
             dataframe["rsi"] <= 68,
             cvd_ok,                                       # CVD 买盘确认
