@@ -35,6 +35,7 @@ Hard Filters（任一触发 → BLOCKED）：
 import sqlite3
 import time
 import logging
+import os
 import requests
 import numpy as np
 import pandas as pd
@@ -66,8 +67,21 @@ MIN_OI_USDT     = 50_000_000
 
 WATCHLIST_ENTRY_N = 3   # consecutive WATCH periods to enter
 WATCHLIST_EXIT_N  = 2   # consecutive non-WATCH periods to exit
+WATCHLIST_MIN_GAP = 600  # min seconds between valid consecutive scans (10 min)
 
 BINANCE = "https://fapi.binance.com"
+
+# ── 窗口参数（支持环境变量覆盖，用于超参扫描）────────────
+def _env_int(name: str, default: int) -> int:
+    return int(os.environ.get(f"MSE_{name}", default))
+
+CVD_WINDOW         = _env_int("CVD_WINDOW", 40)          # CVD 滚动窗口（bar数，15m×40=10h）
+CVD_SLOPE_N        = _env_int("CVD_SLOPE_N", 6)           # CVD 斜率判断（bar数，15m×6=1.5h）
+CVD_DIVERGE_WINDOW = _env_int("CVD_DIVERGE_WINDOW", 20)   # 背离检测 + 趋势均值窗口
+PA_RANGE_N         = _env_int("PA_RANGE_N", 6)             # Price Acceptance 突破范围（bar数）
+PA_SUSTAIN_N       = _env_int("PA_SUSTAIN_N", 3)           # Price Acceptance 持续站稳（bar数）
+TREND_MA_WINDOW    = _env_int("TREND_MA_WINDOW", 40)       # 4h 趋势参考 MA 窗口（15m×40=10h 平滑）
+VOL_MA_WINDOW      = _env_int("VOL_MA_WINDOW", 20)         # 量能均值窗口
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -263,11 +277,14 @@ def fetch_oi_metrics(symbol: str) -> dict | None:
 
 def fetch_price_cvd_metrics(symbol: str) -> dict | None:
     """Kline analysis: returns CVD fields + price acceptance + CVD persistence sub-scores."""
+    kline_limit = max(CVD_WINDOW, TREND_MA_WINDOW, PA_RANGE_N, VOL_MA_WINDOW, CVD_DIVERGE_WINDOW) * 2
+    kline_limit = max(kline_limit, 80)  # minimum 80 bars
     data = _get(
         f"{BINANCE}/fapi/v1/klines",
-        {"symbol": symbol, "interval": "15m", "limit": 80},
+        {"symbol": symbol, "interval": "15m", "limit": kline_limit},
     )
-    if not data or len(data) < 30:
+    min_bars = max(CVD_WINDOW, TREND_MA_WINDOW) // 2
+    if not data or len(data) < min_bars:
         return None
 
     opens   = np.array([float(r[1]) for r in data], dtype=float)
@@ -279,14 +296,16 @@ def fetch_price_cvd_metrics(symbol: str) -> dict | None:
 
     n = len(data)
     vd  = 2 * taker_buy - total_vol
-    cvd = pd.Series(vd).rolling(40, min_periods=10).sum().values
+    cvd = pd.Series(vd).rolling(CVD_WINDOW, min_periods=max(10, CVD_WINDOW // 4)).sum().values
 
-    # ── v1 compatible fields ──
-    cvd_tail   = cvd[-6:]
+    # ── CVD slope: last CVD_SLOPE_N bars ──
+    cvd_tail   = cvd[-CVD_SLOPE_N:]
     cvd_rising = bool(not np.isnan(cvd_tail).any() and cvd_tail[-1] > cvd_tail[0])
 
-    price_high  = np.max(closes[-20:])
-    cvd_window  = cvd[-20:]
+    # ── Top diverge: price near CVD_DIVERGE_WINDOW-bar high, CVD not at peak ──
+    dw = CVD_DIVERGE_WINDOW
+    price_high  = np.max(closes[-dw:])
+    cvd_window  = cvd[-dw:]
     cvd_valid   = cvd_window[~np.isnan(cvd_window)]
     cvd_peak    = float(np.max(cvd_valid)) if len(cvd_valid) > 0 else 0.0
     top_diverge = (
@@ -296,59 +315,59 @@ def fetch_price_cvd_metrics(symbol: str) -> dict | None:
         cvd[-1] < cvd_peak * 0.95
     )
 
-    vwap_approx  = float(np.mean(closes[-20:]))
+    # ── Trend acceptance: price above TREND_MA_WINDOW-bar mean ──
+    tw = TREND_MA_WINDOW
+    vwap_approx  = float(np.mean(closes[-tw:]))
     trend_accept = bool(closes[-1] > vwap_approx and closes[-1] > closes[-5])
 
-    avg_vol   = float(np.mean(total_vol[-20:]))
+    # ── Volume surge vs VOL_MA_WINDOW-bar average ──
+    avg_vol   = float(np.mean(total_vol[-VOL_MA_WINDOW:]))
     vol_surge = bool(avg_vol > 0 and total_vol[-1] > avg_vol * VOL_SURGE_MULT)
 
-    # ── V2: Price Acceptance (25分) ──
-    # 1) breakout: close > previous range high (last 6 bars, excluding current)
-    range_high_6 = np.max(highs[-7:-1])  # exclude current bar
-    breakout     = closes[-1] > range_high_6
+    # ── Price Acceptance (25分) ──
+    # 1) breakout: close > previous range high (last PA_RANGE_N bars, excluding current)
+    range_high_n = np.max(highs[-(PA_RANGE_N + 1):-1])
+    breakout     = closes[-1] > range_high_n
 
-    # 2) sustained: close > breakout level for 2+ consecutive bars
-    sustained_bars = int(closes[-1] > range_high_6)
-    for i in range(2, min(4, n)):
-        if closes[-i] > range_high_6:
+    # 2) sustained: close > breakout level for PA_SUSTAIN_N consecutive bars
+    sustained_bars = int(closes[-1] > range_high_n)
+    for i in range(2, min(PA_SUSTAIN_N + 1, n)):
+        if closes[-i] > range_high_n:
             sustained_bars += 1
         else:
             break
-    sustained = sustained_bars >= 3  # 当前+前2根 = 3根连续
+    sustained = sustained_bars >= PA_SUSTAIN_N
 
     # 3) pullback OK: recent pullback low doesn't break below breakout level
-    #    (breakout level = range_high_6; check last 5 bars' lows)
     pullback_lows = lows[-5:]
-    pullback_ok   = bool(np.all(pullback_lows >= range_high_6 * 0.995))
+    pullback_ok   = bool(np.all(pullback_lows >= range_high_n * 0.995))
 
     # 4) strong close: close in upper 30% of bar range
     bar_range = highs[-1] - lows[-1]
     strong_close = bool(bar_range > 0 and (closes[-1] - lows[-1]) / bar_range >= 0.70)
 
-    # ── V2: CVD Persistence (20分) ──
-    # 1) CVD slope > 0
+    # ── CVD Persistence (20分) ──
     cvd_slope_pos = cvd_rising  # reuse
 
-    # 2) 连续3根CVD正向
+    # 连续3根CVD正向
     cvd_deltas = pd.Series(vd).tail(3).values
     cvd_continuous = bool(len(cvd_deltas) >= 3 and np.all(cvd_deltas > 0))
 
-    # 3) CVD higher high (last 6 bars)
-    cvd_tail6 = cvd[-6:]
-    cvd_valid6 = cvd_tail6[~np.isnan(cvd_tail6)]
+    # CVD higher high (last CVD_SLOPE_N bars)
+    cvd_tail_n = cvd[-CVD_SLOPE_N:]
+    cvd_valid_n = cvd_tail_n[~np.isnan(cvd_tail_n)]
     cvd_higher_high = bool(
-        len(cvd_valid6) >= 2 and
+        len(cvd_valid_n) >= 2 and
         not np.isnan(cvd[-1]) and
-        cvd[-1] > np.max(cvd_valid6[:-1])
+        cvd[-1] > np.max(cvd_valid_n[:-1])
     )
 
-    # ── V2: Trend Structure (15分) ──
-    # 30m trend up: price > 20-bar mean
+    # ── Trend Structure (15分) ──
     trend_30m_up = bool(closes[-1] > vwap_approx)
-    # 4h alignment: price > 40-bar mean (approximate 4h trend with 8x30m bars → use 40 for smoother)
-    if n >= 40:
-        ma40 = float(np.mean(closes[-40:]))
-        trend_4h_up = bool(closes[-1] > ma40)
+    # 4h alignment: price > TREND_MA_WINDOW-bar mean
+    if n >= TREND_MA_WINDOW:
+        ma_long = float(np.mean(closes[-TREND_MA_WINDOW:]))
+        trend_4h_up = bool(closes[-1] > ma_long)
     else:
         trend_4h_up = trend_30m_up
     # slope positive: 5-bar linear slope > 0
@@ -623,14 +642,24 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
 
     # --- Entry check ---
     # Accept any grade >= WATCH_MIN: WATCH, B, A
+    # Also validate scan timestamps are genuinely spaced (not back-to-back cache hits)
     WATCH_GRADES = {"WATCH", "B", "A"}
     a_grade_syms = {r["symbol"] for r in results if r["grade"] in WATCH_GRADES}
     for sym in a_grade_syms:
         rows = cur.execute(
-            "SELECT grade FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
+            "SELECT grade, ts FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
             (sym, WATCHLIST_ENTRY_N),
         ).fetchall()
         if len(rows) >= WATCHLIST_ENTRY_N and all(r[0] in WATCH_GRADES for r in rows):
+            # Verify genuine time spacing: each consecutive scan must be ≥ WATCHLIST_MIN_GAP apart
+            timestamps = [r[1] for r in rows]
+            gaps_ok = True
+            for i in range(len(timestamps) - 1):
+                if timestamps[i] - timestamps[i + 1] < WATCHLIST_MIN_GAP:
+                    gaps_ok = False
+                    break
+            if not gaps_ok:
+                continue  # too close together, not genuine consecutive scans
             r = by_sym[sym]
             cur.execute(
                 """INSERT OR REPLACE INTO watchlist(symbol,added_ts,grade,score,updated_ts)
