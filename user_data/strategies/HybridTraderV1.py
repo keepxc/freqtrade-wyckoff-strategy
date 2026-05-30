@@ -53,13 +53,13 @@ class HybridTraderV1(IStrategy):
     rsi_high   = IntParameter(55, 75,  default=65, space="buy",  optimize=False)
 
     # CVD 参数
-    CVD_WINDOW         = 80    # 15m × 80 = 20 小时滚动窗口
-    CVD_SLOPE_N        = 12    # CVD 斜率判断用 12 根（3h）
+    CVD_WINDOW         = 40    # 15m × 40 = 10 小时滚动窗口
+    CVD_SLOPE_N        = 6     # CVD 斜率判断用 6 根（1.5h）
     CVD_DIVERGE_THRESH = 0.95  # 价格创高但 CVD < 历史峰值 95% → 顶背离
 
     # OI 参数
-    OI_WINDOW    = 16          # OI 变化率窗口（16 × 15m = 4h）
-    OI_RISE_MIN  = 0.005       # OI 4h 增幅 > 0.5% 才算有效多头建仓
+    OI_WINDOW    = 8           # OI 变化率窗口（8 × 15m = 2h）
+    OI_RISE_MIN  = 0.005       # OI 2h 增幅 > 0.5% 才算有效多头建仓
     FUNDING_MAX  = 0.0005      # 资金费率 > 0.05% 视为多头过热，不入场
 
     # 置信度评分权重（满分 100）
