@@ -56,7 +56,7 @@ GRADE_A_MIN     = 85    # A级：强趋势结构
 GRADE_B_MIN     = 75    # B级：可交易结构
 GRADE_WATCH_MIN = 65    # 观察级：有潜力但不稳定，<65=忽略/噪音
 
-OI_EXPAND_MIN   = 0.005   # OI 4h 增幅 > 0.5%
+OI_EXPAND_MIN   = 0.001   # OI 15m 增幅 > 0.1%
 OI_ACCEL_MIN    = 0.002   # OI 加速度阈值
 FUNDING_MAX     = 0.0005  # 0.05%，中性偏多
 FUNDING_WARN    = 0.0008  # 0.08%，禁止追多
@@ -64,8 +64,8 @@ VOL_SURGE_MULT  = 1.2     # 量能突增倍数
 VOL_EXPLOSION   = 3.0     # ATR > ATR_MA * 3
 MIN_OI_USDT     = 50_000_000
 
-WATCHLIST_ENTRY_N = 3   # consecutive A periods to enter
-WATCHLIST_EXIT_N  = 2   # consecutive non-A/B periods to exit
+WATCHLIST_ENTRY_N = 3   # consecutive WATCH periods to enter
+WATCHLIST_EXIT_N  = 2   # consecutive non-WATCH periods to exit
 
 BINANCE = "https://fapi.binance.com"
 
@@ -228,24 +228,24 @@ def fetch_funding(symbol: str) -> float | None:
 # Data fetching
 # ---------------------------------------------------------------------------
 def fetch_oi_metrics(symbol: str) -> dict | None:
-    """Returns 4h OI change rate + acceleration."""
+    """Returns 15m OI change rate + acceleration."""
     data = _get(
         f"{BINANCE}/futures/data/openInterestHist",
-        {"symbol": symbol, "period": "30m", "limit": 20},
+        {"symbol": symbol, "period": "15m", "limit": 20},
     )
-    if not data or len(data) < 10:
+    if not data or len(data) < 4:
         return None
     vals = [float(d["sumOpenInterest"]) for d in data]
-    # current 4h = last 8 periods vs 8 periods ago
-    if len(vals) < 9:
+    # current 15m = last 1 period vs 1 period ago
+    if len(vals) < 3:
         return None
-    cur_base  = vals[-9]
+    cur_base  = vals[-2]
     cur_oi    = vals[-1]
     oi_change = (cur_oi - cur_base) / cur_base if cur_base else 0.0
-    # previous 4h = periods -17 to -9
-    if len(vals) >= 18:
-        prev_base  = vals[-17]
-        prev_oi    = vals[-9]
+    # previous 15m = periods -4 to -3
+    if len(vals) >= 5:
+        prev_base  = vals[-4]
+        prev_oi    = vals[-3]
         prev_change = (prev_oi - prev_base) / prev_base if prev_base else 0.0
         acceleration = oi_change - prev_change
     else:
@@ -265,7 +265,7 @@ def fetch_price_cvd_metrics(symbol: str) -> dict | None:
     """Kline analysis: returns CVD fields + price acceptance + CVD persistence sub-scores."""
     data = _get(
         f"{BINANCE}/fapi/v1/klines",
-        {"symbol": symbol, "interval": "30m", "limit": 80},
+        {"symbol": symbol, "interval": "15m", "limit": 80},
     )
     if not data or len(data) < 30:
         return None
@@ -303,23 +303,23 @@ def fetch_price_cvd_metrics(symbol: str) -> dict | None:
     vol_surge = bool(avg_vol > 0 and total_vol[-1] > avg_vol * VOL_SURGE_MULT)
 
     # ── V2: Price Acceptance (25分) ──
-    # 1) breakout: close > previous range high (last 20 bars, excluding current)
-    range_high_20 = np.max(highs[-21:-1])  # exclude current bar
-    breakout      = closes[-1] > range_high_20
+    # 1) breakout: close > previous range high (last 6 bars, excluding current)
+    range_high_6 = np.max(highs[-7:-1])  # exclude current bar
+    breakout     = closes[-1] > range_high_6
 
     # 2) sustained: close > breakout level for 2+ consecutive bars
-    sustained_bars = int(closes[-1] > range_high_20)
+    sustained_bars = int(closes[-1] > range_high_6)
     for i in range(2, min(4, n)):
-        if closes[-i] > range_high_20:
+        if closes[-i] > range_high_6:
             sustained_bars += 1
         else:
             break
     sustained = sustained_bars >= 3  # 当前+前2根 = 3根连续
 
     # 3) pullback OK: recent pullback low doesn't break below breakout level
-    #    (breakout level = range_high_20; check last 5 bars' lows)
+    #    (breakout level = range_high_6; check last 5 bars' lows)
     pullback_lows = lows[-5:]
-    pullback_ok   = bool(np.all(pullback_lows >= range_high_20 * 0.995))
+    pullback_ok   = bool(np.all(pullback_lows >= range_high_6 * 0.995))
 
     # 4) strong close: close in upper 30% of bar range
     bar_range = highs[-1] - lows[-1]
@@ -622,14 +622,14 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
     by_sym = {r["symbol"]: r for r in results}
 
     # --- Entry check ---
-    # For each symbol in current scan with grade A, check last N records
-    a_grade_syms = {r["symbol"] for r in results if r["grade"] == "A"}
+    # For each symbol in current scan with grade WATCH, check last N records
+    a_grade_syms = {r["symbol"] for r in results if r["grade"] == "WATCH"}
     for sym in a_grade_syms:
         rows = cur.execute(
             "SELECT grade FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
             (sym, WATCHLIST_ENTRY_N),
         ).fetchall()
-        if len(rows) >= WATCHLIST_ENTRY_N and all(r[0] == "A" for r in rows):
+        if len(rows) >= WATCHLIST_ENTRY_N and all(r[0] == "WATCH" for r in rows):
             r = by_sym[sym]
             cur.execute(
                 """INSERT OR REPLACE INTO watchlist(symbol,added_ts,grade,score,updated_ts)
@@ -646,7 +646,7 @@ def update_watchlist(conn: sqlite3.Connection, ts_now: int, results: list[dict])
             "SELECT grade FROM coin_states_v2 WHERE symbol=? ORDER BY ts DESC LIMIT ?",
             (sym, WATCHLIST_EXIT_N),
         ).fetchall()
-        if len(rows) >= WATCHLIST_EXIT_N and all(r[0] not in ("A", "B") for r in rows):
+        if len(rows) >= WATCHLIST_EXIT_N and all(r[0] not in ("WATCH", "SQUEEZE") for r in rows):
             cur.execute("DELETE FROM watchlist WHERE symbol=?", (sym,))
             grades = [r[0] for r in rows]
             log.info(f"WATCHLIST REMOVE: {sym:15s} recent={grades}")
@@ -683,7 +683,7 @@ def update_top10(conn: sqlite3.Connection, ts_now: int, results: list[dict]) -> 
     for i, r in enumerate(ranked, start=1):
         log.info(
             f"  #{i:2d} {r['symbol']:12s} {r['grade']:10s} "
-            f"score={r['score']:5.0f} | OI4h={r['oi_change_4h']*100:+.2f}% "
+            f"score={r['score']:5.0f} | OI15m={r['oi_change_4h']*100:+.2f}% "
             f"FR={r['funding_rate']*100:.4f}% | "
             f"CVD={r['cvd_rising']} TA={r['trend_accept']} VS={r['vol_surge']}"
         )
@@ -768,7 +768,7 @@ def run_scan(conn: sqlite3.Connection) -> None:
             f"PA={r['score_price_acc']:3.0f} OI={r['score_oi_expand']:3.0f} "
             f"CVD={r['score_cvd_pers']:3.0f} TR={r['score_trend']:3.0f} "
             f"FR={r['score_funding']:3.0f} LQ={r['score_liquidity']:3.0f} | "
-            f"OI4h={r['oi_change_4h']*100:+.2f}% OIacc={r['oi_acceleration']*100:+.2f}%"
+            f"OI15m={r['oi_change_4h']*100:+.2f}% OIacc={r['oi_acceleration']*100:+.2f}%"
         )
 
     # Watchlist detail

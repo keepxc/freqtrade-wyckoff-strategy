@@ -3,5 +3,27 @@
   "stoploss": -0.08,
   "bot_name": "HybridTrader_DryRun",
   "timeframe": "30m",
-  "db_url": "sqlite:////freqtrade/user_data/tradesv3.hybrid_dryrun.sqlite"
+  "db_url": "sqlite:////home/gyan/freqtrade/user_data/tradesv3.hybrid_dryrun.sqlite",
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "0.0.0.0",
+    "listen_port": 8081,
+    "verbosity": "error",
+    "enable_openapi": false,
+    "jwt_secret_key": "CHANGE_THIS_TO_A_RANDOM_SECRET",
+    "CORS_origins": [],
+    "username": "freqtrade",
+    "password": "CHANGE_THIS_PASSWORD"
+  },
+  "telegram": {
+    "enabled": false
+  },
+  "pairlist_path": ["/home/gyan/freqtrade/user_data/plugins/pairlist"],
+  "pairlists": [
+    {
+      "method": "OIPairList",
+      "number_assets": 10,
+      "oi_window": "15m"
+    }
+  ]
 }

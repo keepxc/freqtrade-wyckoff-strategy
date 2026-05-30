@@ -193,6 +193,8 @@ class HybridTraderV1(IStrategy):
                 "volume_delta":   2.0 * taker_buy - total_vol,
             })
         df = pd.DataFrame(records)
+        if df.empty:
+            return df
         df["date"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df.set_index("date")
 
@@ -299,6 +301,8 @@ class HybridTraderV1(IStrategy):
             for r in rows
         ]
         df = pd.DataFrame(records)
+        if df.empty:
+            return df
         df["date"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         df = df.set_index("date").sort_index()
 
@@ -340,6 +344,8 @@ class HybridTraderV1(IStrategy):
             for r in rows
         ]
         df = pd.DataFrame(records)
+        if df.empty:
+            return df
         df["date"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         return df.set_index("date").sort_index()
 
