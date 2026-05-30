@@ -51,7 +51,7 @@ class HybridTraderV1(IStrategy):
     # ── 可调参数 ──────────────────────────────────────────
     hma_fast   = IntParameter(40, 80,  default=55, space="buy",  optimize=False)
     hma_slow   = IntParameter(55, 100, default=63, space="buy",  optimize=False)
-    st_period  = IntParameter(7,  20,  default=10, space="buy",  optimize=False)
+    st_period  = IntParameter(7,  20,  default=8,  space="buy",  optimize=False)  # test: 10→8
     st_mult    = DecimalParameter(2.0, 4.0, default=3.0, decimals=1, space="buy", optimize=False)
     rsi_low    = IntParameter(35, 55,  default=45, space="buy",  optimize=False)
     rsi_high   = IntParameter(55, 75,  default=65, space="buy",  optimize=False)
@@ -68,7 +68,7 @@ class HybridTraderV1(IStrategy):
 
     # 置信度评分权重（满分 100）
     # 每个条件满足时得对应分数，≥ CONF_MIN 才允许入场
-    CONF_MIN          = 75   # test: 80→75，增加入场信号
+    CONF_MIN          = 80   # 75与80结果相同，回退
     CONF_W_SUPERTREND = 25   # Supertrend 持续方向
     CONF_W_HMA        = 20   # HMA 趋势对齐 + 斜率
     CONF_W_RSI        = 10   # RSI 位置合理
