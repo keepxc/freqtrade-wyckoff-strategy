@@ -77,14 +77,14 @@ class HybridTraderV1(IStrategy):
     CONF_W_FUNDING    = 5    # Funding Rate 未过热
 
     # Partial Close 参数
-    PARTIAL_CLOSE_PCT  = 0.55   # T1 到达时平仓 55%
+    PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%（t1=100% WR，剩余45%全被止损吃掉）
     PARTIAL_T1_ATR_MUL = 2.0    # T1 = 入场价 + ATR14 × 2.0
 
     # ── Risk Gates（借鉴 TradeCat fail-closed 设计）──────
     MAX_OPEN_TRADES     = 5       # 最大同时持仓数
     MAX_DAILY_LOSS_USDT = 50.0    # 日亏损上限（USDT），触发后当日不再开新仓
     ABNORMAL_MOVE_PCT   = 0.05    # P1: 5min 价格跳变 ≥5% → 熔断，禁止入场
-    MAX_HOLDING_HOURS   = 12      # P2: 持仓超过 12h 强制平仓（48h 测试=7笔全亏）
+    MAX_HOLDING_HOURS   = 999     # P2: 实际禁用（time_stop 胜率<20%，纯亏损）
     SYMBOL_BLOCK_LOSS   = -20.0   # P1: 币种累计亏损 ≤ -20 USDT → 自动加入黑名单
 
     # 日亏损追踪（class-level，按自然日重置，持久化到 JSON）
