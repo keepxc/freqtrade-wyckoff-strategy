@@ -1,10 +1,10 @@
 # HybridTraderV1 — 独立策略，与 WyckoffV8 无关联
 # 基于：HMA55/63 + Supertrend(10,3)，15m K 线
-# 阶段1：HMA + Supertrend + RSI 框架
-# 阶段2：CVD（Binance taker volume，10h 窗口）
-# 阶段3：OI 建仓确认 + Funding Rate 过热过滤
-# 阶段4：置信度评分（≥80入场）+ Partial Close（T1 平55%）
-# 阶段5：MSE top10 市场结构过滤
+# 架构：三层过滤 + 加权评分
+#   Layer 1 — 趋势过滤：ST方向+持续性 (20) + HMA对齐+斜率 (15) = 35
+#   Layer 2 — 资本确认：OI Efficiency (20) + CVD持续性 (20) + Price联动 (5) = 45
+#   Layer 3 — 健康度：RSI (10) + Funding (5) + 成交量 (5) = 20
+#   总分 100，≥75 入场 + MSE watchlist 门前 + Risk Gates
 
 import time
 import threading
@@ -62,19 +62,27 @@ class HybridTraderV1(IStrategy):
     CVD_DIVERGE_THRESH = 0.95  # 价格创高但 CVD < 历史峰值 95% → 顶背离
 
     # OI 参数
-    OI_WINDOW    = 8           # OI 变化率窗口（8 × 15m = 2h）
-    OI_RISE_MIN  = 0.005       # OI 2h 增幅 > 0.5% 才算有效多头建仓
-    FUNDING_MAX  = 0.0005      # 资金费率 > 0.05% 视为多头过热，不入场
+    OI_WINDOW      = 8           # OI 变化率窗口（8 × 15m = 2h）
+    OI_EFF_HIGH    = 0.5         # oi_efficiency > 0.5 → 高效（趋势健康）
+    OI_EFF_MED     = 0.1         # 0.1–0.5 → 中等；<0.1 → 低效/杠杆对赌
+    FUNDING_MAX    = 0.0005      # 资金费率 > 0.05% 视为多头过热
 
-    # 置信度评分权重（满分 100）
-    # 每个条件满足时得对应分数，≥ CONF_MIN 才允许入场
-    CONF_MIN          = 80
-    CONF_W_SUPERTREND = 25
-    CONF_W_HMA        = 20
-    CONF_W_RSI        = 10
-    CONF_W_CVD        = 25
-    CONF_W_OI         = 15
-    CONF_W_FUNDING    = 5
+    # 置信度评分权重（三层架构，满分 100）
+    CONF_MIN           = 75      # 入场阈值（初期测试 75，后续根据数据调优）
+
+    # Layer 1 — 趋势过滤（35 分）
+    CONF_W_ST          = 20      # Supertrend 方向+持续性
+    CONF_W_HMA         = 15      # HMA 对齐+斜率
+
+    # Layer 2 — 资本确认（45 分）
+    CONF_W_OI_EFF      = 20      # OI Efficiency
+    CONF_W_CVD         = 20      # CVD 持续性评分
+    CONF_W_PRICE_LINK  = 5       # OI↑ + CVD↑ + Price↑ 联动加分
+
+    # Layer 3 — 健康度（20 分）
+    CONF_W_RSI         = 10      # RSI 位置
+    CONF_W_FR          = 5       # Funding Rate
+    CONF_W_VOL         = 5       # 成交量健康
 
     # Partial Close 参数
     PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%
@@ -430,8 +438,8 @@ class HybridTraderV1(IStrategy):
 
         # ── OI merge ──
         if not oi_df.empty:
-            oi_reset = oi_df[["oi_rising"]].reset_index()
-            oi_reset.columns = ["date_oi", "oi_rising"]
+            oi_reset = oi_df[["oi", "oi_change_pct"]].reset_index()
+            oi_reset.columns = ["date_oi", "oi", "oi_change_pct"]
             oi_reset["date_oi"] = pd.to_datetime(oi_reset["date_oi"]).dt.tz_localize(None)
             merged_oi = pd.merge_asof(
                 df_work.sort_values("_date_key"),
@@ -440,9 +448,11 @@ class HybridTraderV1(IStrategy):
                 right_on="date_oi",
                 direction="backward",
             )
-            dataframe["oi_rising"] = merged_oi["oi_rising"].values
+            dataframe["oi"] = merged_oi["oi"].values
+            dataframe["oi_change_pct"] = merged_oi["oi_change_pct"].values
         else:
-            dataframe["oi_rising"] = True  # fallback
+            dataframe["oi"] = 0.0
+            dataframe["oi_change_pct"] = 0.0
 
         # ── Funding Rate merge ──
         if not fr_df.empty:
@@ -525,40 +535,108 @@ class HybridTraderV1(IStrategy):
         fr_df = self._get_funding_df(binance_symbol)
         dataframe = self._merge_oi_funding(dataframe, oi_df, fr_df)
 
-        # ── 置信度评分（阶段4）─────────────────────────────
-        # 每个维度独立打分，不依赖外部 API 结果（API 不可用时对应项满分）
+        # ── 三层置信度评分 ──────────────────────────────────
+        # Layer 1: 趋势过滤 (35 max) — 判断方向是否正确
+        # Layer 2: 资本确认 (45 max) — 判断资金是否支撑趋势
+        # Layer 3: 健康度 (20 max) — 风险扣分制
+        # 总分 ≥ CONF_MIN 才允许入场
+
         hma_fast_rising = dataframe["hma_fast"] > dataframe["hma_fast"].shift(2)
 
         score = pd.Series(0.0, index=dataframe.index)
-        # Supertrend：持续 3 根以上得满分，只有 1 根得一半
-        score += np.where(dataframe["st_dir"].shift(2) == 1,
-                          self.CONF_W_SUPERTREND,
-                          np.where(dataframe["st_dir"] == 1,
-                                   self.CONF_W_SUPERTREND * 0.5, 0))
-        # HMA：对齐 + 斜率双满足得满分，只对齐得一半
+
+        # ═══ Layer 1: 趋势过滤 (35) ═══
+        # Supertrend：持续 3 根以上满分，仅当前根半分
+        score += np.where(
+            dataframe["st_dir"].shift(2) == 1,
+            self.CONF_W_ST,
+            np.where(dataframe["st_dir"] == 1,
+                     self.CONF_W_ST * 0.5, 0)
+        )
+        # HMA：对齐+斜率满分，仅对齐半分
         score += np.where(
             (dataframe["hma_fast"] > dataframe["hma_slow"]) & hma_fast_rising,
             self.CONF_W_HMA,
             np.where(dataframe["hma_fast"] > dataframe["hma_slow"],
                      self.CONF_W_HMA * 0.5, 0)
         )
-        # RSI：40-60 最优区间满分，40-68 得一半
-        score += np.where((dataframe["rsi"] >= 40) & (dataframe["rsi"] <= 60),
-                          self.CONF_W_RSI,
-                          np.where((dataframe["rsi"] >= 40) & (dataframe["rsi"] <= 68),
-                                   self.CONF_W_RSI * 0.5, 0))
-        # CVD：上升且无背离满分，只上升得一半，API 不可用时满分
-        cvd_rising_f = dataframe["cvd_rising"].fillna(True).astype(bool)
-        top_div_f    = dataframe["top_diverge"].fillna(False).astype(bool)
-        score += np.where(cvd_rising_f & ~top_div_f,
-                          self.CONF_W_CVD,
-                          np.where(cvd_rising_f, self.CONF_W_CVD * 0.5, 0))
-        # OI：上升满分，API 不可用时满分
-        score += np.where(dataframe["oi_rising"].fillna(True).astype(bool),
-                          self.CONF_W_OI, 0)
-        # Funding Rate：未过热满分，API 不可用时满分
-        score += np.where(dataframe["funding_ok"].fillna(True).astype(bool),
-                          self.CONF_W_FUNDING, 0)
+
+        # ═══ Layer 2: 资本确认 (45) ═══
+        # OI Efficiency — 用价格变化 / OI 变化判断趋势健康度
+        oi_change = dataframe["oi_change_pct"].fillna(0).abs()
+        price_change_2h = (
+            dataframe["close"] / dataframe["close"].shift(self.OI_WINDOW) - 1
+        ).fillna(0)
+        # 防止除零，oi_change 极小时效率无意义 → 低分
+        oi_eff = np.where(
+            oi_change > 0.001,
+            (price_change_2h.abs() / oi_change).clip(0, 5),
+            0
+        )
+        # 方向对齐：OI↑+Price↑ 多头健康；OI↓+Price↓ 空头健康
+        oi_direction_aligned = (
+            (dataframe["oi_change_pct"].fillna(0) > 0) &
+            (price_change_2h > 0)
+        ) | (
+            (dataframe["oi_change_pct"].fillna(0) < 0) &
+            (price_change_2h < 0)
+        )
+        score += np.where(
+            oi_direction_aligned & (oi_eff > self.OI_EFF_HIGH),
+            self.CONF_W_OI_EFF,
+            np.where(oi_direction_aligned & (oi_eff > self.OI_EFF_MED),
+                     self.CONF_W_OI_EFF * 0.5, 0)
+        )
+
+        # CVD 持续性评分 — 过去 CVD_SLOPE_N 根中有几根正向
+        cvd_val = dataframe["cvd"].fillna(method="ffill")
+        cvd_positive_bars = (cvd_val > cvd_val.shift(1)).rolling(self.CVD_SLOPE_N).sum()
+        # ≥4/6 根正向 → 满分；2-3 → 半分；<2 → 0
+        score += np.where(
+            cvd_positive_bars >= self.CVD_SLOPE_N * 0.66,
+            self.CONF_W_CVD,
+            np.where(cvd_positive_bars >= self.CVD_SLOPE_N * 0.33,
+                     self.CONF_W_CVD * 0.5, 0)
+        )
+
+        # Price 联动加分：OI↑ + CVD↑ + Price↑ 三向确认
+        price_up = price_change_2h > 0.005
+        oi_up = dataframe["oi_change_pct"].fillna(0) > 0
+        cvd_sustained = cvd_positive_bars >= self.CVD_SLOPE_N * 0.5
+        score += np.where(
+            price_up & oi_up & cvd_sustained,
+            self.CONF_W_PRICE_LINK, 0
+        )
+
+        # ═══ Layer 3: 健康度 (20) ═══
+        # RSI：40-60 最优满分，32-68 半分，极端值 0
+        score += np.where(
+            (dataframe["rsi"] >= 40) & (dataframe["rsi"] <= 60),
+            self.CONF_W_RSI,
+            np.where(
+                (dataframe["rsi"] >= 32) & (dataframe["rsi"] <= 68),
+                self.CONF_W_RSI * 0.5, 0
+            )
+        )
+
+        # Funding Rate：< 0.05% 满分，0.05-0.1% 半分，> 0.1% 零分
+        fr_abs = dataframe["funding_rate"].fillna(0).abs()
+        score += np.where(
+            fr_abs <= self.FUNDING_MAX,
+            self.CONF_W_FR,
+            np.where(fr_abs <= self.FUNDING_MAX * 2,
+                     self.CONF_W_FR * 0.5, 0)
+        )
+
+        # 成交量健康：高于 SMA20 成交量满分，高于一半半分，低于零分
+        vol_sma20 = dataframe["volume"].rolling(20).mean()
+        volume_ratio = dataframe["volume"] / vol_sma20.replace(0, np.nan)
+        score += np.where(
+            volume_ratio >= 1.0,
+            self.CONF_W_VOL,
+            np.where(volume_ratio >= 0.5,
+                     self.CONF_W_VOL * 0.5, 0)
+        )
 
         dataframe["confidence"] = score.astype(float)
 
@@ -807,40 +885,22 @@ class HybridTraderV1(IStrategy):
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        做多条件（全部满足）：
-        1. Supertrend 方向 = +1（上升趋势）
-        2. HMA55 > HMA63（趋势对齐）
-        3. RSI 在 40–68 范围内（避免超买追高，避免过度弱势）
-        4. CVD 买盘确认 + OI 建仓 + Funding 正常
-        5. 置信度 ≥80 + MSE top10 过滤
+        做多条件 — 三层评分架构：
+        Layer 1 硬条件：ST 方向向上 + HMA 对齐（方向错了就不入场）
+        Layer 2+3 由置信度评分统一衡量
+        MSE watchlist 作为最外层门控
         """
-
-        # HMA 斜率向上（快线本身在上涨，用于置信度评分）
-        dataframe["hma_fast_rising"] = (
-            dataframe["hma_fast"] > dataframe["hma_fast"].shift(2)
+        # Layer 1 硬条件：趋势方向必须正确
+        trend_ok_long = (
+            (dataframe["st_dir"] == 1) &
+            (dataframe["hma_fast"] > dataframe["hma_slow"])
         )
 
-        # CVD 过滤：买盘真实支撑 + 无顶背离
-        cvd_ok = (
-            dataframe["cvd_rising"].fillna(True).astype(bool) &
-            (~dataframe["top_diverge"].fillna(False).astype(bool))
-        )
-
-        # OI + Funding 过滤（实盘有效，回测 fallback=True 不影响）
-        oi_ok      = dataframe["oi_rising"].fillna(True).astype(bool)
-        funding_ok = dataframe["funding_ok"].fillna(True).astype(bool)
-
-        # MSE watchlist 过滤（实盘有效；DB不存在时 fallback=True，回测不受影响）
+        # MSE 门控
         mse_ok = dataframe["mse_ok"].fillna(True).astype(bool)
 
         conditions_long = [
-            dataframe["st_dir"] == 1,
-            dataframe["hma_fast"] > dataframe["hma_slow"],
-            dataframe["rsi"] >= 40,
-            dataframe["rsi"] <= 68,
-            cvd_ok,
-            oi_ok,
-            funding_ok,
+            trend_ok_long,
             dataframe["confidence"] >= self.CONF_MIN,
             mse_ok,
             dataframe["volume"] > 0,
@@ -850,19 +910,13 @@ class HybridTraderV1(IStrategy):
             "enter_long"
         ] = 1
 
-        # ── 做空条件（做多的镜像，CVD 放宽：顶背离即满足）───
-        cvd_ok_short = (
-            (~dataframe["cvd_rising"].fillna(False).astype(bool)) |
-            (dataframe["top_diverge"].fillna(False).astype(bool))
+        # ── 做空条件（对称逻辑）───
+        trend_ok_short = (
+            (dataframe["st_dir"] == -1) &
+            (dataframe["hma_fast"] < dataframe["hma_slow"])
         )
         conditions_short = [
-            dataframe["st_dir"] == -1,
-            dataframe["hma_fast"] < dataframe["hma_slow"],
-            dataframe["rsi"] >= 32,
-            dataframe["rsi"] <= 60,
-            cvd_ok_short,
-            oi_ok,
-            funding_ok,
+            trend_ok_short,
             dataframe["confidence"] >= self.CONF_MIN,
             mse_ok,
             dataframe["volume"] > 0,
