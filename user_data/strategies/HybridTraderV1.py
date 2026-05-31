@@ -595,6 +595,9 @@ class HybridTraderV1(IStrategy):
         )
 
         # Price 联动加分：三向确认（多空对称）
+        price_change_2h = (
+            dataframe["close"] / dataframe["close"].shift(self.OI_WINDOW) - 1
+        ).fillna(0)
         price_up = price_change_2h > 0.005
         price_down = price_change_2h < -0.005
         oi_up = dataframe["oi_change_pct"].fillna(0) > 0
