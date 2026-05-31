@@ -62,20 +62,19 @@ class HybridTraderV1(IStrategy):
     CVD_DIVERGE_THRESH = 0.95  # 价格创高但 CVD < 历史峰值 95% → 顶背离
 
     # OI 参数
-    OI_WINDOW      = 8           # OI 变化率窗口（8 × 15m = 2h）
-    OI_EFF_HIGH    = 0.5         # oi_efficiency > 0.5 → 高效（趋势健康）
-    OI_EFF_MED     = 0.1         # 0.1–0.5 → 中等；<0.1 → 低效/杠杆对赌
-    FUNDING_MAX    = 0.0005      # 资金费率 > 0.05% 视为多头过热
+    OI_WINDOW    = 8           # OI 变化率窗口（8 × 15m = 2h）
+    OI_RISE_MIN  = 0.005       # OI 2h 增幅 > 0.5% 才算有效多头建仓
+    FUNDING_MAX  = 0.0005      # 资金费率 > 0.05% 视为多头过热
 
     # 置信度评分权重（三层架构，满分 100）
-    CONF_MIN           = 75      # 入场阈值（初期测试 75，后续根据数据调优）
+    CONF_MIN           = 80
 
     # Layer 1 — 趋势过滤（35 分）
     CONF_W_ST          = 20      # Supertrend 方向+持续性
     CONF_W_HMA         = 15      # HMA 对齐+斜率
 
     # Layer 2 — 资本确认（45 分）
-    CONF_W_OI_EFF      = 20      # OI Efficiency
+    CONF_W_OI          = 15      # OI 建仓方向（简单布尔，比 Efficiency 更稳定）
     CONF_W_CVD         = 20      # CVD 持续性评分
     CONF_W_PRICE_LINK  = 5       # OI↑ + CVD↑ + Price↑ 联动加分
 
@@ -577,31 +576,9 @@ class HybridTraderV1(IStrategy):
         )
 
         # ═══ Layer 2: 资本确认 (45) ═══
-        # OI Efficiency — 用价格变化 / OI 变化判断趋势健康度
-        oi_change = dataframe["oi_change_pct"].fillna(0).abs()
-        price_change_2h = (
-            dataframe["close"] / dataframe["close"].shift(self.OI_WINDOW) - 1
-        ).fillna(0)
-        # 防止除零，oi_change 极小时效率无意义 → 低分
-        oi_eff = np.where(
-            oi_change > 0.001,
-            (price_change_2h.abs() / oi_change).clip(0, 5),
-            0
-        )
-        # 方向对齐：OI↑+Price↑ 多头健康；OI↓+Price↓ 空头健康
-        oi_direction_aligned = (
-            (dataframe["oi_change_pct"].fillna(0) > 0) &
-            (price_change_2h > 0)
-        ) | (
-            (dataframe["oi_change_pct"].fillna(0) < 0) &
-            (price_change_2h < 0)
-        )
-        score += np.where(
-            oi_direction_aligned & (oi_eff > self.OI_EFF_HIGH),
-            self.CONF_W_OI_EFF,
-            np.where(oi_direction_aligned & (oi_eff > self.OI_EFF_MED),
-                     self.CONF_W_OI_EFF * 0.5, 0)
-        )
+        # OI 简单方向（15m 级别 Efficiency 噪声太大，回退布尔判断）
+        score += np.where(dataframe["oi_rising"].fillna(True).astype(bool),
+                          self.CONF_W_OI, 0)
 
         # CVD 持续性评分 — 过去 CVD_SLOPE_N 根中有几根正向
         cvd_val = dataframe["cvd"].ffill()

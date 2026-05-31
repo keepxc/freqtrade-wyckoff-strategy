@@ -34,9 +34,14 @@
     "name": "binance",
     "key": "",
     "secret": "",
-    "ccxt_config": {},
+    "ccxt_config": {
+      "proxies": {
+        "http": "http://host.docker.internal:7890",
+        "https": "http://host.docker.internal:7890"
+      }
+    },
     "ccxt_async_config": {
-      "aiohttp_proxy": "http://127.0.0.1:7890",
+      "aiohttp_proxy": "http://host.docker.internal:7890",
       "aiohttp_timeout": 60
     },
     "pair_whitelist": [
