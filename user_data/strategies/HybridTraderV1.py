@@ -327,13 +327,13 @@ class HybridTraderV1(IStrategy):
         merged = merged.set_index(dataframe.index)
 
         # 顶/底背离检测
-        # 顶背离：价格涨到 40-bar 高点 99% 以上，但 CVD < 峰值 95%
+        # 顶背离：价格涨到 40-bar 高点 98.5% 以上，但 CVD < 峰值 95%
         # 底背离：价格跌到 40-bar 低点 101% 以下，但 CVD > 低谷 / 95%
         merged["price_10h_high"] = merged["high"].rolling(40).max()
         merged["price_10h_low"] = merged["low"].rolling(40).min()
         merged["cvd_10h_trough"] = merged["cvd"].rolling(40).min()
         merged["top_diverge"] = (
-            (merged["high"] >= merged["price_10h_high"] * 0.99) &
+            (merged["high"] >= merged["price_10h_high"] * 0.985) &
             (merged["cvd"]  <  merged["cvd_10h_peak"]  * HybridTraderV1.CVD_DIVERGE_THRESH)
         )
         merged["bot_diverge"] = (
