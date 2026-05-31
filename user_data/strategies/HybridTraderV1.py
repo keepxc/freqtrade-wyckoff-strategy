@@ -371,10 +371,10 @@ class HybridTraderV1(IStrategy):
         df["date"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
         df = df.set_index("date").sort_index()
 
-        # OI 变化率（OI_WINDOW 根）
+        # OI 变化率（OI_WINDOW 根）+ 方向判断
         n = self.OI_WINDOW
         df["oi_change_pct"] = (df["oi"] - df["oi"].shift(n)) / df["oi"].shift(n)
-        # OI 变化率（旧版 oi_rising 已废弃，评分使用 OI Efficiency）
+        df["oi_rising"] = df["oi_change_pct"] > self.OI_RISE_MIN
         return df
 
     def _get_oi_df(self, symbol: str) -> pd.DataFrame:
