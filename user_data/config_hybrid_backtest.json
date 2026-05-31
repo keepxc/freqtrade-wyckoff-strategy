@@ -35,25 +35,28 @@
     "key": "",
     "secret": "",
     "ccxt_config": {},
-    "ccxt_async_config": {}
+    "ccxt_async_config": {
+      "aiohttp_proxy": "http://127.0.0.1:7890",
+      "aiohttp_timeout": 60
+    },
+    "pair_whitelist": [
+      "BTC/USDT:USDT",
+      "ETH/USDT:USDT",
+      "BNB/USDT:USDT",
+      "SOL/USDT:USDT",
+      "DOGE/USDT:USDT",
+      "1000PEPE/USDT:USDT",
+      "LIT/USDT:USDT",
+      "NFP/USDT:USDT",
+      "LAB/USDT:USDT",
+      "UB/USDT:USDT",
+      "ZEC/USDT:USDT"
+    ]
   },
   "pairlists": [
     {
       "method": "StaticPairList",
       "allow_inactive": true
     }
-  ],
-  "pair_whitelist": [
-    "BTC/USDT:USDT",
-    "ETH/USDT:USDT",
-    "BNB/USDT:USDT",
-    "SOL/USDT:USDT",
-    "DOGE/USDT:USDT",
-    "1000PEPE/USDT:USDT",
-    "LIT/USDT:USDT",
-    "NFP/USDT:USDT",
-    "LAB/USDT:USDT",
-    "UB/USDT:USDT",
-    "ZEC/USDT:USDT"
   ]
 }

@@ -84,6 +84,9 @@ class HybridTraderV1(IStrategy):
     CONF_W_FR          = 5       # Funding Rate
     CONF_W_VOL         = 5       # 成交量健康
 
+    # ── 风险扣分参数 ──────────────────────────────────────
+    DIVERGE_PENALTY    = 5       # 顶/底背离扣分
+
     # Partial Close 参数
     PARTIAL_CLOSE_PCT  = 0.85   # T1 到达时平仓 85%
     PARTIAL_T1_ATR_MUL = 2.0    # T1 = 入场价 + ATR14 × 2.0（3x 更差）
@@ -298,6 +301,7 @@ class HybridTraderV1(IStrategy):
             dataframe["cvd"]         = np.nan
             dataframe["cvd_rising"]  = True   # 无数据时不过滤（宽松 fallback）
             dataframe["top_diverge"] = False
+            dataframe["bot_diverge"] = False
             return dataframe
 
         cvd_reset = cvd_df[["cvd", "cvd_rising", "cvd_10h_peak"]].reset_index()
@@ -322,14 +326,22 @@ class HybridTraderV1(IStrategy):
         )
         merged = merged.set_index(dataframe.index)
 
-        # 顶背离：收盘在 10h 高点 99.9% 以上，但 CVD < 峰值 95%
+        # 顶/底背离检测
+        # 顶背离：价格涨到 40-bar 高点 99% 以上，但 CVD < 峰值 95%
+        # 底背离：价格跌到 40-bar 低点 101% 以下，但 CVD > 低谷 / 95%
         merged["price_10h_high"] = merged["high"].rolling(40).max()
+        merged["price_10h_low"] = merged["low"].rolling(40).min()
+        merged["cvd_10h_trough"] = merged["cvd"].rolling(40).min()
         merged["top_diverge"] = (
-            (merged["close"] >= merged["price_10h_high"] * 0.999) &
-            (merged["cvd"]   <  merged["cvd_10h_peak"]  * HybridTraderV1.CVD_DIVERGE_THRESH)
+            (merged["high"] >= merged["price_10h_high"] * 0.99) &
+            (merged["cvd"]  <  merged["cvd_10h_peak"]  * HybridTraderV1.CVD_DIVERGE_THRESH)
+        )
+        merged["bot_diverge"] = (
+            (merged["low"] <= merged["price_10h_low"] * 1.01) &
+            (merged["cvd"] >  merged["cvd_10h_trough"] / HybridTraderV1.CVD_DIVERGE_THRESH)
         )
 
-        for col in ["cvd", "cvd_rising", "top_diverge"]:
+        for col in ["cvd", "cvd_rising", "top_diverge", "bot_diverge"]:
             dataframe[col] = merged[col].values
 
         return dataframe
@@ -363,8 +375,7 @@ class HybridTraderV1(IStrategy):
         # OI 变化率（OI_WINDOW 根）
         n = self.OI_WINDOW
         df["oi_change_pct"] = (df["oi"] - df["oi"].shift(n)) / df["oi"].shift(n)
-        # OI 上升且幅度超过阈值 = 真实建仓
-        df["oi_rising"] = df["oi_change_pct"] > self.OI_RISE_MIN
+        # OI 变化率（旧版 oi_rising 已废弃，评分使用 OI Efficiency）
         return df
 
     def _get_oi_df(self, symbol: str) -> pd.DataFrame:
@@ -546,19 +557,23 @@ class HybridTraderV1(IStrategy):
         score = pd.Series(0.0, index=dataframe.index)
 
         # ═══ Layer 1: 趋势过滤 (35) ═══
-        # Supertrend：持续 3 根以上满分，仅当前根半分
+        # Supertrend：持续 3 根以上满分，仅当前根半分（对称多空）
+        st_dir_shift2 = dataframe["st_dir"].shift(2)
         score += np.where(
-            dataframe["st_dir"].shift(2) == 1,
-            self.CONF_W_ST,
-            np.where(dataframe["st_dir"] == 1,
-                     self.CONF_W_ST * 0.5, 0)
+            st_dir_shift2 == 1, self.CONF_W_ST,
+            np.where(dataframe["st_dir"] == 1, self.CONF_W_ST * 0.5,
+            np.where(st_dir_shift2 == -1, self.CONF_W_ST,
+                     np.where(dataframe["st_dir"] == -1, self.CONF_W_ST * 0.5, 0)))
         )
-        # HMA：对齐+斜率满分，仅对齐半分
+        # HMA：趋势方向对齐+斜率满分，仅对齐半分（对称多空）
+        hma_aligned_long = dataframe["hma_fast"] > dataframe["hma_slow"]
+        hma_aligned_short = dataframe["hma_fast"] < dataframe["hma_slow"]
+        hma_fast_falling = dataframe["hma_fast"] < dataframe["hma_fast"].shift(2)
         score += np.where(
-            (dataframe["hma_fast"] > dataframe["hma_slow"]) & hma_fast_rising,
-            self.CONF_W_HMA,
-            np.where(dataframe["hma_fast"] > dataframe["hma_slow"],
-                     self.CONF_W_HMA * 0.5, 0)
+            hma_aligned_long & hma_fast_rising, self.CONF_W_HMA,
+            np.where(hma_aligned_long, self.CONF_W_HMA * 0.5,
+            np.where(hma_aligned_short & hma_fast_falling, self.CONF_W_HMA,
+                     np.where(hma_aligned_short, self.CONF_W_HMA * 0.5, 0)))
         )
 
         # ═══ Layer 2: 资本确认 (45) ═══
@@ -589,8 +604,9 @@ class HybridTraderV1(IStrategy):
         )
 
         # CVD 持续性评分 — 过去 CVD_SLOPE_N 根中有几根正向
-        cvd_val = dataframe["cvd"].fillna(method="ffill")
+        cvd_val = dataframe["cvd"].ffill()
         cvd_positive_bars = (cvd_val > cvd_val.shift(1)).rolling(self.CVD_SLOPE_N).sum()
+        cvd_negative_bars = (cvd_val < cvd_val.shift(1)).rolling(self.CVD_SLOPE_N).sum()
         # ≥4/6 根正向 → 满分；2-3 → 半分；<2 → 0
         score += np.where(
             cvd_positive_bars >= self.CVD_SLOPE_N * 0.66,
@@ -599,12 +615,16 @@ class HybridTraderV1(IStrategy):
                      self.CONF_W_CVD * 0.5, 0)
         )
 
-        # Price 联动加分：OI↑ + CVD↑ + Price↑ 三向确认
+        # Price 联动加分：三向确认（多空对称）
         price_up = price_change_2h > 0.005
+        price_down = price_change_2h < -0.005
         oi_up = dataframe["oi_change_pct"].fillna(0) > 0
-        cvd_sustained = cvd_positive_bars >= self.CVD_SLOPE_N * 0.5
+        oi_down = dataframe["oi_change_pct"].fillna(0) < 0
+        cvd_sustained_long = cvd_positive_bars >= self.CVD_SLOPE_N * 0.5
+        cvd_sustained_short = cvd_negative_bars >= self.CVD_SLOPE_N * 0.5
         score += np.where(
-            price_up & oi_up & cvd_sustained,
+            (price_up & oi_up & cvd_sustained_long) |
+            (price_down & oi_down & cvd_sustained_short),
             self.CONF_W_PRICE_LINK, 0
         )
 
@@ -638,7 +658,11 @@ class HybridTraderV1(IStrategy):
                      self.CONF_W_VOL * 0.5, 0)
         )
 
-        dataframe["confidence"] = score.astype(float)
+        # 顶/底背离扣分
+        score -= np.where(dataframe["top_diverge"].fillna(False), self.DIVERGE_PENALTY, 0)
+        score -= np.where(dataframe["bot_diverge"].fillna(False), self.DIVERGE_PENALTY, 0)
+
+        dataframe["confidence"] = score.clip(0, 100).astype(float)
 
         # t1_atr 供 custom_exit 在开仓时取入场 bar 的 ATR，固化 T1
         dataframe["t1_atr"] = dataframe["atr14"]
