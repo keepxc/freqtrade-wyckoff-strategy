@@ -448,8 +448,8 @@ class HybridTraderV1(IStrategy):
 
         # ── OI merge ──
         if not oi_df.empty:
-            oi_reset = oi_df[["oi", "oi_change_pct"]].reset_index()
-            oi_reset.columns = ["date_oi", "oi", "oi_change_pct"]
+            oi_reset = oi_df[["oi", "oi_change_pct", "oi_rising"]].reset_index()
+            oi_reset.columns = ["date_oi", "oi", "oi_change_pct", "oi_rising"]
             oi_reset["date_oi"] = pd.to_datetime(oi_reset["date_oi"]).dt.tz_localize(None)
             merged_oi = pd.merge_asof(
                 df_work.sort_values("_date_key"),
@@ -460,9 +460,11 @@ class HybridTraderV1(IStrategy):
             )
             dataframe["oi"] = merged_oi["oi"].values
             dataframe["oi_change_pct"] = merged_oi["oi_change_pct"].values
+            dataframe["oi_rising"] = merged_oi["oi_rising"].values
         else:
             dataframe["oi"] = 0.0
             dataframe["oi_change_pct"] = 0.0
+            dataframe["oi_rising"] = True  # fallback
 
         # ── Funding Rate merge ──
         if not fr_df.empty:
