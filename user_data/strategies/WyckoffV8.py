@@ -286,16 +286,71 @@ class WyckoffV8(IStrategy):
                         df_1d['dist_cause_sufficient']   = False
 
                     # 把派发序列字段追加进 merge slim
-                    # ── TASK 14 Fix 1: sm_v2 — BC独立熊市结构判断（日线级别）──
-                    # 触发：120日回撤>=20% AND close<EMA200*0.97 连续3根
-                    # 持续：状态机，重置需连续5天 close>EMA200
-                    # 依据：39次历史EMA200上穿事件统计，假突破中位停留=3天，5天阈值最优分割
-                    _1d_ema200 = df_1d['close'].ewm(span=200, adjust=False).mean()
-                    _1d_high_120d = df_1d['high'].rolling(120, min_periods=30).max()
-                    _1d_drawdown = (_1d_high_120d - df_1d['close']) / _1d_high_120d.replace(0, float('nan'))
-                    _sm_v2_raw = (_1d_drawdown >= 0.20) & (df_1d['close'] < _1d_ema200 * 0.97)
+                    # ── TASK 15: cycle_high 状态机 — 周期性分配锚点 ──────────────
+                    # 替换 TASK 14 的 120日滚动高点，消除死猫反弹稀释陷阱
+                    # 锁定：dist_cause_sufficient 上升沿（False→True）
+                    #   BC+AR 路径：cycle_high = daily_ar_high（派发区结构上限）
+                    #   BE 路径（无AR）：cycle_high = be_zone_high（耗尽区间最高价）
+                    # 释放（任一）：
+                    #   close > cycle_high（价格证伪派发因）
+                    #   v8_phase in ['A','B'] AND v8_sc_final（SC确认积累，因果重置）
+                    #   DCS 消失持续 >= 20 天（一个交易月，周期自然结束）
+                    _1d_ema200   = df_1d['close'].ewm(span=200, adjust=False).mean()
+                    _dcs_v15     = df_1d.get('dist_cause_sufficient', pd.Series(False, index=df_1d.index)).fillna(False).values
+                    _ar_h_v15    = df_1d.get('daily_ar_high',         pd.Series(float('nan'), index=df_1d.index)).fillna(float('nan')).values
+                    _be_zh_v15   = df_1d.get('be_zone_high',          pd.Series(float('nan'), index=df_1d.index)).fillna(float('nan')).values
+                    _phase_v15   = df_1d.get('v8_phase',              pd.Series('unknown', index=df_1d.index)).fillna('unknown').values
+                    _sc_v15      = df_1d.get('v8_sc_final',           pd.Series(False, index=df_1d.index)).fillna(False).values
+                    _close_v15   = df_1d['close'].values
+
+                    _cyc_arr15       = np.full(len(df_1d), np.nan)
+                    _cyc_high15      = np.nan
+                    _dcs_prev15      = False
+                    _dcs_false_days  = 0
+
+                    for _ci15 in range(len(df_1d)):
+                        _dcs_now = bool(_dcs_v15[_ci15])
+
+                        # 上升沿：锁定 cycle_high
+                        if _dcs_now and not _dcs_prev15:
+                            _ar_h = _ar_h_v15[_ci15]
+                            _be_h = _be_zh_v15[_ci15]
+                            if not np.isnan(_ar_h):
+                                _cyc_high15 = float(_ar_h)        # BC+AR 路径
+                            elif not np.isnan(_be_h):
+                                _cyc_high15 = float(_be_h)        # BE 路径
+                            # else：无锚点（极罕见），保持 NaN
+                            _dcs_false_days = 0
+
+                        # 释放条件1：价格收于 cycle_high 之上
+                        if not np.isnan(_cyc_high15) and _close_v15[_ci15] > _cyc_high15:
+                            _cyc_high15 = np.nan
+
+                        # 释放条件2：SC确认 + Phase A/B（积累开始，因果重置）
+                        _ph = str(_phase_v15[_ci15])
+                        if _ph in ('A', 'B') and bool(_sc_v15[_ci15]):
+                            _cyc_high15 = np.nan
+
+                        # 释放条件3：DCS 消失 >= 20 天
+                        if _dcs_now:
+                            _dcs_false_days = 0
+                        else:
+                            _dcs_false_days += 1
+                            if _dcs_false_days >= 20:
+                                _cyc_high15 = np.nan
+
+                        _cyc_arr15[_ci15] = _cyc_high15
+                        _dcs_prev15 = _dcs_now
+
+                    df_1d['cycle_high'] = _cyc_arr15
+
+                    # ── TASK 15: sm_v2 — 基于 cycle_high 的周期性回撤判断 ─────────
+                    # cycle_high 为 NaN（DCS未激活）时 sm_v2 不触发（无因无果）
+                    _1d_cycle_high = df_1d['cycle_high']
+                    _1d_drawdown   = (_1d_cycle_high - df_1d['close']) / _1d_cycle_high.replace(0, float('nan'))
+                    _sm_v2_raw     = (_1d_drawdown >= 0.20) & (df_1d['close'] < _1d_ema200 * 0.97)
                     _sm_v2_activate = _sm_v2_raw.astype(int).rolling(3, min_periods=3).min().fillna(0).astype(bool)
-                    # TASK 14 Fix 1: 重置需连续5天收于EMA200上方（数据依据：假突破中位停留3天）
+                    # 重置需连续5天收于EMA200上方（TASK 14 依据：假突破中位停留3天）
                     _sm_v2_reset = (
                         df_1d['close'].gt(_1d_ema200)
                         .astype(int).rolling(5, min_periods=5).min()
@@ -359,8 +414,9 @@ class WyckoffV8(IStrategy):
                     dist_cols = ['date', 'daily_bc_detected', 'daily_bc_path',
                                  'daily_ar_high', 'daily_ar_low', 'dist_sequence_progress',
                                  'daily_utad_detected', 'daily_dist_sow_detected',
-                                 'buying_exhaustion', 'dist_cause_sufficient',
-                                 'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist']
+                                 'buying_exhaustion', 'be_zone_high', 'dist_cause_sufficient',
+                                 'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist',
+                                 'cycle_high']  # TASK 16: LPSY ceiling anchor
                     dist_cols = [c for c in dist_cols if c in df_1d.columns]
                     df_dist = df_1d[dist_cols].copy()
                     df_dist['date'] = pd.to_datetime(df_dist['date'], utc=True) + pd.Timedelta(days=1)
@@ -446,8 +502,9 @@ class WyckoffV8(IStrategy):
                      'bear_market_mode', 'sustained_markdown', '_short_bear_gate',
                      'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist'}
         float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3',
-                      'v8_sc_low', 'daily_ar_high', 'daily_ar_low',
-                      'target_short_conservative', 'target_short_standard', 'rr_short_standard'}
+                      'v8_sc_low', 'daily_ar_high', 'daily_ar_low', 'be_zone_high',
+                      'target_short_conservative', 'target_short_standard', 'rr_short_standard',
+                      'cycle_high'}  # TASK 16
         str_cols   = {'v8_phase', 'daily_bc_path', 'dist_sequence_progress'}
         all_cols = bool_cols | float_cols | str_cols
         for col in all_cols:
@@ -512,21 +569,69 @@ class WyckoffV8(IStrategy):
             be_entry & _bear_gate & pnf_valid_short & short_intent_ok
         )
 
+        # ── TASK 16: LPSY 路径（最后供应点）─────────────────────────
+        # 物理含义：分配因果已激活（DCS True）+ 反弹衰竭区以下（close < cycle_high×0.95）
+        #   + 1H 摆高确认于衰竭区内 + 跌破反弹支点（ChoCh）+ 放量阴线
+        # 门控：full bear_gate + pnf_valid_short（豁免 RR，对齐 BE 路径）
+        _cycle_high_1h = dataframe.get('cycle_high',
+                                       pd.Series(np.nan, index=dataframe.index)).fillna(np.nan)
+        _lpsy_ceiling  = _cycle_high_1h * 0.95
+
+        # 日线层：DCS 激活 + 当前收盘在衰竭区以内
+        _dcs_1h = dataframe.get('dist_cause_sufficient',
+                                 pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        _lpsy_context = _dcs_1h & (_cycle_high_1h.notna()) & (dataframe['close'] < _lpsy_ceiling)
+
+        # 1H 执行层：用 WaveAnalyzer 的摆动点追踪
+        #   is_wave_start & wave_direction=='down'  → 确认摆高（下降波起点）
+        #   is_wave_start & wave_direction=='up'    → 确认摆低（上升波起点），作为反弹支点
+        _is_swing_high = (
+            dataframe['is_wave_start'].fillna(False).astype(bool) &
+            (dataframe['wave_direction'] == 'down')
+        )
+        _is_swing_low = (
+            dataframe['is_wave_start'].fillna(False).astype(bool) &
+            (dataframe['wave_direction'] == 'up')
+        )
+
+        # 追踪最近确认摆高价（ffill：持续到下一个摆高为止）
+        _recent_swing_high_price = dataframe['high'].where(_is_swing_high).ffill()
+        # 追踪最近确认摆低价（ffill：反弹支点，ChoCh 参考）
+        _recent_swing_low_price  = dataframe['low'].where(_is_swing_low).ffill()
+
+        # 1H 量均线（过去20根K线）
+        _vol_ma20_lpsy = dataframe['volume'].rolling(20, min_periods=10).mean()
+
+        lpsy_1h_ok = (
+            _recent_swing_high_price.notna() &
+            (_recent_swing_high_price < _lpsy_ceiling) &          # 摆高位于衰竭区以内
+            _recent_swing_low_price.notna() &
+            (dataframe['close'] < _recent_swing_low_price) &      # 跌破反弹支点（ChoCh）
+            (dataframe['close'] < dataframe['open']) &            # 阴线确认
+            (dataframe['volume'] > _vol_ma20_lpsy * 1.2)          # 放量确认
+        )
+
+        lpsy_gate = (
+            _lpsy_context & lpsy_1h_ok & _bear_gate & pnf_valid_short & short_intent_ok
+        )
+
         final_short_entry = (
             (sow_entry | utad_entry) &
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
-        ) | be_gate
+        ) | be_gate | lpsy_gate
 
-        # 优先级：UTAD > SOW > BE（UTAD/SOW 是更强的结构确认）
+        # 优先级：UTAD > SOW > LPSY > BE（UTAD/SOW 是更强的结构确认，LPSY 比 BE 更精准）
         dataframe.loc[final_short_entry & be_entry,   'enter_tag'] = 'v8_short_be'
+        dataframe.loc[final_short_entry & lpsy_gate,  'enter_tag'] = 'v8_short_lpsy'
         dataframe.loc[final_short_entry & sow_entry,  'enter_tag'] = 'v8_short_sow'
         dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
-        _be_cnt  = int(be_gate.sum())
-        _sow_cnt = int((final_short_entry & sow_entry).sum())
+        _be_cnt   = int(be_gate.sum())
+        _sow_cnt  = int((final_short_entry & sow_entry).sum())
+        _lpsy_cnt = int(lpsy_gate.sum())
         _pair = metadata.get('pair', '')
-        logger.info(f'[V8-DIAG] {_pair} enter_short: sow={_sow_cnt} be={_be_cnt}')
+        logger.info(f'[V8-DIAG] {_pair} enter_short: sow={_sow_cnt} be={_be_cnt} lpsy={_lpsy_cnt}')
 
         # P5：发射信号事件
         if self.event_bridge is not None:

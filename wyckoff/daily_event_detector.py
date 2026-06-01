@@ -157,7 +157,7 @@ class DailyEventDetector:
               daily_bc_detected, daily_bc_path,
               daily_ar_high, daily_ar_low,
               dist_sequence_progress, daily_utad_detected, daily_dist_sow_detected,
-              buying_exhaustion, dist_cause_sufficient
+              buying_exhaustion, be_zone_high, dist_cause_sufficient
         """
         df = dataframe.copy()
 
@@ -356,9 +356,15 @@ class DailyEventDetector:
             .astype(bool)
         )
 
-        df['buying_exhaustion'] = (
-            no_new_high & vol_dec & ema_break_3
-        ).fillna(False).astype(bool)
+        _be_signal = (no_new_high & vol_dec & ema_break_3).fillna(False).astype(bool)
+        df['buying_exhaustion'] = _be_signal
+
+        # TASK 15: BE 耗尽区间最高价（BE触发时向前回溯15根K线的最高价）
+        # 物理含义：BE窗口（10根无新高+5根量萎缩+3根跌破EMA，最长约15根）的最高价
+        # 是需求衰竭前的最后价格地标，作为 BE 路径下 sm_v2 的 cycle_high 锚点
+        _be_window = max(self.be_no_new_high_bars, 15)
+        _be_zone_peak = df['high'].rolling(_be_window, min_periods=_be_window).max()
+        df['be_zone_high'] = np.where(_be_signal, _be_zone_peak, np.nan)
 
         return df
 
@@ -600,5 +606,6 @@ class DailyEventDetector:
         df['daily_utad_detected']    = False
         df['daily_dist_sow_detected'] = False
         df['buying_exhaustion']      = False
+        df['be_zone_high']           = np.nan
         df['dist_cause_sufficient']  = False
         return df
