@@ -422,8 +422,9 @@ class DailyEventDetector:
         # 路径1：BC 序列状态机（state 到达 utad/sow 才激活，与序列 exit 联动重置）
         dcs_active   = False
         # 路径2：Buying Exhaustion 独立持久化（独立 EMA200 重回追踪，与 BC 序列解耦）
-        be_dcs_active        = False
-        be_ema200_below_seen = False
+        be_dcs_active          = False
+        be_ema200_below_seen   = False
+        be_ema200_above_streak = 0
         dcs_arr      = np.zeros(n, dtype=bool)
         # 读取 buying_exhaustion（Step 3 已预计算）
         be_v = df['buying_exhaustion'].values if 'buying_exhaustion' in df.columns else np.zeros(n, dtype=bool)
@@ -478,13 +479,18 @@ class DailyEventDetector:
                 ema200_below_seen = True
 
             # ── Buying Exhaustion 独立 EMA200 跟踪（路径2）───────────────
+            # TASK 14 Fix 1: 重置需连续5天收于EMA200上方，防单日假突破清零 be_dcs
+            # 依据：39次历史上穿事件，假突破中位停留=3天，5天为最优阈值
             if not np.isnan(ema200_v[i]):
                 if close_v[i] < ema200_v[i]:
                     be_ema200_below_seen = True
+                    be_ema200_above_streak = 0
                 elif be_ema200_below_seen and close_v[i] > ema200_v[i]:
-                    # EMA200 重回：贮市周期结束，重置 Buying Exhaustion 的持久激活
-                    be_dcs_active        = False
-                    be_ema200_below_seen = False
+                    be_ema200_above_streak += 1
+                    if be_ema200_above_streak >= 5:
+                        be_dcs_active          = False
+                        be_ema200_below_seen   = False
+                        be_ema200_above_streak = 0
 
             bars_since_bc = i - bc_idx if bc_idx >= 0 else 99999
 

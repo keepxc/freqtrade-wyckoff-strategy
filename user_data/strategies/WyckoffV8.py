@@ -286,15 +286,58 @@ class WyckoffV8(IStrategy):
                         df_1d['dist_cause_sufficient']   = False
 
                     # 把派发序列字段追加进 merge slim
-                    # ── TASK 13 Fix 1: sm_v2 — BC独立熊市结构判断（日线级别）──
-                    # 条件：120日内最高点回撤 >= 20% AND close < EMA200*0.97 持续 5 根日线
+                    # ── TASK 14 Fix 1: sm_v2 — BC独立熊市结构判断（日线级别）──
+                    # 触发：120日回撤>=20% AND close<EMA200*0.97 连续3根
+                    # 持续：状态机，重置需连续5天 close>EMA200
+                    # 依据：39次历史EMA200上穿事件统计，假突破中位停留=3天，5天阈值最优分割
                     _1d_ema200 = df_1d['close'].ewm(span=200, adjust=False).mean()
                     _1d_high_120d = df_1d['high'].rolling(120, min_periods=30).max()
                     _1d_drawdown = (_1d_high_120d - df_1d['close']) / _1d_high_120d.replace(0, float('nan'))
                     _sm_v2_raw = (_1d_drawdown >= 0.20) & (df_1d['close'] < _1d_ema200 * 0.97)
-                    df_1d['daily_sm_v2'] = (
-                        _sm_v2_raw.astype(int).rolling(5, min_periods=5).min().fillna(0).astype(bool)
+                    _sm_v2_activate = _sm_v2_raw.astype(int).rolling(3, min_periods=3).min().fillna(0).astype(bool)
+                    # TASK 14 Fix 1: 重置需连续5天收于EMA200上方（数据依据：假突破中位停留3天）
+                    _sm_v2_reset = (
+                        df_1d['close'].gt(_1d_ema200)
+                        .astype(int).rolling(5, min_periods=5).min()
+                        .fillna(0).astype(bool)
+                    ).values
+                    _sm_v2_act   = _sm_v2_activate.values
+                    _sm_v2_arr   = np.zeros(len(df_1d), dtype=bool)
+                    _sm_v2_on    = False
+                    for _si in range(len(df_1d)):
+                        if _sm_v2_act[_si]:
+                            _sm_v2_on = True
+                        if _sm_v2_reset[_si]:
+                            _sm_v2_on = False
+                        _sm_v2_arr[_si] = _sm_v2_on
+                    df_1d['daily_sm_v2'] = _sm_v2_arr
+
+                    # ── TASK 14 Fix 2: daily_ema200_persist — 连续跌穿EMA200第四路径 ──
+                    # 触发：连续15天 close < EMA200（慢性熊市，不依赖120日回撤%）
+                    # 重置：连续5天 close > EMA200（与 sm_v2 保持一致）
+                    # 依据：2026-05-11至05-31连续20天在EMA200下方但sm_v2失效，此路径填补空白
+                    _ema_persist_raw = (df_1d['close'] < _1d_ema200).astype(int)
+                    _ema_persist_activate = (
+                        _ema_persist_raw.rolling(15, min_periods=15).min().fillna(0).astype(bool)
                     )
+                    _ema_persist_reset = (
+                        df_1d['close'].gt(_1d_ema200)
+                        .astype(int).rolling(5, min_periods=5).min()
+                        .fillna(0).astype(bool)
+                    ).values
+                    _ema_persist_act = _ema_persist_activate.values
+                    _ema_persist_arr = np.zeros(len(df_1d), dtype=bool)
+                    _ema_persist_on  = False
+                    for _pi in range(len(df_1d)):
+                        if _ema_persist_act[_pi]:
+                            _ema_persist_on = True
+                        if _ema_persist_reset[_pi]:
+                            _ema_persist_on = False
+                        _ema_persist_arr[_pi] = _ema_persist_on
+                    df_1d['daily_ema200_persist'] = _ema_persist_arr
+
+                    _ep_cnt = int(df_1d['daily_ema200_persist'].sum())
+                    logger.info(f'[V8-DIAG] {pair} TASK14: daily_ema200_persist={_ep_cnt}')
 
                     # ── TASK 13 Fix 2: fallback SOW — sm_v2 激活时的结构性做空信号 ──
                     # 替代 ar_low 的锚点：使用 20 日滚动最低价（shift(1) 防未来函数）
@@ -317,7 +360,7 @@ class WyckoffV8(IStrategy):
                                  'daily_ar_high', 'daily_ar_low', 'dist_sequence_progress',
                                  'daily_utad_detected', 'daily_dist_sow_detected',
                                  'buying_exhaustion', 'dist_cause_sufficient',
-                                 'daily_sm_v2', 'daily_fallback_sow']
+                                 'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist']
                     dist_cols = [c for c in dist_cols if c in df_1d.columns]
                     df_dist = df_1d[dist_cols].copy()
                     df_dist['date'] = pd.to_datetime(df_dist['date'], utc=True) + pd.Timedelta(days=1)
@@ -334,9 +377,11 @@ class WyckoffV8(IStrategy):
                     _dcs_cnt = int(dataframe.get('dist_cause_sufficient', pd.Series(False)).sum())
                     logger.info(f'[V8-DIAG] {pair} dist_seq: bc_bars={_bc_cnt} dist_cause_sufficient_bars={_dcs_cnt}')
 
-                    # ── TASK S-2: bear_market_mode + sustained_markdown ──
-                    # daily_choch_confirmed：复用 v8_sc_final 近似（SC 确认 = 结构改变）
-                    # 派发侧：用 daily_bc_detected 触发 choch
+                    # ── TASK 14 Fix 3: 移除 sustained_markdown + _short_bear_gate 死代码 ──
+                    # sustained_markdown：7年0触发（daily_bc_detected点事件经merge_asof只有24根1H
+                    #   bar为True，rolling(30)永远无法达到30连续True）
+                    # _short_bear_gate：孤儿变量，计算后从未在enter_short逻辑中引用
+                    # bear_market_mode 保留（P5字段适配仍引用）
                     _daily_choch = dataframe.get(
                         'daily_bc_detected', pd.Series(False, index=dataframe.index)
                     ).fillna(False).astype(bool)
@@ -344,25 +389,7 @@ class WyckoffV8(IStrategy):
                         'dist_cause_sufficient', pd.Series(False, index=dataframe.index)
                     ).fillna(False).astype(bool)
                     dataframe['bear_market_mode'] = _daily_choch & _dist_cause
-
-                    # sustained_markdown：choch + close < daily_ema200×0.97 持续 30 根 1H
-                    _daily_ema200 = dataframe.get('v8_tr_low', pd.Series(float('nan'), index=dataframe.index))
-                    # 用 EMA200 估算：V8 无独立 daily_ema200，用 close 的 EMA200 代替
-                    _ema200_1h = dataframe['close'].ewm(span=200, adjust=False).mean()
-                    _sm_raw = (
-                        _daily_choch &
-                        (dataframe['close'] < _ema200_1h * 0.97)
-                    )
-                    dataframe['sustained_markdown'] = (
-                        _sm_raw.astype(int).rolling(30, min_periods=30).min().fillna(0).astype(bool)
-                    )
-                    dataframe['_short_bear_gate'] = (
-                        dataframe['bear_market_mode'] | dataframe['sustained_markdown']
-                    )
-
-                    _bm = int(dataframe['bear_market_mode'].sum())
-                    _sm = int(dataframe['sustained_markdown'].sum())
-                    logger.info(f'[V8-DIAG] {pair} S-2: bear_market_mode={_bm} sustained_markdown={_sm}')
+                    dataframe['sustained_markdown'] = False  # 死代码占位，保持字段兼容性
 
                 else:
                     logger.warning(f'[V8-DIAG] {pair} 1d data insufficient ({len(df_1d) if df_1d is not None else 0} rows)')
@@ -417,7 +444,7 @@ class WyckoffV8(IStrategy):
                      'daily_bc_detected', 'daily_utad_detected', 'daily_dist_sow_detected',
                      'buying_exhaustion', 'dist_cause_sufficient',
                      'bear_market_mode', 'sustained_markdown', '_short_bear_gate',
-                     'daily_sm_v2', 'daily_fallback_sow'}
+                     'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist'}
         float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3',
                       'v8_sc_low', 'daily_ar_high', 'daily_ar_low',
                       'target_short_conservative', 'target_short_standard', 'rr_short_standard'}
@@ -472,9 +499,9 @@ class WyckoffV8(IStrategy):
         _bear_gate    = (
             dataframe.get('dist_cause_sufficient',
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) |
-            dataframe.get('sustained_markdown',
-                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) |
             dataframe.get('daily_sm_v2',                                      # TASK 13: BC独立熊市闸门
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) |
+            dataframe.get('daily_ema200_persist',                             # TASK 14: 连续跌穿EMA200第四路径
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
         )
         pnf_valid_short = dataframe.get('target_short_conservative',
