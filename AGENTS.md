@@ -1,64 +1,162 @@
-# README_for_Claude
+# AGENTS.md — 项目状态与架构
 
-## What this package is
-This package is the implementation starter for P5 / P5-WS, the Strategy Intelligence Layer.
-It is not a trading strategy module. Freqtrade remains the execution engine.
+> 约束与教训见 `CLAUDE.md`。
 
-## Read this first
-1. `docs/P5-Data-Design.md`
-2. `docs/P5-Event-Spec.md`
-3. `docs/P5-V1-Implementation-Plan.md`
-4. `db/schema.sql`
-5. `db/views.sql`
+---
 
-## Implementation intent
-- Keep trading execution inside Freqtrade.
-- Write structured runtime events to JSONL.
-- Ingest those events into SQLite first.
-- Build summaries and diagnostics from DB views.
-- AI reads summaries and facts; AI does not mutate production logic directly.
+## 项目身份
 
-## V1 scope
-- SQLite only
-- Core tables only
-- Core views only
-- No auto-upgrade of baseline
-- No auto-parameter mutation
+这是一个基于 **Freqtrade** 的 **威科夫交易系统**，包含两大子系统：
 
-## Current execution order context
-The wider project order is:
-- P1 complete
-- P3 complete
-- P4 archived as future regime-aware optimization seed
-- P5 / P5-WS is the platformization stage
+| 子系统 | 定位 | 状态 |
+|--------|------|:---:|
+| **Wyckoff 策略** | 交易执行引擎 | 🟢 V8 封板，Dry Run 运行中 |
+| **P5 智能层** | 统计、诊断、实验、治理底座（SQLite + JSONL） | 🟢 V1 已运行 |
 
-## What to implement first
-1. `db/schema.sql`
-2. `db/views.sql`
-3. JSONL event emitter contract in strategy-side code
-4. Ingest script
-5. Weekly summary script
+---
 
+## 开始前必读
 
-## New implementation files added
-- `ingest/ingest_jsonl.py`: import structured JSONL events into SQLite
-- `reports/build_weekly_report.py`: build and optionally store a minimal weekly markdown report
-- `examples/sample_events.jsonl`: sample event stream for local validation
-- `events/sample/README.md`: quickstart commands
+1. `TASK_NEW/wyckoff_v8_redesign.md` — V8 设计主文档（最重要，含所有 TASK 记录和实验证伪结论）
+2. `docs/P5-Data-Design.md` / `docs/P5-Event-Spec.md` — P5 数据底座设计
 
-## Suggested first validation
-1. Create a fresh SQLite DB using `db/schema.sql` and `db/views.sql`.
-2. Ingest `examples/sample_events.jsonl` with `ingest/ingest_jsonl.py`.
-3. Generate a weekly report with `reports/build_weekly_report.py`.
-4. Confirm data appears in `experiment_runs`, `signals`, `trades`, `detector_events`, and `regime_snapshots`.
+> `TASK_NEW/TASKS.md` 和 `TASK_NEW/TASKS_with_checklist.md` 为 V7 时代遗留文档，V8 阶段不再维护。
 
+---
 
-推荐回测命令：
-```bash
-docker compose run --rm freqtrade backtesting --config user_data/config_backtest.json --strategy WyckoffV7_TrueMethod --timerange 20230101-20260330 --cache none
+## 当前基线（封板，2026-06-02，TASK 16）
+
+| 指标 | 数值 |
+|------|------|
+| 收益率 | **20,272%**（20220101-20260602） |
+| 交易数 | 491（多头 482 / 空头 9） |
+| 胜率 | 93.5% |
+| 最大 DD | 0.32% |
+| Sharpe | 3.13 |
+| Sortino | 36.12 |
+| Profit Factor | 157.4 |
+
+> 策略文件：`user_data/strategies/WyckoffV8.py`
+
+### 基线演进历史
+
+| TASK | 收益率 | 空头数 | 说明 |
+|------|--------|:------:|------|
+| TASK 7 | 19,449% | 0 | V8 初版集成 |
+| TASK S-1~S-7 | — | 3 | 做空完整集成（SOW/UTAD/BE） |
+| TASK 13 | 19,615% | 5 | sm_v2 + fallback_sow，熊市路径激活 |
+| TASK 14 | 19,615% | 5 | EMA200 persist 第四路径（修复死代码，数值不变） |
+| TASK 15 | 19,615% | 5 | sm_v2 权重 20% 封板（无统计差异） |
+| TASK 16 | 20,272% | 9 | LPSY 路径，捕获 BE 周期 78k→72k 零空单缺口 |
+
+### V7 历史基线（已归档）
+
+| 版本 | 收益率 | 交易数 | 胜率 | DD | 说明 |
+|------|--------|:------:|------|-----|------|
+| V7.1 | 8,374% | — | — | — | 移除 EMA200 独裁者 |
+| V7.1 + 实验A | 9,749% | 554 | 81.4% | 6.28% | wave_start 豁免 distributing |
+| V7.1 + A+B（修复后） | 6,284% | 583 | 76.8% | 6.25% | ZigZag lookahead 修复后真实值 |
+
+---
+
+## V8 架构设计
+
+### 核心设计原则
+
+```
+日线层 = 趋势背景：Phase D/E 过滤 + PNF 因果结构 + TR Low 止损参考
+1H 层  = 交易执行：wave_start 入场（v8_ws_d/v8_ws_e）+ down_wave 退出（主导）
+PNF 目标位 = 辅助参考：T1→移保本止损，T2→辅助退出
+止损架构 = TR Low 统一（Phase D/E/unknown 全部使用，奥卡姆最优解）
 ```
 
-Dry-run 检查：
-```bash
-python check_dryrun_fields.py
+### 多头入场路径
+
 ```
+v8_ws_d / v8_ws_e：Phase D/E 中 1H wave_start（up）确认后入场
+条件：Phase D/E + wave_displacement > 阈值 + bear_gate=False
+```
+
+### 空头入场路径（四路）
+
+```
+1. SOW / fallback_sow：超卖 + 20日新低
+2. UTAD：上冲吸筹失败
+3. BE（Buying Exhaustion）：买盘耗尽
+4. LPSY（Last Point of Supply）：BE 周期失败反弹后 ChoCh（TASK 16）
+门控：dist_cause_sufficient（含 BE 双轨）| daily_sm_v2 | daily_ema200_persist
+```
+
+### 退出优先级
+
+```
+1. 结构失败：current_rate < TR Low → v8_structure_fail（紧急）
+2. 1H down_wave 开始             → v8_down_wave（主要，95.3% 占比）
+3. PNF T2 到达                   → v8_pnf_t2（辅助）
+custom_stoploss: TR Low 结构止损（统一）+ T1 到达移保本
+```
+
+---
+
+## TASK 完成状态
+
+| TASK | 内容 | 状态 |
+|------|------|:---:|
+| TASK 1 | `sc_detector.py` SC/BC 识别 | ✅ |
+| TASK 2 | `phase_detector.py` Phase A-E | ✅ |
+| TASK 3 | `pnf_calculator.py` PNF 目标位 | ✅ |
+| TASK 4 | 1H 执行层（entry_detector.py） | ✅ |
+| TASK 5 | 退出层（down_wave 主退出 + PNF 辅助） | ✅ |
+| TASK 6 | `WyckoffV8.py` 集成 | ✅ |
+| TASK 7 | 回测验证 | ✅ 19,449% / 93.6% WR |
+| TASK S-1~S-7 | 做空完整集成（SOW/UTAD/BE） | ✅ |
+| TASK 11 | 全链路延迟法医审计（51.5h 确认税） | ✅ |
+| TASK 12 | 空头三路径审计 + LPSY 决策 | ✅ |
+| TASK 13 | 熊市空头路径激活（sm_v2 + fallback_sow） | ✅ |
+| TASK 14 | EMA200 persist 第四路径 + 做空门控深度修复 | ✅ |
+| TASK 15 | sm_v2 权重调参审计（20% 封板） | ✅ |
+| TASK 16 | LPSY 路径实现（BE 周期做空缺口修复） | ✅ |
+
+---
+
+## 常用命令
+
+```bash
+# V8 回测（全量）
+docker compose run --rm "freqtrade" backtesting \
+  --config user_data/config_backtest.json \
+  --config user_data/config_v8_backtest.json \
+  --strategy WyckoffV8 \
+  --timerange 20220101-20260602 --cache none
+
+# 数据更新（1H + 1D）
+docker compose run --rm "freqtrade" download-data \
+  --config user_data/config_backtest.json \
+  --config user_data/config_v8_backtest.json \
+  --timerange 20260101- --timeframe 1h 1d
+
+# Dry Run 日志
+docker compose logs -f --tail=100 "freqtrade"
+
+# 确认税审计脚本
+docker compose run --rm --entrypoint "" "freqtrade" \
+  sh -c "cd /freqtrade && python user_data/scripts/audit_confirmation_tax.py"
+
+# P5 全流程一键：回测 + 摄入 + 报表
+python scripts/run_backtest_pipeline.py --timerange 20260101-20260114
+
+# 快速查数据库行数
+python -c "import sqlite3; conn=sqlite3.connect('user_data/market.db'); \
+  [print(f'{t}: {conn.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]}') \
+  for t in ['experiment_runs','signals','trades','detector_events',\
+  'regime_snapshots','exit_decision_events','weekly_reports']]"
+```
+
+---
+
+## P5 智能层说明
+
+- 实现文件：`ingest/ingest_jsonl.py`、`reports/build_weekly_report.py`
+- 数据库：`user_data/market.db`（SQLite）
+- 设计文档：`docs/P5-Data-Design.md` / `docs/P5-Event-Spec.md`
+- 架构原则：交易执行保留在 Freqtrade，P5 只读取结构化事件，不直接修改策略逻辑
