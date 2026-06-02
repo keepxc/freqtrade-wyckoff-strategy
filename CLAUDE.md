@@ -11,6 +11,28 @@
 
 ---
 
+## ⚠️ 核心工作纪律：改代码必须有依据
+
+**在动任何策略代码之前，必须能回答这个问题：**
+
+> "我有什么理论或数据依据证明这个改动会改善系统，而不是基于直觉或'感觉合理'？"
+
+合法依据的示例：
+- **回测数据**：对照组 vs 实验组，样本 >30 笔，数值可对比
+- **Wyckoff 物理理论**：引用威科夫原典结构（SC/AR/SOS/BC/UTAD 等定义的行为规律）
+- **法医审计结论**：从 TASK 11/12 等历史审计中提炼的量化结论
+- **已知缺陷的根因**：能定位到具体 bar/逻辑路径，而不是"感觉信号太少"
+
+**不合法的依据**（这些理由不能触发代码改动）：
+- "这样更灵活" / "更能捕捉机会"
+- "理论上应该更好"
+- "其他系统也这么做"
+- 观察到某几天没开仓就认为系统有问题
+
+> 教训：15m/30m 切换提案 — 直觉上"更灵活"，但 Wyckoff 物理要求结构确认需要 1H+ 粒度，假突破率在低时框架指数级上升，无数据支撑，直接否决。
+
+---
+
 ## ⚠️ 写代码必读：未来函数（Lookahead Bias）检查清单
 
 **每次修改策略代码，必须检查以下几点，否则回测结果不可信：**
@@ -51,24 +73,32 @@
 | V7.1 + 实验A | 9,749% | 554 | 81.4% | 6.28% | wave_start 豁免 distributing |
 | V7.1 + A+B（修复后） | 6,284% | 583 | 76.8% | 6.25% | ZigZag lookahead 修复后真实值 |
 
-### V8 当前基线（封板，2026-05-26，TASK 13 完成）
+### V8 当前基线（封板，2026-06-02，TASK 16 完成）
 
 | 指标 | 数值 |
 |------|------|
-| 收益率 | **19,615%**（20220101-20260525） |
-| 交易数 | 482（多头 477 / 空头 5） |
-| 胜率 | 93.4% |
+| 收益率 | **20,272%**（20220101-20260602） |
+| 交易数 | 491（多头 482 / 空头 9） |
+| 胜率 | 93.5% |
 | 最大 DD | 0.32% |
-| Sharpe | 3.10 |
-| Sortino | 35.35 |
-| Profit Factor | 153.95 |
+| Sharpe | 3.13 |
+| Sortino | 36.12 |
+| Profit Factor | 157.4 |
 
-> 回测范围：`20220101-20260525`（随数据更新延伸）
+> 回测范围：`20220101-20260602`（随数据更新延伸）
 > 策略文件：`user_data/strategies/WyckoffV8.py`
+
+#### V8 基线演进历史
+| TASK | 收益率 | 空头数 | 说明 |
+|------|--------|:------:|------|
+| TASK 13 | 19,615% | 5 | sm_v2 + fallback_sow，熊市路径激活 |
+| TASK 14 | 19,615% | 5 | EMA200 persist 第四路径，数值不变（修复死代码） |
+| TASK 15 | 19,615% | 5 | sm_v2 权重调至 20%（与 13 持平，接受） |
+| TASK 16 | 20,272% | 9 | LPSY 路径，捕获 BE 周期 78k→72k 零空单缺口 |
 
 ---
 
-## V8 当前状态（2026-05-26，封板版本 TASK 13）
+## V8 当前状态（2026-06-02，封板版本 TASK 16）
 
 **V8 架构已完成并封板**：`WyckoffV8.py` 从零实现，Dry Run 运行中。
 
@@ -102,15 +132,20 @@ custom_stoploss: TR Low 结构止损（统一）+ T1到达移保本
 | TASK 11 | 全链路延迟法医审计（51.5h确认税） | ✅ |
 | TASK 12 | 空头三路径审计 + LPSY 封板决策 | ✅ |
 | TASK 13 | 熊市空头路径激活（sm_v2 + fallback_sow）| ✅ |
+| TASK 14 | EMA200 persist 第四路径 + 做空门控深度修复 | ✅ |
+| TASK 15 | sm_v2 权重调参审计（20% 封板） | ✅ |
+| TASK 16 | LPSY 路径实现（BE 周期做空缺口修复）| ✅ |
 
 ### 关键审计结论（已固化）
 | 结论 | 数据支撑 |
 |------|------|
 | Phase E 止损必须用 TR Low（不能用 ATR/Swing Low） | 复利悖论：0.175pp/笔差距 → 109,750× 复利差 |
 | down_wave 退出门槛（0.8% displacement）不需要调整 | 449笔 93.5% WR，6.5% 误触发为正常摩擦 |
-| LPSY 路径暂不补充 | 4.5年仅3笔空头，样本稀少，奥卡姆剃刀 |
 | 全链路入场延迟 51.5h，确认税 3.6% | 389个转折点统计，Alpha 物理真实性确认 |
 | 短窗口回测（<30天）无法触发交易 | PNF 门控需要长期历史预热，非系统缺陷 |
+| LPSY 路径实现（TASK 16）捕获 BE 周期空头缺口 | 根因：fallback_sow 要求 20日新低，BE顶后反弹物理不可能触发，4笔新增空头，+657% |
+| 确认税 Phase D vs E 无显著差异，min_bars 不需调整 | Phase D 中位 52h，Phase E 中位 45h；长尾延迟中负 price_gap 占多数，延迟≠错过，607笔统计 |
+| 1H 时间框架是 Wyckoff 最低有效粒度，不下沉 15m/30m | 15m 假突破率指数级上升（无数据支撑的提案已否决）；Wyckoff 结构确认需要 1H+ |
 
 ---
 
@@ -129,6 +164,10 @@ custom_stoploss: TR Low 结构止损（统一）+ T1到达移保本
 | 仓位管理默认关闭 | `WY_POSITION_MODE=off` |
 | sm_v2 + fallback_sow = BC独立空头路径 | TASK 13，$120k→$70k 信号真空修复，空头 3→5，收益 19,449%→19,615% |
 | fallback_sow 20日新低条件不放宽 | 放宽会引入假 SOW，对满仓复利链造成非线性回撤，奥卡姆封板 |
+| sm_v2 权重 20% 封板（TASK 15） | 5%/10%/15%/20%/25% 五档回测，各档与基线持平，无统计显著差异，保持原值 |
+| LPSY 豁免 RR（对齐 BE 路径） | BE 路径已无 RR 要求，LPSY 同为 BE 周期衍生路径，统一处理；样本少不宜用 RR 过滤 |
+| dist_cause_sufficient 包含 BE 激活（双轨并行） | daily_event_detector.py L577-579：`be_dcs_active=True` 当 BE 触发；DCS = dcs_active OR be_dcs_active |
+| 当前 Dry Run DCS=False 是正确行为 | BTC 已连续 5 日收于 EMA200 上方，be_dcs_active 按设计重置，分发论题物理失效 |
 
 ---
 
@@ -136,7 +175,7 @@ custom_stoploss: TR Low 结构止损（统一）+ T1到达移保本
 
 ```bash
 # V8 回测（全量）
-docker compose run --rm "freqtrade" backtesting --config user_data/config_backtest.json --config user_data/config_v8_backtest.json --strategy WyckoffV8 --timerange 20220101-20260525 --cache none
+docker compose run --rm "freqtrade" backtesting --config user_data/config_backtest.json --config user_data/config_v8_backtest.json --strategy WyckoffV8 --timerange 20220101-20260602 --cache none
 
 # 数据更新（1H + 1D）
 docker compose run --rm "freqtrade" download-data --config user_data/config_backtest.json --config user_data/config_v8_backtest.json --timerange 20260101- --timeframe 1h 1d
