@@ -2746,3 +2746,88 @@ LPSY 路径精准捕获了 78k→72k 的供应主导下杀（+4笔空单，短�
 DD 纹丝未动（0.32%），胜率保持 93.4%，Sharpe 继续提升（3.20）。
 Profit Factor 微降（-3.87）属正常摩擦：LPSY 的平均单笔盈利低于 Major SOW，但无亏损。
 **TASK 16 封板，新基线：20,272%，空头9笔（SOW/BE/LPSY 三路径均已覆盖）。**
+
+---
+
+## TASK 17 — BE 路径分层门控与结构化重置（2026-06-03）
+
+### 背景：Logic Bug 定位
+
+**法医审计数据**（2026-06-03，基于本地 1D 数据）：
+
+- `be_zone_high_locked = $82,828.7`（2026-05-06 高点，BE 触发锚点）
+- 2026-05-08 ~ 05-12：BTC 连续5日收盘 > EMA200（~80,846），触发旧重置逻辑 → `be_dcs_active = False`
+- 关键事实：5日内 BTC **最高仅到 82,460**（05-10），**从未突破 82,828.7**
+- 结果：be_dcs 被时间阈值抹除，05-22 跌破 EMA200 后无法恢复 → 83k→67k 第二波零空单
+
+**违反原则**：分发之"因"被时间稀释（5日 EMA200 阈值），而非结构证伪（突破供应上限），违反威科夫因果律。
+
+### Wyckoff 物理依据
+
+在威科夫体系中，一个派发周期的"因"只能由两种事件证伪：
+1. **价格放量突破供应上限**（close > be_zone_high_locked）→ 大机构筹码被更强力量承接
+2. **新积累周期开始**（新 BC/SC 出现）→ 旧分发之因已兑现完毕，能量释放
+
+EMA200 是趋势参考，无法从物理上"抹除"大机构在 $82.8k 留下的供应筹码。
+
+### 方案：两层分离
+
+| 层级 | 变量 | 语义 | 重置条件 |
+|------|------|------|----------|
+| **结构因（Active）** | `be_dcs_active` | 分发之因是否存续 | close > `be_zone_high_locked` 或 新 BC |
+| **战术门（Gated）** | `be_ema200_above_streak >= 5` | 是否暂停入场 | close < EMA200（立即重开） |
+
+```
+dcs_arr[i] = dcs_active OR (be_dcs_active AND NOT be_dcs_gated)
+```
+
+### 代码实现（daily_event_detector.py）
+
+**新增变量**：
+- `be_zone_high_locked`：BE 首次触发时采样 `be_zone_high_v[i]`，硬重置时清零
+- `be_zone_high_v`：从 df 预读（Step 3 已计算）
+
+**新 BC 时同步清零 BE 路径**（第二重置条件）：
+```python
+be_dcs_active       = False
+be_zone_high_locked = np.nan
+be_ema200_below_seen   = False
+be_ema200_above_streak = 0
+```
+
+**结构硬重置**（替换旧的时间阈值重置）：
+```python
+if be_dcs_active and not np.isnan(be_zone_high_locked) and close_v[i] > be_zone_high_locked:
+    be_dcs_active = False
+    be_zone_high_locked = np.nan
+    be_ema200_below_seen = False
+    be_ema200_above_streak = 0
+```
+
+**EMA200 降级为软门控**（不再触发 be_dcs 重置）：
+```python
+if close_v[i] < ema200_v[i]:
+    be_ema200_above_streak = 0   # 跌回立即归零
+elif be_ema200_below_seen and close_v[i] > ema200_v[i]:
+    be_ema200_above_streak += 1  # 计数，但不重置 be_dcs_active
+be_dcs_gated = be_dcs_active and (be_ema200_above_streak >= 5)
+```
+
+**5月数据回放验证**：
+
+| 日期 | 收盘 | be_dcs_active | be_dcs_gated | dist_cause_sufficient |
+|------|------|:---:|:---:|:---:|
+| 05-06 BE 触发 | 81,390 | True | False | **True ✅** |
+| 05-08~05-12 反弹 | 80k~82k | True | **True（5日门控）** | False（暂停入场） |
+| 05-22 跌破EMA200 | 75,513 | True | **False（立即重开）** | **True ✅** |
+| 05-27~06-02 续跌 | 74k→67k | True | False | **True ✅ 应有空单** |
+
+### 影响范围
+
+- 修改文件：`wyckoff/daily_event_detector.py`
+- WyckoffV8.py：**无需改动**（bear_gate 使用 `dist_cause_sufficient`，输出语义不变）
+- 空头四路径均受益：SOW/UTAD/BE/LPSY 全部通过 `dist_cause_sufficient` 门控
+
+### 回测验证
+
+> 待运行：`--timerange 20220101-20260602 --cache none`，对比 TASK 16 基线（20,272%）

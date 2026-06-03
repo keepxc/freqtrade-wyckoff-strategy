@@ -427,13 +427,18 @@ class DailyEventDetector:
         # Bug Fix #2: dist_cause_sufficient 双轨持久化
         # 路径1：BC 序列状态机（state 到达 utad/sow 才激活，与序列 exit 联动重置）
         dcs_active   = False
-        # 路径2：Buying Exhaustion 独立持久化（独立 EMA200 重回追踪，与 BC 序列解耦）
+        # 路径2：Buying Exhaustion 分层门控（TASK 17）
+        #   be_dcs_active       = 结构因（只有价格突破 be_zone_high_locked 或新 BC 才重置）
+        #   be_zone_high_locked = BE 触发时锁定的供应上限锚点
+        #   be_ema200_above_streak = EMA200 软门控计数（≥5 日关门，跌回立即重开）
         be_dcs_active          = False
+        be_zone_high_locked    = np.nan   # TASK 17: 结构锚点，首次 BE 时采样，硬重置时清零
         be_ema200_below_seen   = False
         be_ema200_above_streak = 0
         dcs_arr      = np.zeros(n, dtype=bool)
-        # 读取 buying_exhaustion（Step 3 已预计算）
-        be_v = df['buying_exhaustion'].values if 'buying_exhaustion' in df.columns else np.zeros(n, dtype=bool)
+        # 读取 buying_exhaustion 和 be_zone_high（Step 3 已预计算）
+        be_v          = df['buying_exhaustion'].values if 'buying_exhaustion' in df.columns else np.zeros(n, dtype=bool)
+        be_zone_high_v = df['be_zone_high'].values if 'be_zone_high' in df.columns else np.full(n, np.nan)
 
         for i in range(n):
             # EMA200 未就绪（前 200 根），跳过
@@ -452,6 +457,11 @@ class DailyEventDetector:
                 running_low = low_v[i]          # 初始化为 BC 自身 low
                 ema200_below_seen = False        # 新 BC：重置前一序列的 EMA200 跟踪
                 dcs_active  = False              # 新 BC：重置持久状态
+                # TASK 17: 新 BC = 新积累起点，旧分发之因物理兑现完毕，彻底清零 BE 路径
+                be_dcs_active       = False
+                be_zone_high_locked = np.nan
+                be_ema200_below_seen   = False
+                be_ema200_above_streak = 0
             else:
                 # ── Task 4.1c 退出条件（无新 BC 时检查）────────────────────
                 # 路径A：价格收回 AR 高点以上 → 派发区物理消亡，dist_cause_sufficient 自然置 False
@@ -484,19 +494,22 @@ class DailyEventDetector:
             if state != 'none' and not np.isnan(ema200_v[i]) and close_v[i] < ema200_v[i]:
                 ema200_below_seen = True
 
-            # ── Buying Exhaustion 独立 EMA200 跟踪（路径2）───────────────
-            # TASK 14 Fix 1: 重置需连续5天收于EMA200上方，防单日假突破清零 be_dcs
-            # 依据：39次历史上穿事件，假突破中位停留=3天，5天为最优阈值
+            # ── TASK 17: BE 路径分层门控 ─────────────────────────────────
+            # 结构硬重置：close > be_zone_high_locked（供应上限被放量突破，分发因证伪）
+            if be_dcs_active and not np.isnan(be_zone_high_locked) and close_v[i] > be_zone_high_locked:
+                be_dcs_active          = False
+                be_zone_high_locked    = np.nan
+                be_ema200_below_seen   = False
+                be_ema200_above_streak = 0
+
+            # EMA200 软门控：连续5日上方关门，跌回立即重开（不清零 be_dcs_active）
             if not np.isnan(ema200_v[i]):
                 if close_v[i] < ema200_v[i]:
-                    be_ema200_below_seen = True
+                    be_ema200_below_seen   = True
                     be_ema200_above_streak = 0
                 elif be_ema200_below_seen and close_v[i] > ema200_v[i]:
                     be_ema200_above_streak += 1
-                    if be_ema200_above_streak >= 5:
-                        be_dcs_active          = False
-                        be_ema200_below_seen   = False
-                        be_ema200_above_streak = 0
+            # be_ema200_above_streak 不再触发 be_dcs_active 重置，仅用于门控
 
             bars_since_bc = i - bc_idx if bc_idx >= 0 else 99999
 
@@ -574,9 +587,14 @@ class DailyEventDetector:
             #   路垄2：Buying Exhaustion 独立持久 → be_dcs_active（独立 EMA200 重回重置）
             if state in ('utad', 'sow'):
                 dcs_active = True
+            # TASK 17: BE 触发时采样结构锚点（只在首次激活时采样，防多次 BE 覆盖低点）
             if bool(be_v[i]):
+                if not be_dcs_active:          # 仅首次激活时锁定锚点
+                    be_zone_high_locked = be_zone_high_v[i]
                 be_dcs_active = True
-            dcs_arr[i] = dcs_active or be_dcs_active
+            # TASK 17: dcs_arr = BC路径 OR (BE路径因 AND NOT EMA200软门控)
+            be_dcs_gated = be_dcs_active and (be_ema200_above_streak >= 5)
+            dcs_arr[i] = dcs_active or (be_dcs_active and not be_dcs_gated)
             progress_arr[i] = state
             ar_high_arr[i]  = ar_high_val if not np.isnan(ar_high_val) else np.nan
             ar_low_arr[i]   = ar_low_val  if not np.isnan(ar_low_val)  else np.nan
