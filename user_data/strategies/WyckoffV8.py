@@ -491,10 +491,13 @@ class WyckoffV8(IStrategy):
 
                     # MSOW 检测：横盘前置 + EMA200熊市 + 破冰线 + 扩量 + 宽价差
                     _fti_ema200_shifted = pd.Series(_1d_ema200.values, index=df_1d.index).shift(1).fillna(0)
-                    _fti_consol_shifted = _fti_consol.shift(1).fillna(False)
-                    # TASK 24: persist >= 20 确认税 — 区分"牛市震仓"与"结构性熊市"
-                    # 物理依据：persist=1/2 的跌破属于 Shakeout（供应因不足），不具备冰层厚度
-                    # 数据依据：审计发现5笔侥幸交易（persist=1/2），2023-03-09为-18.6%灾难性风险
+                    _fti_consol_shifted = _fti_consol.shift(1).infer_objects(copy=False).fillna(False)
+                    # TASK 24: ema200_persist 激活天数门控 — 区分"牛市震仓"与"结构性熊市"
+                    # 语义：_persist_days 是 ema200_persist（连续15日跌穿EMA200激活）激活后的连续天数
+                    #       raw=1/2 → _persist_days=0（未激活），raw=79 → _persist_days≈65
+                    #       _persist_days >= 20 等效于 EMA200 下方连续 raw ≥ ~35 天
+                    # 物理依据：raw=1/2 属于 Shakeout（供应因不足），无冰层物理厚度
+                    # 数据依据：审计发现5笔侥幸交易（persist=0），2023-03-09为-18.6%灾难性风险
                     _fti_persist = pd.Series(_persist_days, index=df_1d.index).shift(1).fillna(0)
 
                     _fti_msow_raw = (
@@ -843,14 +846,15 @@ class WyckoffV8(IStrategy):
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
         ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate | fti_gate
 
-        # 优先级：SOW > LPSY > BE > ICE_LPSY > REDIST > FTI（UTAD 已停用）
+        # 优先级（顺序赋值：后者覆盖前者，故最高优先级放最后）
+        # FTI < REDIST < ICE_LPSY < BE < LPSY < SOW
+        dataframe.loc[final_short_entry & fti_gate,       'enter_tag'] = 'v8_short_fti'
+        dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
+        dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
+        # dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'  # 停用
         dataframe.loc[final_short_entry & be_entry,       'enter_tag'] = 'v8_short_be'
         dataframe.loc[final_short_entry & lpsy_gate,      'enter_tag'] = 'v8_short_lpsy'
         dataframe.loc[final_short_entry & sow_entry,      'enter_tag'] = 'v8_short_sow'
-        # dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'  # 停用
-        dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
-        dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
-        dataframe.loc[final_short_entry & fti_gate,       'enter_tag'] = 'v8_short_fti'
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
         _be_cnt   = int(be_gate.sum())
