@@ -24,17 +24,17 @@
 
 ---
 
-## 当前基线（封板，2026-06-02，TASK 16）
+## 当前基线（封板，2026-06-05，TASK 20）
 
 | 指标 | 数值 |
 |------|------|
-| 收益率 | **20,272%**（20220101-20260602） |
-| 交易数 | 491（多头 482 / 空头 9） |
-| 胜率 | 93.5% |
+| 收益率 | **21,934%**（20220101-20260602） |
+| 交易数 | 498（多头 478 / 空头 20） |
+| 胜率 | 93.2% |
 | 最大 DD | 0.32% |
-| Sharpe | 3.13 |
-| Sortino | 36.12 |
-| Profit Factor | 157.4 |
+| Sharpe | 3.26 |
+| Sortino | 38.50 |
+| Profit Factor | 160.23 |
 
 > 策略文件：`user_data/strategies/WyckoffV8.py`
 
@@ -48,6 +48,8 @@
 | TASK 14 | 19,615% | 5 | EMA200 persist 第四路径（修复死代码，数值不变） |
 | TASK 15 | 19,615% | 5 | sm_v2 权重 20% 封板（无统计差异） |
 | TASK 16 | 20,272% | 9 | LPSY 路径，捕获 BE 周期 78k→72k 零空单缺口 |
+| TASK 17 | 21,553% | 15 | BE路径分层门控，结构化重置替换时间阈值清零 |
+| TASK 20 | 21,934% | 20 | EMA200 冰线 LPSY（再派发确权），persist_days≥30 时间税 |
 
 ### V7 历史基线（已归档）
 
@@ -77,14 +79,16 @@ v8_ws_d / v8_ws_e：Phase D/E 中 1H wave_start（up）确认后入场
 条件：Phase D/E + wave_displacement > 阈值 + bear_gate=False
 ```
 
-### 空头入场路径（四路）
+### 空头入场路径（五路）
 
 ```
 1. SOW / fallback_sow：超卖 + 20日新低
 2. UTAD：上冲吸筹失败
 3. BE（Buying Exhaustion）：买盘耗尽
 4. LPSY（Last Point of Supply）：BE 周期失败反弹后 ChoCh（TASK 16）
-门控：dist_cause_sufficient（含 BE 双轨）| daily_sm_v2 | daily_ema200_persist
+5. ICE_LPSY（EMA200冰线LPSY）：再派发确权，persist_days≥30（TASK 20）
+门控：1~4：dist_cause_sufficient（含 BE 双轨）| daily_sm_v2 | daily_ema200_persist
+      5：daily_ema200_persist + persist_days≥30 + EMA200触碰失败；豁免 pnf_valid_short
 ```
 
 ### 退出优先级
@@ -116,6 +120,8 @@ custom_stoploss: TR Low 结构止损（统一）+ T1 到达移保本
 | TASK 14 | EMA200 persist 第四路径 + 做空门控深度修复 | ✅ |
 | TASK 15 | sm_v2 权重调参审计（20% 封板） | ✅ |
 | TASK 16 | LPSY 路径实现（BE 周期做空缺口修复） | ✅ |
+| TASK 17 | BE路径分层门控，结构化重置替换时间阈值清零 | ✅ |
+| TASK 20 | EMA200 冰线 LPSY 第五路径（再派发确权，阴跌型熊市盲区补全）| ✅ |
 
 ---
 

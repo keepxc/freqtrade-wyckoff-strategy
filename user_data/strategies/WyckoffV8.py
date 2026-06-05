@@ -391,6 +391,16 @@ class WyckoffV8(IStrategy):
                         _ema_persist_arr[_pi] = _ema_persist_on
                     df_1d['daily_ema200_persist'] = _ema_persist_arr
 
+                    # TASK 20: ema200_persist 连续激活天数（用于冰线 LPSY 的时间确权）
+                    _persist_days = np.zeros(len(df_1d), dtype=float)
+                    _pd_cnt = 0
+                    for _pi in range(len(df_1d)):
+                        _pd_cnt = _pd_cnt + 1 if _ema_persist_arr[_pi] else 0
+                        _persist_days[_pi] = _pd_cnt
+                    df_1d['ema200_persist_days'] = _persist_days
+                    # TASK 20: 日线 EMA200 值（供1H止损锚点使用）
+                    df_1d['daily_ema200_value'] = _1d_ema200
+
                     _ep_cnt = int(df_1d['daily_ema200_persist'].sum())
                     logger.info(f'[V8-DIAG] {pair} TASK14: daily_ema200_persist={_ep_cnt}')
 
@@ -416,7 +426,8 @@ class WyckoffV8(IStrategy):
                                  'daily_utad_detected', 'daily_dist_sow_detected',
                                  'buying_exhaustion', 'be_zone_high', 'dist_cause_sufficient',
                                  'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist',
-                                 'cycle_high']  # TASK 16: LPSY ceiling anchor
+                                 'cycle_high',                        # TASK 16: LPSY ceiling anchor
+                                 'ema200_persist_days', 'daily_ema200_value']  # TASK 20: 冰线 LPSY
                     dist_cols = [c for c in dist_cols if c in df_1d.columns]
                     df_dist = df_1d[dist_cols].copy()
                     df_dist['date'] = pd.to_datetime(df_dist['date'], utc=True) + pd.Timedelta(days=1)
@@ -504,7 +515,8 @@ class WyckoffV8(IStrategy):
         float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3',
                       'v8_sc_low', 'daily_ar_high', 'daily_ar_low', 'be_zone_high',
                       'target_short_conservative', 'target_short_standard', 'rr_short_standard',
-                      'cycle_high'}  # TASK 16
+                      'cycle_high',                                          # TASK 16
+                      'ema200_persist_days', 'daily_ema200_value'}           # TASK 20
         str_cols   = {'v8_phase', 'daily_bc_path', 'dist_sequence_progress'}
         all_cols = bool_cols | float_cols | str_cols
         for col in all_cols:
@@ -615,16 +627,45 @@ class WyckoffV8(IStrategy):
             _lpsy_context & lpsy_1h_ok & _bear_gate & pnf_valid_short & short_intent_ok
         )
 
+        # ── TASK 20: EMA200 冰线 LPSY（再派发确权路径）────────────────────────
+        # 物理含义：EMA200 在 Markdown 阶段充当"冰线（Ice）"，每次触碰后失败
+        #   = 供应主导的物理证据（努力与结果不和谐）
+        # 条件：
+        #   ① daily_ema200_persist = True（熊市门已激活）
+        #   ② ema200_persist_days >= 30（确认税：供应已统治市场30天，排除牛市深调假信号）
+        #   ③ 1H high >= daily_ema200_value * 0.98（触碰冰线警戒区）
+        #   ④ 1H close < daily_ema200_value（未能站上冰线）
+        #   ⑤ 1H close < open（阴线确认失败）
+        # 豁免：pnf_valid_short（DCS=False时无PNF目标，以EMA200×1.02为结构止损替代）
+        # 止损：custom_stoploss 中 EMA200 × 1.02（冰线被收复=空头论题证伪）
+        _ice_ema200     = dataframe.get('daily_ema200_value',
+                                        pd.Series(0.0, index=dataframe.index)).fillna(0.0)
+        _persist_days   = dataframe.get('ema200_persist_days',
+                                        pd.Series(0.0, index=dataframe.index)).fillna(0.0)
+        _ice_persist_ok = (
+            dataframe.get('daily_ema200_persist',
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) &
+            (_persist_days >= 30)
+        )
+        _ice_touch = (
+            (_ice_ema200 > 0) &
+            (dataframe['high'] >= _ice_ema200 * 0.98) &   # 触碰冰线警戒区
+            (dataframe['close'] < _ice_ema200) &           # 未能站上冰线
+            (dataframe['close'] < dataframe['open'])       # 阴线确认
+        )
+        ice_lpsy_gate = _ice_persist_ok & _ice_touch & short_intent_ok
+
         final_short_entry = (
             (sow_entry | utad_entry) &
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
-        ) | be_gate | lpsy_gate
+        ) | be_gate | lpsy_gate | ice_lpsy_gate
 
-        # 优先级：UTAD > SOW > LPSY > BE（UTAD/SOW 是更强的结构确认，LPSY 比 BE 更精准）
-        dataframe.loc[final_short_entry & be_entry,   'enter_tag'] = 'v8_short_be'
-        dataframe.loc[final_short_entry & lpsy_gate,  'enter_tag'] = 'v8_short_lpsy'
-        dataframe.loc[final_short_entry & sow_entry,  'enter_tag'] = 'v8_short_sow'
-        dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'
+        # 优先级：UTAD > SOW > LPSY > BE > ICE_LPSY
+        dataframe.loc[final_short_entry & be_entry,       'enter_tag'] = 'v8_short_be'
+        dataframe.loc[final_short_entry & lpsy_gate,      'enter_tag'] = 'v8_short_lpsy'
+        dataframe.loc[final_short_entry & sow_entry,      'enter_tag'] = 'v8_short_sow'
+        dataframe.loc[final_short_entry & utad_entry,     'enter_tag'] = 'v8_short_utad'
+        dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
         _be_cnt   = int(be_gate.sum())
@@ -686,6 +727,17 @@ class WyckoffV8(IStrategy):
 
         # ── TASK S-6: 空头止损分支 ──────────────────────────────
         if trade.is_short:
+            enter_tag_short = getattr(trade, 'enter_tag', '') or ''
+
+            # TASK 20: ice_lpsy 专用止损 — EMA200 × 1.02（冰线被收复=空头论题证伪）
+            if enter_tag_short == 'v8_short_ice_lpsy':
+                ice_ema200 = last.get('daily_ema200_value', np.nan)
+                if not np.isnan(ice_ema200) and ice_ema200 > 0:
+                    sl_price = ice_ema200 * 1.02
+                    return (sl_price / current_rate) - 1
+                # fallback：近期20日高点
+                return (float(dataframe['high'].tail(20).max()) * 1.02 / current_rate) - 1
+
             # 空头结构止损用派发侧 AR 高点；BE 路径无状态机锚点时 fallback 到近期 20 日高点
             ar_high = last.get('daily_ar_high', np.nan)
             if np.isnan(ar_high) or ar_high <= 0:

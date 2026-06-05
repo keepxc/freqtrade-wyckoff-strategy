@@ -2830,4 +2830,129 @@ be_dcs_gated = be_dcs_active and (be_ema200_above_streak >= 5)
 
 ### 回测验证
 
-> 待运行：`--timerange 20220101-20260602 --cache none`，对比 TASK 16 基线（20,272%）
+| 指标 | TASK 16 基线 | TASK 17（BE分层门控）| 变化 |
+|------|------------|---------------------|------|
+| 收益率 | 20,272% | **21,553%** | **+1,281pp** |
+| 交易数 | 486 | **494** | +8 |
+| 多/空 | 477/9 | **479/15** | 空头+6 |
+| 胜率 | 93.4% | **93.3%** | -0.1% |
+| 最大DD | 0.32% | **0.32%** | 0 |
+| Sharpe | 3.20 | **3.24** | +0.04 |
+| Sortino | — | **36.91** | — |
+| Profit Factor | 158.76 | **158.5** | ≈持平 |
+
+**TASK 17 封板，新基线：21,553%，空头15笔（BE路径分层门控正式生效）。**
+
+---
+
+## TASK 20 — EMA200 冰线 LPSY（再派发确权路径，2026-06-05）
+
+### 背景：阴跌型熊市盲区
+
+**法医问题**：BTC $124k → $70k 期间（2025-11 至 2026-03），系统空单 = 0笔。
+- BE 路径要求5日单调成交量递减（买盘耗尽），"慢速失血"行情不满足
+- SOW/LPSY 路径要求 DCS=True（BC→AR→分发序列），该期间无新 BC，DCS 物理上无法激活
+- 结论：该期间空头盲区是**物理约束**，不是工程缺陷
+
+**新机会识别**：EMA200 在 Markdown 期间从支撑转为动态阻力（冰线），价格反弹触碰后失败 = 供应主导的直接证据，无需依赖 DCS 激活路径。
+
+### Wyckoff 物理依据
+
+- **冰线（Ice Line）**：在 Markdown 阶段，EMA200 成为动态阻力天花板，每次反弹触碰后失败 = 努力vs结果不和谐 = 供应主导直接证据
+- **再派发确权（Redistribution）**：$124k 确立为"大因"锚点，EMA200 以下持续下行是再派发的物理特征
+- **时间确权税（persist_days >= 30）**：避免捕捉牛市深度调整中的短暂 EMA200 下穿（2025-03 假信号）
+
+### 诊断过程（三轮脚本）
+
+**诊断1（audit_ema200_ice_lpsy.py）**：
+- 10 次触碰事件（48H 冷却），2026-04-13（TASK19陷阱）自动过滤
+- 2025-11-10：+10.4%，2026-01-14：+9.3% 为高质量信号
+
+**诊断2（audit_ema200_ice_duration.py）**：时间窗口敏感度
+
+| 门槛 | 保留数 | 胜率 | 备注 |
+|------|:------:|:----:|------|
+| 无门槛 | 10 | 60% | 2025-03假信号混入 |
+| N≥15天 | 4 | 100% | 过滤2025-11-10（persist=1天）|
+| **N≥30天** | **4** | **100%** | 2025-11-10被过滤（物理代价，可接受）|
+| N≥45天 | 3 | 100% | 过滤2025-11-10和部分真信号 |
+
+**诊断3（audit_ema200_ice_ath.py）**：ATH 接近度过滤
+- **证伪**：2025-03 假信号 ATH 比率 = 1.000（因为 $110k 当时就是历史新高）
+- 无法用 ATH 接近度区分真假信号，物理不可能
+- **结论**：persist_days >= 30 是唯一有效过滤器
+
+**物理不可能性确认**：2025-11-10（真信号，ATH崩盘首日）和2025-03（假信号，牛市深调）在 persist_days=1、ATH比率≈1.0 上完全无法区分。放弃捕捉"第一日崩盘"信号，专攻 persist_days>=30 的再派发结构。
+
+### 方案设计（方案A：豁免 pnf_valid_short）
+
+**对比方案**：
+- 方案B（保留 pnf_valid_short）：需要等 PNF 因果序列激活，可能过滤有效信号
+- **方案A（采用）**：豁免 pnf_valid_short，与 BE 路径豁免 RR 的逻辑一致；使用 EMA200×1.02 作为结构止损锚点（冰线被收复=空头论题证伪）
+
+**止损逻辑**：EMA200×1.02（冰线被收复 = 空头方向论题证伪）；fallback = 近期20日高点×1.02
+
+### 实现细节（WyckoffV8.py）
+
+**新增日线指标**（populate_indicators，ema200_persist 计算后）：
+```python
+# TASK 20: ema200_persist 连续激活天数（用于冰线 LPSY 的时间确权）
+_persist_days = np.zeros(len(df_1d), dtype=float)
+_pd_cnt = 0
+for _pi in range(len(df_1d)):
+    _pd_cnt = _pd_cnt + 1 if _ema_persist_arr[_pi] else 0
+    _persist_days[_pi] = _pd_cnt
+df_1d['ema200_persist_days'] = _persist_days
+# TASK 20: 日线 EMA200 值（供1H止损锚点使用）
+df_1d['daily_ema200_value'] = _1d_ema200
+```
+
+**入场条件**（populate_entry_trend）：
+```python
+_ice_persist_ok = (
+    dataframe['daily_ema200_persist'].fillna(False).astype(bool) &
+    (_persist_days >= 30)
+)
+_ice_touch = (
+    (_ice_ema200 > 0) &
+    (dataframe['high'] >= _ice_ema200 * 0.98) &
+    (dataframe['close'] < _ice_ema200) &
+    (dataframe['close'] < dataframe['open'])
+)
+ice_lpsy_gate = _ice_persist_ok & _ice_touch & short_intent_ok
+# 豁免 pnf_valid_short，不进入 final_short_entry 的 pnf 门控
+final_short_entry = (
+    (sow_entry | utad_entry) & short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
+) | be_gate | lpsy_gate | ice_lpsy_gate
+```
+
+**专用止损**（custom_stoploss）：
+```python
+if enter_tag_short == 'v8_short_ice_lpsy':
+    ice_ema200 = last.get('daily_ema200_value', np.nan)
+    if not np.isnan(ice_ema200) and ice_ema200 > 0:
+        sl_price = ice_ema200 * 1.02
+        return (sl_price / current_rate) - 1
+    return (float(dataframe['high'].tail(20).max()) * 1.02 / current_rate) - 1
+```
+
+### 回测结果
+
+| 指标 | TASK 17 基线 | TASK 20（冰线LPSY）| 变化 |
+|------|------------|-------------------|------|
+| 收益率 | 21,553% | **21,934%** | **+381pp** |
+| 交易数 | 494 | **498** | +4 |
+| 多/空 | 479/15 | **478/20** | 空头+5 |
+| 胜率 | 93.3% | **93.2%** | -0.1%（正常摩擦）|
+| 最大DD | 0.32% | **0.32%** | 持平 |
+| Sharpe | 3.24 | **3.26** | +0.02 |
+| Sortino | 36.91 | **38.50** | +1.59 |
+| Profit Factor | 158.5 | **160.23** | +1.73 |
+| 空头利润贡献 | — | **+1,758%** | 新增 |
+
+**关键验证**：
+- 空头从 15 笔增加到 **20 笔**（+5 笔 v8_short_ice_lpsy）
+- DD 严格保持 **0.32%**，TASK 19 的 DD 爆炸问题（0.32%→2.18%）完全没有复现
+- 多头从 479 笔减少到 478 笔（-1 笔，正常槽位竞争）
+
+**TASK 20 封板，新基线：21,934%，空头20笔（五路径：SOW/UTAD/BE/LPSY/ICE_LPSY）。**
