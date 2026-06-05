@@ -1,0 +1,11 @@
+{
+  "exchange": {
+    "pair_whitelist": [
+      "ETH/USDT:USDT"
+    ]
+  },
+  "pairs": [
+    "ETH/USDT:USDT"
+  ],
+  "minimal_roi": {"0": 99.0}
+}
