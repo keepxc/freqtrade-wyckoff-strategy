@@ -401,6 +401,68 @@ class WyckoffV8(IStrategy):
                     # TASK 20: 日线 EMA200 值（供1H止损锚点使用）
                     df_1d['daily_ema200_value'] = _1d_ema200
 
+                    # ── TASK 22: 再派发（Redistribution）结构日线指标 ──────────────
+                    # 物理含义：主跌浪途中的横盘整理区间，供应补充 + 需求撤离
+                    # 三项量化指标（全部 shift(1) 防未来函数）：
+                    #   1. range_atr7：7日价格区间宽度 / ATR14（横盘紧凑度）
+                    #   2. lower_highs7：窗口前半 high_max > 后半 high_max（高点递降结构）
+                    #   3. no_demand7：上涨日平均成交量 < vol_ma20 * 0.85（需求匮乏）
+                    _1d_atr14   = (df_1d['high'] - df_1d['low']).rolling(14).mean()
+                    _1d_vol_ma20_nd = df_1d['volume'].rolling(20, min_periods=10).mean()
+
+                    _range_atr7   = np.full(len(df_1d), np.nan)
+                    _lower_highs7 = np.zeros(len(df_1d), dtype=bool)
+                    _no_demand7   = np.zeros(len(df_1d), dtype=bool)
+
+                    WIN = 7
+                    MID = WIN // 2
+                    for _ri in range(WIN, len(df_1d)):
+                        _w     = df_1d.iloc[_ri - WIN: _ri]
+                        _atr   = _1d_atr14.iloc[_ri - 1]
+                        _vma   = _1d_vol_ma20_nd.iloc[_ri - 1]
+                        if _atr <= 0 or np.isnan(_atr):
+                            continue
+                        # 1. 横盘紧凑度
+                        _rng = _w['high'].max() - _w['low'].min()
+                        _range_atr7[_ri] = _rng / _atr
+                        # 2. 高点递降
+                        _h1 = _w.iloc[:MID]['high'].max()
+                        _h2 = _w.iloc[MID:]['high'].max()
+                        _lower_highs7[_ri] = (_h2 < _h1)
+                        # 3. 需求匮乏（上涨日量萎缩）
+                        _up = _w[_w['close'] > _w['open']]
+                        if len(_up) >= 2 and _vma > 0 and not np.isnan(_vma):
+                            _no_demand7[_ri] = (_up['volume'].mean() < _vma * 0.85)
+                        else:
+                            _no_demand7[_ri] = True  # 上涨日极少 = 需求本身不存在
+
+                    # shift(1) 防未来函数，再派发门控需 persist_days >= 20
+                    _range_s   = pd.Series(_range_atr7,   index=df_1d.index).shift(1)
+                    _lh_s      = pd.Series(_lower_highs7, index=df_1d.index).shift(1).fillna(False).astype(bool)
+                    _nd_s      = pd.Series(_no_demand7,   index=df_1d.index).shift(1).fillna(False).astype(bool)
+                    _pd_s      = pd.Series(_persist_days, index=df_1d.index).shift(1).fillna(0)
+
+                    # 距离过滤：close < EMA200 * 0.93（再派发发生在主跌浪中段，非冰线边缘）
+                    _ema200_s = pd.Series(_1d_ema200.values, index=df_1d.index).shift(1).fillna(0)
+                    _deep_enough = (
+                        (_ema200_s > 0) &
+                        (df_1d['close'] < _ema200_s * 0.93)
+                    )
+                    # 动量过滤：close < close 7日前（7日净趋势仍为下行，排除局部反弹末段）
+                    _mom7_down = (df_1d['close'] < df_1d['close'].shift(7))
+
+                    df_1d['daily_redist_ok'] = (
+                        (_pd_s >= 20) &
+                        (_range_s <= 2.5) &
+                        _lh_s &
+                        _nd_s &
+                        _deep_enough &
+                        _mom7_down
+                    ).fillna(False)
+
+                    _rd_cnt = int(df_1d['daily_redist_ok'].sum())
+                    logger.info(f'[V8-DIAG] {pair} TASK22: daily_redist_ok={_rd_cnt}')
+
                     _ep_cnt = int(df_1d['daily_ema200_persist'].sum())
                     logger.info(f'[V8-DIAG] {pair} TASK14: daily_ema200_persist={_ep_cnt}')
 
@@ -427,7 +489,8 @@ class WyckoffV8(IStrategy):
                                  'buying_exhaustion', 'be_zone_high', 'dist_cause_sufficient',
                                  'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist',
                                  'cycle_high',                        # TASK 16: LPSY ceiling anchor
-                                 'ema200_persist_days', 'daily_ema200_value']  # TASK 20: 冰线 LPSY
+                                 'ema200_persist_days', 'daily_ema200_value',  # TASK 20: 冰线 LPSY
+                                 'daily_redist_ok']                            # TASK 22: 再派发结构
                     dist_cols = [c for c in dist_cols if c in df_1d.columns]
                     df_dist = df_1d[dist_cols].copy()
                     df_dist['date'] = pd.to_datetime(df_dist['date'], utc=True) + pd.Timedelta(days=1)
@@ -511,7 +574,8 @@ class WyckoffV8(IStrategy):
                      'daily_bc_detected', 'daily_utad_detected', 'daily_dist_sow_detected',
                      'buying_exhaustion', 'dist_cause_sufficient',
                      'bear_market_mode', 'sustained_markdown', '_short_bear_gate',
-                     'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist'}
+                     'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist',
+                     'daily_redist_ok'}
         float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3',
                       'v8_sc_low', 'daily_ar_high', 'daily_ar_low', 'be_zone_high',
                       'target_short_conservative', 'target_short_standard', 'rr_short_standard',
@@ -655,17 +719,34 @@ class WyckoffV8(IStrategy):
         )
         ice_lpsy_gate = _ice_persist_ok & _ice_touch & short_intent_ok
 
+        # ── TASK 22: 再派发结构路径（第六路径）────────────────────────────────
+        # 物理含义：主跌浪途中横盘整理，高点递降 + 需求匮乏 = 供应补充完成，续跌
+        # 条件：
+        #   ① daily_redist_ok = True（日线层：7日横盘 + 高点递降 + 上涨日量萎缩 + persist>=20）
+        #   ② 1H close < open（阴线：执行层确认供应入场）
+        #   ③ short_intent_ok（做空意图）
+        # 豁免：pnf_valid_short 和 EMA200触碰（结构门控替代单点信号）
+        # 止损：EMA200 × 1.02（与 ice_lpsy 共用冰线结构止损）
+        _redist_daily_ok = dataframe.get('daily_redist_ok',
+                                         pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        _redist_1h_confirm = (
+            (dataframe['close'] < dataframe['open']) &     # 阴线：供应主导
+            (dataframe['volume'] > 0)                      # 有成交（过滤空 bar）
+        )
+        redist_gate = _redist_daily_ok & _redist_1h_confirm & short_intent_ok
+
         final_short_entry = (
             (sow_entry | utad_entry) &
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
-        ) | be_gate | lpsy_gate | ice_lpsy_gate
+        ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate
 
-        # 优先级：UTAD > SOW > LPSY > BE > ICE_LPSY
+        # 优先级：UTAD > SOW > LPSY > BE > ICE_LPSY > REDIST
         dataframe.loc[final_short_entry & be_entry,       'enter_tag'] = 'v8_short_be'
         dataframe.loc[final_short_entry & lpsy_gate,      'enter_tag'] = 'v8_short_lpsy'
         dataframe.loc[final_short_entry & sow_entry,      'enter_tag'] = 'v8_short_sow'
         dataframe.loc[final_short_entry & utad_entry,     'enter_tag'] = 'v8_short_utad'
         dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
+        dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
         _be_cnt   = int(be_gate.sum())
@@ -729,8 +810,8 @@ class WyckoffV8(IStrategy):
         if trade.is_short:
             enter_tag_short = getattr(trade, 'enter_tag', '') or ''
 
-            # TASK 20: ice_lpsy 专用止损 — EMA200 × 1.02（冰线被收复=空头论题证伪）
-            if enter_tag_short == 'v8_short_ice_lpsy':
+            # TASK 20/22: ice_lpsy / redist 专用止损 — EMA200 × 1.02（冰线被收复=空头论题证伪）
+            if enter_tag_short in ('v8_short_ice_lpsy', 'v8_short_redist'):
                 ice_ema200 = last.get('daily_ema200_value', np.nan)
                 if not np.isnan(ice_ema200) and ice_ema200 > 0:
                     sl_price = ice_ema200 * 1.02
