@@ -24,15 +24,15 @@
 
 ---
 
-## 当前基线（封板，2026-06-05，TASK 23）
+## 当前基线（封板，2026-06-05，TASK 24）
 
 | 指标 | 数值 |
 |------|------|
-| 收益率 | **26,693%**（20220101-20260602） |
-| 交易数 | 514（多头 476 / 空头 38） |
-| 胜率 | 92.6% |
+| 收益率 | **25,512%**（20220101-20260602） |
+| 交易数 | 509（多头 471 / 空头 38） |
+| 胜率 | 92.5% |
 | 最大 DD | 0.32% |
-| Sharpe | 3.32 |
+| Sharpe | — |
 | Sortino | — |
 | Profit Factor | — |
 
@@ -52,6 +52,7 @@
 | TASK 20 | 21,934% | 20 | EMA200 冰线 LPSY（再派发确权），persist_days≥30 时间税 |
 | TASK 22 | 25,200% | 36 | 再派发结构第六路径（横盘+高点递降+量萎缩+深度+动量过滤） |
 | TASK 23 | 26,693% | 38 | FTI 冰线跌破第七路径（横盘15%+EMA200+MSOW日线门控，1H收盘位置确认） |
+| TASK 24 | 25,512% | 38 | FTI冰层厚度确认税（persist_days≥20，清除persist=1/2的5笔侥幸交易，物理逻辑闭环） |
 
 ### V7 历史基线（已归档）
 
@@ -93,7 +94,7 @@ v8_ws_d / v8_ws_e：Phase D/E 中 1H wave_start（up）确认后入场
 门控：1~4：dist_cause_sufficient（含 BE 双轨）| daily_sm_v2 | daily_ema200_persist
       5：daily_ema200_persist + persist_days≥30 + EMA200触碰失败；豁免 pnf_valid_short
       6：daily_redist_ok（7项日线结构）；豁免 pnf_valid_short 和 EMA200触碰；止损 EMA200×1.02
-      7：daily_fti_msow_active（横盘15%+EMA200熊市+MSOW）+ 1H收盘位置≤40%；止损 ice×1.02
+      7：daily_fti_msow_active（横盘15%+EMA200熊市+persist≥20天+MSOW）+ 1H收盘位置≤40%；止损 ice×1.02
 ```
 
 ### 退出优先级
@@ -134,6 +135,7 @@ custom_stoploss: TR Low 结构止损（统一）+ T1 到达移保本
 | TASK 21 | 量价指纹早窗口绕过30天税 — 证伪（假信号指纹强于真信号）| ❌ |
 | TASK 22 | 再派发结构第六路径（+3,266pp，DD持平0.32%） | ✅ |
 | TASK 23 | FTI 冰线跌破第七路径（+1,493pp，DD持平0.32%，Sharpe 3.32） | ✅ |
+| TASK 24 | FTI冰层厚度确认税 persist≥20（-1,181pp，清除persist=1/2侥幸交易，物理逻辑闭环） | ✅ |
 
 ---
 

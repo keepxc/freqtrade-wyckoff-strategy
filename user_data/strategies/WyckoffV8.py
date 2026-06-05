@@ -492,9 +492,14 @@ class WyckoffV8(IStrategy):
                     # MSOW 检测：横盘前置 + EMA200熊市 + 破冰线 + 扩量 + 宽价差
                     _fti_ema200_shifted = pd.Series(_1d_ema200.values, index=df_1d.index).shift(1).fillna(0)
                     _fti_consol_shifted = _fti_consol.shift(1).fillna(False)
+                    # TASK 24: persist >= 20 确认税 — 区分"牛市震仓"与"结构性熊市"
+                    # 物理依据：persist=1/2 的跌破属于 Shakeout（供应因不足），不具备冰层厚度
+                    # 数据依据：审计发现5笔侥幸交易（persist=1/2），2023-03-09为-18.6%灾难性风险
+                    _fti_persist = pd.Series(_persist_days, index=df_1d.index).shift(1).fillna(0)
 
                     _fti_msow_raw = (
                         _fti_consol_shifted &                                           # 横盘前置
+                        (_fti_persist >= 20) &                                          # TASK24: 冰层厚度确认税
                         (df_1d['close'] < _fti_ema200_shifted) &                        # EMA200熊市
                         (df_1d['close'] < _fti_ice_raw) &                               # 跌破冰线
                         ((df_1d['high'] - df_1d['low']) >= _fti_atr14 * 1.5) &          # 宽价差
