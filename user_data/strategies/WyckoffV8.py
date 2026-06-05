@@ -606,9 +606,9 @@ class WyckoffV8(IStrategy):
         dataframe['v8_t2_exists'] = t2.notna()
 
         # ── TASK S-4: enter_short ───────────────────────────────
-        # 触发条件（三路径）：
+        # 触发条件（五路径，UTAD 已停用）：
         #   路径1 SOW：daily_dist_sow_detected（经典 BC→AR→SOW 或 ar→sow 直通）
-        #   路径2 UTAD：daily_utad_detected（UTAD 确认后提前入场）
+        #   路径2 UTAD：【已停用，见下方注释】
         #   路径3 BE：buying_exhaustion（渐进式分配顶，无单根 BC，2022型）
         dataframe['enter_short'] = 0
 
@@ -618,8 +618,15 @@ class WyckoffV8(IStrategy):
             dataframe.get('daily_fallback_sow',                              # TASK 13: BC独立 fallback SOW
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
         )
-        utad_entry = dataframe.get('daily_utad_detected',
-                                   pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        # UTAD 路径停用（2026-06-05）：
+        # 原因：20220101-20260602 全量回测（4年两轮熊市）触发 0 笔。
+        # UTAD 需要完整 BC→AR→UT 结构且价格精准突破分发区高点，条件过严，
+        # 实战中该信号出现时 SOW/LPSY/ICE_LPSY 已先行覆盖，入场不再依赖它。
+        # 检测器代码（daily_event_detector.py）保留，仅停用此处入场逻辑。
+        # 如需重启，恢复下方注释并在 final_short_entry 中加回 utad_entry。
+        # utad_entry = dataframe.get('daily_utad_detected',
+        #                            pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        utad_entry = pd.Series(False, index=dataframe.index)  # 停用占位，保持后续引用不报错
         be_entry   = dataframe.get('buying_exhaustion',
                                    pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
 
@@ -740,11 +747,11 @@ class WyckoffV8(IStrategy):
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
         ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate
 
-        # 优先级：UTAD > SOW > LPSY > BE > ICE_LPSY > REDIST
+        # 优先级：SOW > LPSY > BE > ICE_LPSY > REDIST（UTAD 已停用）
         dataframe.loc[final_short_entry & be_entry,       'enter_tag'] = 'v8_short_be'
         dataframe.loc[final_short_entry & lpsy_gate,      'enter_tag'] = 'v8_short_lpsy'
         dataframe.loc[final_short_entry & sow_entry,      'enter_tag'] = 'v8_short_sow'
-        dataframe.loc[final_short_entry & utad_entry,     'enter_tag'] = 'v8_short_utad'
+        # dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'  # 停用
         dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
         dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
         dataframe.loc[final_short_entry, 'enter_short'] = 1
