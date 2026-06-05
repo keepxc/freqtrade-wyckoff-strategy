@@ -466,6 +466,63 @@ class WyckoffV8(IStrategy):
                     _ep_cnt = int(df_1d['daily_ema200_persist'].sum())
                     logger.info(f'[V8-DIAG] {pair} TASK14: daily_ema200_persist={_ep_cnt}')
 
+                    # ── TASK 23: FTI（Fall Through the Ice）冰线跌破日线门控 ──────────
+                    # 诊断发现：FTI 在日线粒度的量价确认存在系统性偏差（close_loc P10=0.74）
+                    # 正确架构：日线三重门控（横盘前置+EMA200+MSOW），1H层执行FTI确认
+                    #
+                    # 日线门控三项：
+                    #   1. 横盘前置：前14日 (high-low)/close <= 15%（价格%，规避ATR高波动失真）
+                    #   2. EMA200 熊市：close < EMA200（消除牛市假信号）
+                    #   3. MSOW：收盘跌破冰线 + 价差>=1.5×ATR + 量>=1.5×vol_ma20
+                    # 输出：
+                    #   daily_fti_msow_active：MSOW 发生后 7 日内持续有效（供1H入场窗口）
+                    #   daily_fti_ice_level：冰线锚点（横盘14日最低 low，止损参考）
+
+                    _fti_atr14      = _1d_atr14  # 复用 TASK 22 已计算的 ATR14
+                    _fti_vol_ma20   = _1d_vol_ma20_nd  # 复用 TASK 22 已计算的 vol_ma20
+
+                    # 横盘检测：14日 (high-low)/close <= 15%
+                    _fti_range14 = (df_1d['high'].rolling(14, min_periods=8).max()
+                                  - df_1d['low'].rolling(14, min_periods=8).min())
+                    _fti_consol = (_fti_range14 / df_1d['close'].replace(0, float('nan'))) <= 0.15
+
+                    # 冰线：14日滚动最低 low（shift(1) 防未来函数）
+                    _fti_ice_raw = df_1d['low'].rolling(14, min_periods=8).min().shift(1)
+
+                    # MSOW 检测：横盘前置 + EMA200熊市 + 破冰线 + 扩量 + 宽价差
+                    _fti_ema200_shifted = pd.Series(_1d_ema200.values, index=df_1d.index).shift(1).fillna(0)
+                    _fti_consol_shifted = _fti_consol.shift(1).fillna(False)
+
+                    _fti_msow_raw = (
+                        _fti_consol_shifted &                                           # 横盘前置
+                        (df_1d['close'] < _fti_ema200_shifted) &                        # EMA200熊市
+                        (df_1d['close'] < _fti_ice_raw) &                               # 跌破冰线
+                        ((df_1d['high'] - df_1d['low']) >= _fti_atr14 * 1.5) &          # 宽价差
+                        (df_1d['volume'] >= _fti_vol_ma20 * 1.5)                        # 放量
+                    ).fillna(False)
+
+                    # daily_fti_msow_active：MSOW 后 7 日内持续激活（滑窗传播）
+                    _fti_active_arr = np.zeros(len(df_1d), dtype=bool)
+                    _fti_ice_arr    = np.full(len(df_1d), np.nan)
+                    _fti_active_cnt = 0
+                    _fti_ice_locked = np.nan
+                    for _fi in range(len(df_1d)):
+                        if _fti_msow_raw.iloc[_fi]:
+                            _fti_active_cnt = 7   # MSOW 后 7 日窗口
+                            _fti_ice_locked = _fti_ice_raw.iloc[_fi]  # 锁定冰线值
+                        if _fti_active_cnt > 0 and not np.isnan(_fti_ice_locked):
+                            _fti_active_arr[_fi] = True
+                            _fti_ice_arr[_fi]    = _fti_ice_locked
+                            _fti_active_cnt -= 1
+                        else:
+                            _fti_active_arr[_fi] = False
+
+                    df_1d['daily_fti_msow_active'] = _fti_active_arr
+                    df_1d['daily_fti_ice_level']   = pd.Series(_fti_ice_arr, index=df_1d.index)
+
+                    _fti_cnt = int(df_1d['daily_fti_msow_active'].sum())
+                    logger.info(f'[V8-DIAG] {pair} TASK23: daily_fti_msow_active={_fti_cnt}')
+
                     # ── TASK 13 Fix 2: fallback SOW — sm_v2 激活时的结构性做空信号 ──
                     # 替代 ar_low 的锚点：使用 20 日滚动最低价（shift(1) 防未来函数）
                     _1d_vol_ma20 = df_1d['volume'].rolling(20, min_periods=10).mean()
@@ -490,7 +547,8 @@ class WyckoffV8(IStrategy):
                                  'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist',
                                  'cycle_high',                        # TASK 16: LPSY ceiling anchor
                                  'ema200_persist_days', 'daily_ema200_value',  # TASK 20: 冰线 LPSY
-                                 'daily_redist_ok']                            # TASK 22: 再派发结构
+                                 'daily_redist_ok',                            # TASK 22: 再派发结构
+                                 'daily_fti_msow_active', 'daily_fti_ice_level'] # TASK 23: FTI冰线跌破
                     dist_cols = [c for c in dist_cols if c in df_1d.columns]
                     df_dist = df_1d[dist_cols].copy()
                     df_dist['date'] = pd.to_datetime(df_dist['date'], utc=True) + pd.Timedelta(days=1)
@@ -575,12 +633,14 @@ class WyckoffV8(IStrategy):
                      'buying_exhaustion', 'dist_cause_sufficient',
                      'bear_market_mode', 'sustained_markdown', '_short_bear_gate',
                      'daily_sm_v2', 'daily_fallback_sow', 'daily_ema200_persist',
-                     'daily_redist_ok'}
+                     'daily_redist_ok',
+                     'daily_fti_msow_active'}                                # TASK 23: FTI门控
         float_cols = {'v8_tr_high', 'v8_tr_low', 'v8_target_1', 'v8_target_2', 'v8_target_3',
                       'v8_sc_low', 'daily_ar_high', 'daily_ar_low', 'be_zone_high',
                       'target_short_conservative', 'target_short_standard', 'rr_short_standard',
                       'cycle_high',                                          # TASK 16
-                      'ema200_persist_days', 'daily_ema200_value'}           # TASK 20
+                      'ema200_persist_days', 'daily_ema200_value',           # TASK 20
+                      'daily_fti_ice_level'}                                 # TASK 23: 冰线锚点
         str_cols   = {'v8_phase', 'daily_bc_path', 'dist_sequence_progress'}
         all_cols = bool_cols | float_cols | str_cols
         for col in all_cols:
@@ -742,18 +802,50 @@ class WyckoffV8(IStrategy):
         )
         redist_gate = _redist_daily_ok & _redist_1h_confirm & short_intent_ok
 
+        # ── TASK 23: FTI（跌破冰层）路径（第七路径）────────────────────────────────
+        # 物理含义：横盘区间跌破后回抽冰线，收盘在低位区（需求失败）= 冰线变阻力确认
+        # 日线门控（daily_fti_msow_active）已在 populate_indicators 日线层设置：
+        #   - 横盘前置（14日 range/close ≤ 15%）+ EMA200熊市 + MSOW（扩量宽价差破冰）
+        #   - MSOW 后 7 日内持续有效，daily_fti_ice_level 锁定冰线锚点
+        # 1H 执行确认：
+        #   1. daily_fti_msow_active=True（在MSOW后7日窗口内）
+        #   2. 1H high >= ice × 0.985（触及冰线）
+        #   3. 1H close < ice（未能收复冰线）
+        #   4. 收盘位置 <= 0.40：(close-low)/(high-low)（卖方守住冰线，日内需求失败）
+        #   5. 量 <= vol_ma_1h（1H量不超过均量，需求匮乏）
+        # 豁免：pnf_valid_short、EMA200距离（日线门控已含EMA200熊市确认）
+        # 止损：ice_level × 1.02（冰线收复则逻辑证伪，区别于ATR倍数止损）
+        _fti_active = dataframe.get('daily_fti_msow_active',
+                                    pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
+        _fti_ice = dataframe.get('daily_fti_ice_level',
+                                  pd.Series(np.nan, index=dataframe.index)).fillna(0)
+
+        _fti_vol_ma_1h = dataframe['volume'].rolling(20, min_periods=5).mean()
+        _fti_bar_range = (dataframe['high'] - dataframe['low']).replace(0, np.nan)
+        _fti_close_loc = (dataframe['close'] - dataframe['low']) / _fti_bar_range
+
+        _fti_1h_confirm = (
+            (_fti_ice > 0) &
+            (dataframe['high'] >= _fti_ice * 0.985) &    # 触及冰线
+            (dataframe['close'] < _fti_ice) &             # 未能收复冰线
+            (_fti_close_loc <= 0.40) &                    # 收盘在日内低位区（需求失败）
+            (dataframe['volume'] <= _fti_vol_ma_1h)       # 量 <= 1H均量（需求匮乏）
+        )
+        fti_gate = _fti_active & _fti_1h_confirm
+
         final_short_entry = (
             (sow_entry | utad_entry) &
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
-        ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate
+        ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate | fti_gate
 
-        # 优先级：SOW > LPSY > BE > ICE_LPSY > REDIST（UTAD 已停用）
+        # 优先级：SOW > LPSY > BE > ICE_LPSY > REDIST > FTI（UTAD 已停用）
         dataframe.loc[final_short_entry & be_entry,       'enter_tag'] = 'v8_short_be'
         dataframe.loc[final_short_entry & lpsy_gate,      'enter_tag'] = 'v8_short_lpsy'
         dataframe.loc[final_short_entry & sow_entry,      'enter_tag'] = 'v8_short_sow'
         # dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'  # 停用
         dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
         dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
+        dataframe.loc[final_short_entry & fti_gate,       'enter_tag'] = 'v8_short_fti'
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
         _be_cnt   = int(be_gate.sum())
@@ -822,6 +914,15 @@ class WyckoffV8(IStrategy):
                 ice_ema200 = last.get('daily_ema200_value', np.nan)
                 if not np.isnan(ice_ema200) and ice_ema200 > 0:
                     sl_price = ice_ema200 * 1.02
+                    return (sl_price / current_rate) - 1
+                # fallback：近期20日高点
+                return (float(dataframe['high'].tail(20).max()) * 1.02 / current_rate) - 1
+
+            # TASK 23: FTI 专用止损 — 结构冰线 × 1.02（冰线收复=破位为震仓，逻辑证伪）
+            if enter_tag_short == 'v8_short_fti':
+                fti_ice = last.get('daily_fti_ice_level', np.nan)
+                if not np.isnan(fti_ice) and fti_ice > 0:
+                    sl_price = fti_ice * 1.02
                     return (sl_price / current_rate) - 1
                 # fallback：近期20日高点
                 return (float(dataframe['high'].tail(20).max()) * 1.02 / current_rate) - 1
