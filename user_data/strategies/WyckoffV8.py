@@ -747,6 +747,8 @@ class WyckoffV8(IStrategy):
 
         # 追踪最近确认摆高价（ffill：持续到下一个摆高为止）
         _recent_swing_high_price = dataframe['high'].where(_is_swing_high).ffill()
+        # TASK 27: 存入 dataframe，供 custom_stoploss 读取 wave_breakdown 止损锚点
+        dataframe['wb_swing_high_ref'] = _recent_swing_high_price
         # 追踪最近确认摆低价（ffill：反弹支点，ChoCh 参考）
         _recent_swing_low_price  = dataframe['low'].where(_is_swing_low).ffill()
 
@@ -841,13 +843,34 @@ class WyckoffV8(IStrategy):
         )
         fti_gate = _fti_active & _fti_1h_confirm
 
+        # ── TASK 27: wave_breakdown 趋势跟随空头（第八路径）────────────────────────
+        # 物理含义：熊市确认（EMA200 persist ≥15天激活）+ 1H 下降波 ChoCh = 跟随主跌浪做空
+        # 对称于多头 v8_ws_d/v8_ws_e（wave_start up），但方向朝下
+        # 入场：is_wave_start & wave_direction=='down'（摆高确认 + 下降浪启动）
+        # 止损：最近确认摆高 × 1.01（swing high 被突破 = 下跌结构失效，存 wb_swing_high_ref）
+        # 出场：is_up_wave → v8_up_wave_reverse（已有路径，对称退出）
+        # 门控：豁免 pnf_valid_short 和 rr_short_ok（趋势跟随，无 PNF 目标位约束）
+        _wb_bear_ok = (
+            dataframe.get('daily_ema200_persist',
+                          pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) &
+            (_persist_days >= 15)
+        )
+        _wb_signal = (
+            dataframe['is_wave_start'].fillna(False).astype(bool) &
+            (dataframe['wave_direction'] == 'down') &
+            (dataframe['wave_efficiency'] > 0.001) &
+            (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
+        )
+        wave_breakdown_gate = _wb_bear_ok & _wb_signal & short_intent_ok
+
         final_short_entry = (
             (sow_entry | utad_entry) &
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
-        ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate | fti_gate
+        ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate | fti_gate | wave_breakdown_gate
 
         # 优先级（顺序赋值：后者覆盖前者，故最高优先级放最后）
-        # FTI < REDIST < ICE_LPSY < BE < LPSY < SOW
+        # WB < FTI < REDIST < ICE_LPSY < BE < LPSY < SOW
+        dataframe.loc[final_short_entry & wave_breakdown_gate, 'enter_tag'] = 'v8_short_wsdown'
         dataframe.loc[final_short_entry & fti_gate,       'enter_tag'] = 'v8_short_fti'
         dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
         dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
@@ -917,6 +940,25 @@ class WyckoffV8(IStrategy):
         # ── TASK S-6: 空头止损分支 ──────────────────────────────
         if trade.is_short:
             enter_tag_short = getattr(trade, 'enter_tag', '') or ''
+
+            # TASK 27: wave_breakdown 专用止损 — 入场时摆高 × 1.01（swing high 被突破=下跌结构失效）
+            # 必须固化入场 bar 的摆高锚点，不能用 last：ffill 会随行情推进到新（更低）摆高，导致止损漂移
+            if enter_tag_short == 'v8_short_wsdown':
+                open_date = pd.Timestamp(trade.open_date).tz_localize(None) \
+                    if getattr(trade.open_date, 'tzinfo', None) is None else \
+                    pd.Timestamp(trade.open_date).tz_convert(None)
+                df_dates = dataframe['date']
+                if hasattr(df_dates.iloc[0], 'tzinfo') and df_dates.iloc[0].tzinfo is not None:
+                    df_dates = df_dates.dt.tz_convert(None)
+                entry_idx = int(df_dates.searchsorted(open_date, side='right')) - 1
+                if 0 <= entry_idx < len(dataframe):
+                    wb_sl = dataframe.iloc[entry_idx].get('wb_swing_high_ref', np.nan)
+                else:
+                    wb_sl = np.nan
+                if not np.isnan(wb_sl) and wb_sl > 0:
+                    sl_price = float(wb_sl) * 1.01
+                    return (sl_price / current_rate) - 1
+                return (float(dataframe['high'].tail(20).max()) * 1.01 / current_rate) - 1
 
             # TASK 20/22: ice_lpsy / redist 专用止损 — EMA200 × 1.02（冰线被收复=空头论题证伪）
             if enter_tag_short in ('v8_short_ice_lpsy', 'v8_short_redist'):
