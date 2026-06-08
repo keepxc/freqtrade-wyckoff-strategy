@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS regime_snapshots (
     dist_cause_sufficient INTEGER,
     daily_tr_exists     INTEGER,
     daily_gate_score    REAL,
+    daily_sm_v2         INTEGER DEFAULT 0,
 
     FOREIGN KEY (run_id) REFERENCES experiment_runs(run_id)
 );

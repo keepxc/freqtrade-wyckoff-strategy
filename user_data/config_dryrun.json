@@ -1,5 +1,5 @@
 {
-  "max_open_trades": 2,
+  "max_open_trades": 1,
   "stake_currency": "USDT",
   "stake_amount": "unlimited",
   "tradable_balance_ratio": 0.8,
@@ -38,28 +38,17 @@
     "price_last_balance": 0.0
   },
   "exchange": {
-    "name": "okx",
+    "name": "binance",
     "key": "",
     "secret": "",
-    "password": "",
-    "_ft_has_params": {
-      "ws_enabled": false
-    },
     "ccxt_config": {
-      "enableRateLimit": true,
-      "rateLimit": 100,
       "proxies": {
         "http": "http://127.0.0.1:7890",
         "https": "http://127.0.0.1:7890"
-      },
-      "timeout": 60000
+      }
     },
     "ccxt_async_config": {
-      "enableRateLimit": true,
-      "rateLimit": 100,
-      "aiohttp_proxy": "http://127.0.0.1:7890",
-      "timeout": 60000,
-      "aiohttp_timeout": 60
+      "aiohttp_proxy": "http://127.0.0.1:7890"
     },
     "pair_whitelist": [
       "BTC/USDT:USDT"

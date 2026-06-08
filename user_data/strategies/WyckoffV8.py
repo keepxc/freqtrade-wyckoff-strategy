@@ -686,15 +686,6 @@ class WyckoffV8(IStrategy):
             dataframe.get('daily_fallback_sow',                              # TASK 13: BC独立 fallback SOW
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
         )
-        # UTAD 路径停用（2026-06-05）：
-        # 原因：20220101-20260602 全量回测（4年两轮熊市）触发 0 笔。
-        # UTAD 需要完整 BC→AR→UT 结构且价格精准突破分发区高点，条件过严，
-        # 实战中该信号出现时 SOW/LPSY/ICE_LPSY 已先行覆盖，入场不再依赖它。
-        # 检测器代码（daily_event_detector.py）保留，仅停用此处入场逻辑。
-        # 如需重启，恢复下方注释并在 final_short_entry 中加回 utad_entry。
-        # utad_entry = dataframe.get('daily_utad_detected',
-        #                            pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
-        utad_entry = pd.Series(False, index=dataframe.index)  # 停用占位，保持后续引用不报错
         be_entry   = dataframe.get('buying_exhaustion',
                                    pd.Series(False, index=dataframe.index)).fillna(False).astype(bool)
 
@@ -841,7 +832,7 @@ class WyckoffV8(IStrategy):
             (_fti_close_loc <= 0.40) &                    # 收盘在日内低位区（需求失败）
             (dataframe['volume'] <= _fti_vol_ma_1h)       # 量 <= 1H均量（需求匮乏）
         )
-        fti_gate = _fti_active & _fti_1h_confirm
+        fti_gate = _fti_active & _fti_1h_confirm & short_intent_ok
 
         # ── TASK 27: wave_breakdown 趋势跟随空头（第八路径）────────────────────────
         # 物理含义：熊市确认（EMA200 persist ≥15天激活）+ 1H 下降波 ChoCh = 跟随主跌浪做空
@@ -864,7 +855,7 @@ class WyckoffV8(IStrategy):
         wave_breakdown_gate = _wb_bear_ok & _wb_signal & short_intent_ok
 
         final_short_entry = (
-            (sow_entry | utad_entry) &
+            sow_entry &
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
         ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate | fti_gate | wave_breakdown_gate
 
@@ -874,7 +865,6 @@ class WyckoffV8(IStrategy):
         dataframe.loc[final_short_entry & fti_gate,       'enter_tag'] = 'v8_short_fti'
         dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
         dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
-        # dataframe.loc[final_short_entry & utad_entry, 'enter_tag'] = 'v8_short_utad'  # 停用
         dataframe.loc[final_short_entry & be_entry,       'enter_tag'] = 'v8_short_be'
         dataframe.loc[final_short_entry & lpsy_gate,      'enter_tag'] = 'v8_short_lpsy'
         dataframe.loc[final_short_entry & sow_entry,      'enter_tag'] = 'v8_short_sow'
@@ -883,8 +873,13 @@ class WyckoffV8(IStrategy):
         _be_cnt   = int(be_gate.sum())
         _sow_cnt  = int((final_short_entry & sow_entry).sum())
         _lpsy_cnt = int(lpsy_gate.sum())
+        _ice_cnt  = int(ice_lpsy_gate.sum())
+        _redist_cnt = int(redist_gate.sum())
+        _fti_cnt  = int(fti_gate.sum())
+        _wb_cnt   = int(wave_breakdown_gate.sum())
         _pair = metadata.get('pair', '')
-        logger.info(f'[V8-DIAG] {_pair} enter_short: sow={_sow_cnt} be={_be_cnt} lpsy={_lpsy_cnt}')
+        logger.info(f'[V8-DIAG] {_pair} enter_short: sow={_sow_cnt} be={_be_cnt} lpsy={_lpsy_cnt} '
+                    f'ice={_ice_cnt} redist={_redist_cnt} fti={_fti_cnt} wb={_wb_cnt}')
 
         # P5：发射信号事件
         if self.event_bridge is not None:

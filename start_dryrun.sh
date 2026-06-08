@@ -6,6 +6,24 @@ SERVICE_FILE="$HOME/.config/systemd/user/${SERVICE_NAME}.service"
 FREQTRADE_DIR="/home/gyan/freqtrade"
 
 # ═══════════════════════════════════════════════════
+# Preflight 检查 — 启动前验证数据 + 配置 + 门控状态
+# ═══════════════════════════════════════════════════
+echo ""
+echo "========================================================"
+echo "  [preflight] Dry Run 启动前检查..."
+echo "========================================================"
+source "$FREQTRADE_DIR/env/dryrun.env" 2>/dev/null || true
+PYTHONPATH="${PYTHONPATH:-}:$FREQTRADE_DIR" \
+  "$FREQTRADE_DIR/.venv/bin/python" "$FREQTRADE_DIR/scripts/local_preflight.py"
+PREFLIGHT_EXIT=$?
+if [ $PREFLIGHT_EXIT -ne 0 ]; then
+  echo "[preflight] ❌ 检查未通过，启动已取消。修复后重新运行 start_dryrun.sh"
+  exit 1
+fi
+echo "[preflight] ✅ 检查通过，继续启动..."
+echo ""
+
+# ═══════════════════════════════════════════════════
 # 清理缓存 — 防止旧 bytecode 覆盖新源码
 # ═══════════════════════════════════════════════════
 echo "[cache] Clearing Python bytecode..."
