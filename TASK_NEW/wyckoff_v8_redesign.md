@@ -4131,3 +4131,78 @@ TASK 31 敏感度测试初始覆盖 rolling=5/10/15/20/30，用户指出遗漏 r
 | 最大 DD | 2.06% | 2.06% | 不变 |
 | Sortino | 4.86 | 5.22 | +0.36 |
 | CAGR | 370.94% | **394.13%** | +23.19pp |
+
+---
+
+## P5 假跌破检测器设计定稿（2026-06-08，待实现）
+
+> 状态：设计定稿，等 Dry Run 积累真实假跌破事件后再动手实现。
+
+### 背景
+
+TASK 31b 采用 rolling=1（单日收盘低于 EMA200 即激活），回测发现 2024-08 出现 13 笔 V 形假跌破集群（WR 46%）。架构决策：策略层保持灵敏，P5 智能层负责识别假跌破模式并提出软建议。
+
+### 设计参数
+
+| 项目 | 值 |
+|------|---|
+| 数据源 | market.db（检测前先 ingest，与周报共享同一库） |
+| 运行频率 | 每 6h |
+| 滑动窗口 | 12h |
+
+### 触发条件（三 AND）
+
+| # | 条件 | 阈值 | 依据 |
+|---|------|------|------|
+| 1 | wave_breakdown 触发数 | ≥ 3 笔 | 12h 内密集信号 |
+| 2 | 窗口内 stop_loss 退出占比 | > 40% | 基线 15.6%，超过 2.5× |
+| 3 | 窗口内 wb 持仓时长中位数 | < 8h | 基线 30h，低于 1/4 |
+
+三条同时满足才写提案；单条命中视为正常波动。
+
+止损退出同时覆盖 `stop_loss` 和 `v8_structure_fail` 两种退出原因。
+
+### 佐证（归档至 evidence_json，不参与 AND 判断）
+
+- 价格收复跌幅 > 50%（V 返幅度确认）
+
+### proposals 表字段
+
+```sql
+path_name        TEXT,    -- 'wave_breakdown'
+window_start     DATETIME,
+window_end       DATETIME,
+detection_type   TEXT,    -- 'fake_breakdown'
+problem_statement TEXT,
+recommended_action TEXT,  -- 'suspend_path 24h' / 'reduce_size 50%'
+evidence_json    TEXT,
+risk_level       TEXT,    -- 'medium' / 'high'
+status           TEXT DEFAULT 'active',
+detected_at      DATETIME,
+expires_at       DATETIME, -- 默认 detected_at + 24h
+UNIQUE (path_name, window_start, detection_type)
+```
+
+### 路径基线（path_stats.py，TASK 31b 回测）
+
+| 路径 | 笔数 | 胜率 | 平均持仓 |
+|------|:---:|:---:|:---:|
+| wave_breakdown (v8_short_wsdown_S) | 167 | 78.4% | 30h |
+| v8_ws_e（多头） | 442 | 93.9% | 35h |
+| v8_short_redist_S | 6 | 83.3% | 44h |
+| v8_short_lpsy_S | 3 | 66.7% | 15h |
+
+### 输出（软建议阶段）
+
+Telegram 消息通知，不碰策略代码：
+
+```
+🟡 V形假跌破模式检测
+窗口: MM-DD HH:00 ~ HH:00 CST
+触发 N 笔 wave_breakdown → M 笔止损集中在 Xh 内 → 价格已收复 Y%
+建议：wave_breakdown 路径暂缓激活 24h
+```
+
+### 硬约束（后续，待软建议跑顺后）
+
+策略每小时查 proposals 表，有 `status='active'` 且未过期的提案则自动执行对应动作。
