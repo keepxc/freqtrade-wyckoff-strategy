@@ -373,7 +373,7 @@ class WyckoffV8(IStrategy):
                     # 依据：2026-05-11至05-31连续20天在EMA200下方但sm_v2失效，此路径填补空白
                     _ema_persist_raw = (df_1d['close'] < _1d_ema200).astype(int)
                     _ema_persist_activate = (
-                        _ema_persist_raw.rolling(15, min_periods=15).min().fillna(0).astype(bool)
+                        _ema_persist_raw.rolling(5, min_periods=5).min().fillna(0).astype(bool)
                     )
                     _ema_persist_reset = (
                         df_1d['close'].gt(_1d_ema200)
