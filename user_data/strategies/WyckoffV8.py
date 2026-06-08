@@ -853,7 +853,7 @@ class WyckoffV8(IStrategy):
         _wb_bear_ok = (
             dataframe.get('daily_ema200_persist',
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) &
-            (_persist_days >= 15)
+            (_persist_days >= 0)
         )
         _wb_signal = (
             dataframe['is_wave_start'].fillna(False).astype(bool) &
