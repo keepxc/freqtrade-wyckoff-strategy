@@ -9,6 +9,7 @@ sys.path.insert(0, '/home/gyan/freqtrade')
 
 import pandas as pd
 import numpy as np
+import time
 from datetime import timezone, timedelta
 from wyckoff.daily_event_detector import DailyEventDetector
 
@@ -73,39 +74,58 @@ check('1H 新鲜（< 2h）', 'pass' if gap_1h < 2 else ('warn' if gap_1h < 24 el
 check('1D 新鲜（< 48h）', 'pass' if gap_1d < 48 else 'fail',
       f'最新={str(last_1d)[:16]}  滞后{gap_1d:.1f}h  历史{d1_days}天')
 
-# ─── 2b. 自动补下载（滞后时触发）─────────────────────
+# ─── 2b. 自动补下载（滞后时触发，有频率限制）────────
+LOCK_FILE = '/tmp/preflight_download.lock'
+LOCK_TTL = 900  # 15 分钟内不重复下载
+
+should_dl = False
 if gap_1h >= 2 or gap_1d >= 48:
+    if os.path.exists(LOCK_FILE):
+        lock_age = time.time() - os.path.getmtime(LOCK_FILE)
+        if lock_age < LOCK_TTL:
+            print(f'【2b】数据滞后但刚刚下载过（{int(lock_age)}s前），跳过以免限流')
+        else:
+            should_dl = True
+    else:
+        should_dl = True
+
+if should_dl:
     print()
     print('【2b】数据滞后，自动补下载...')
+    open(LOCK_FILE, 'w').close()
     from_date_1h = (last_1h - timedelta(days=1)).strftime('%Y%m%d')
     from_date_1d = (last_1d - timedelta(days=2)).strftime('%Y%m%d')
-    # 下载 1H + 1D
+    dl_fail = False
+    CONFIG2 = os.path.join(FREQTRADE_DIR, 'user_data/config_v8_dryrun.json')
     for tf, from_date in [('1h', from_date_1h), ('1d', from_date_1d)]:
         cmd = [
             sys.executable, '-m', 'freqtrade', 'download-data',
-            '--config', CONFIG,
+            '--config', CONFIG, '--config', CONFIG2,
             '--timerange', f'{from_date}-',
             '--timeframe', tf,
-            '--exchange', 'okx',
         ]
         print(f'  下载 {tf}（{from_date}-）...')
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if r.returncode != 0:
-            check(f'  {tf} 下载失败', 'fail', r.stderr[:200])
-    # 重读 & 重新检查新鲜度
-    df1h = pd.read_feather(DATA_1H)
-    df1d = pd.read_feather(DATA_1D)
-    df1h['date'] = pd.to_datetime(df1h['date'], utc=True)
-    df1d['date'] = pd.to_datetime(df1d['date'], utc=True)
-    last_1h = df1h['date'].max(); gap_1h = (NOW_UTC - last_1h).total_seconds() / 3600
-    last_1d = df1d['date'].max(); gap_1d = (NOW_UTC - last_1d).total_seconds() / 3600
-    check('  1H 新鲜度（补后）', 'pass' if gap_1h < 2 else 'fail',
-          f'最新={str(last_1h)[:16]}  滞后{gap_1h:.1f}h')
-    check('  1D 新鲜度（补后）', 'pass' if gap_1d < 48 else 'fail',
-          f'最新={str(last_1d)[:16]}  滞后{gap_1d:.1f}h')
-    # 更新 h1_days / d1_days 供后续 PNF 检查使用
-    h1_days = (last_1h - df1h['date'].min()).days
-    d1_days = (last_1d - df1d['date'].min()).days
+            msg = r.stderr[-300:] if r.stderr else r.stdout[-300:]
+            check(f'  {tf} 下载失败', 'warn', msg)
+            dl_fail = True
+    if dl_fail:
+        print('  → 下载失败，用已有数据继续启动')
+    else:
+        # 重读 & 重新检查新鲜度（仅下载成功时）
+        df1h = pd.read_feather(DATA_1H)
+        df1d = pd.read_feather(DATA_1D)
+        df1h['date'] = pd.to_datetime(df1h['date'], utc=True)
+        df1d['date'] = pd.to_datetime(df1d['date'], utc=True)
+        last_1h = df1h['date'].max(); gap_1h = (NOW_UTC - last_1h).total_seconds() / 3600
+        last_1d = df1d['date'].max(); gap_1d = (NOW_UTC - last_1d).total_seconds() / 3600
+        check('  1H 新鲜度（补后）', 'pass' if gap_1h < 2 else 'warn',
+              f'最新={str(last_1h)[:16]}  滞后{gap_1h:.1f}h')
+        check('  1D 新鲜度（补后）', 'pass' if gap_1d < 48 else 'warn',
+              f'最新={str(last_1d)[:16]}  滞后{gap_1d:.1f}h')
+        h1_days = (last_1h - df1h['date'].min()).days
+        d1_days = (last_1d - df1d['date'].min()).days
 
 # ─── 3. PNF 预热 ─────────────────────────────────────
 print(); print('【3】PNF 预热（≥ 2 年数据）')
