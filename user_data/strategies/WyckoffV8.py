@@ -847,7 +847,7 @@ class WyckoffV8(IStrategy):
             (_persist_days >= 0)
         )
         _wb_signal = (
-            dataframe['is_wave_start'].fillna(False).astype(bool) &
+            dataframe['is_wave_start'].rolling(8, min_periods=1).max().fillna(0).astype(bool) &
             (dataframe['wave_direction'] == 'down') &
             (dataframe['wave_efficiency'] > 0.001) &
             (dataframe['wave_displacement'] > dataframe['close'] * 0.008)

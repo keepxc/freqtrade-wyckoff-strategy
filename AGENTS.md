@@ -24,16 +24,16 @@
 
 ---
 
-## 当前基线（封板，2026-06-08，TASK 31b）
+## 当前基线（封板，2026-06-09，TASK 32）
 
 | 指标 | 数值 |
 |------|------|
-| 收益率 | **119,473%**（20220101-20260608） |
-| 交易数 | 655（多头 471 / 空头 185） |
-| 胜率 | 89.6% |
+| 收益率 | **134,485%**（20220101-20260608） |
+| 交易数 | 686（多头 470 / 空头 216） |
+| 胜率 | 87.3% |
 | 最大 DD | 2.06% |
-| Sortino | 5.22 |
-| CAGR | 394.13% |
+| Sortino | 5.80 |
+| CAGR | 407.49% |
 
 > 策略文件：`user_data/strategies/WyckoffV8.py`
 
@@ -55,7 +55,8 @@
 | TASK 27 | 66,188% | 108 | wave_breakdown 趋势跟随空头第八路径（EMA200 persist≥15 + ChoCh下行，零新参数，+160%） |
 | TASK 30 | 76,522% | 126 | wave_breakdown persist_days 0→15 敏感度审计，去除无依据等待税（+10,334pp，+15.6%） |
 | TASK 31 | 96,509% | 150 | daily_ema200_persist 激活窗口 rolling(15→5) 审计，提前10天激活（+19,987pp，+26.1%） |
-| TASK 31b | **119,473%** | **185** | daily_ema200_persist 激活窗口 rolling(5→1) 法医审计，P5 接管 V 形反弹保护（+22,964pp，+23.8%） |
+| TASK 31b | 119,473% | 185 | daily_ema200_persist 激活窗口 rolling(5→1) 法医审计，P5 接管 V 形反弹保护（+22,964pp，+23.8%） |
+| TASK 32 | **134,485%** | **216** | wave_breakdown 入场窗口 rolling(1→8)，趋势跟随多点入场（+15,012pp，+12.6%） |
 
 ### V7 历史基线（已归档）
 
@@ -100,7 +101,7 @@ v8_ws_d / v8_ws_e：Phase D/E 中 1H wave_start（up）确认后入场
       5：daily_ema200_persist + persist_days≥30 + EMA200触碰失败；豁免 pnf_valid_short
       6：daily_redist_ok（7项日线结构）；豁免 pnf_valid_short 和 EMA200触碰；止损 EMA200×1.02
       7：daily_fti_msow_active（横盘15%+EMA200熊市+persist≥20天+MSOW）+ 1H收盘位置≤40%；止损 ice×1.02
-      8：daily_ema200_persist（单日收盘低于EMA200即激活，rolling=1）+ is_wave_start down；豁免 pnf/rr；止损 swing_high×1.01
+      8：daily_ema200_persist（单日收盘低于EMA200即激活，rolling=1）+ is_wave_start down（8h窗口内有效）；豁免 pnf/rr；止损 swing_high×1.01
 ```
 
 ### 退出优先级
