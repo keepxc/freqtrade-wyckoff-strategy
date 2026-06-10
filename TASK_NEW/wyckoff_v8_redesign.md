@@ -4271,3 +4271,44 @@ dataframe['is_wave_start'].rolling(8, min_periods=1).max().fillna(0).astype(bool
 | 最大 DD | 2.06% | 2.06% | 不变 |
 | Sortino | 5.22 | **5.80** | +0.58 |
 | CAGR | 394.13% | **407.49%** | +13.36pp |
+
+---
+
+## Dry Run 数据延迟根因分析（2026-06-09，已归档）
+
+### 背景
+
+2026-06-08 BTC 下跌约 3,178 点，V8 wave_breakdown 路径未触发。排查后确认三层根因：
+
+| 根因 | 权重 | 状态 |
+|------|:---:|:---:|
+| watchdog 每 30 分钟强杀进程，永远等不到实时 candle 被处理 | 60% | ✅ 已关闭 |
+| rolling(8) 未覆盖，即使活下来也只有波次启动那一根入场机会 | 20% | ✅ TASK 32 已修 |
+| 数据延迟：cron 30min 写 feather + freqtrade 内部刷新最长 60min | 20% | ⚠️ 暂缓 |
+
+### Dryrun 数据链路（已确认）
+
+freqtrade dryrun **不调 Binance API 拉实时 1H 数据**（`grep "Fetching OHLCV" dryrun.log` = 0 条），而是读取 feather 文件：
+
+```
+1H 蜡烛收盘
+    ↓ 等待 cron（最多 30 分钟）
+download-data 写入 feather
+    ↓ 等待 freqtrade _now_is_time_to_refresh（最长 60 分钟）
+populate_indicators → 信号检测
+总延迟：0 ~ 90 分钟
+```
+
+### 方案备选（暂缓实现）
+
+| 方案 | 做法 | 效果 | 侵入度 |
+|------|------|------|:---:|
+| 方案一 | cron 30min → 5min | feather 写入延迟 6x 缩短 | 低 |
+| ~~方案二~~ | ~~process_throttle_secs~~ | ~~无效~~（控制循环 tick，不控制数据刷新） | — |
+| 方案三 | 独立 watchdog 脚本 30s REST → 追写 feather | 实时补入，freqtrade 下次刷新即读到 | 低 |
+
+**推荐组合（待实现）**：方案一（cron 5min）+ 方案三（REST watchdog），可将延迟从 0~90min 降至 10~30s。
+
+### 当前状态
+
+watchdog 强杀 + rolling(8) 修复后，进程已连续运行 8h+。数据延迟问题暂不紧迫，等下一次实盘观察窗口后决定是否推进方案三。
