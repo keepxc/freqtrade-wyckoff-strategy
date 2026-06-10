@@ -4309,6 +4309,124 @@ populate_indicators → 信号检测
 
 **推荐组合（待实现）**：方案一（cron 5min）+ 方案三（REST watchdog），可将延迟从 0~90min 降至 10~30s。
 
+### 当前状态（2026-06-10 更新）
+
+**数据链路修正**：dryrun 实际通过代理 `127.0.0.1:7890` 调用 Binance API 获取实时数据（非 feather 文件）。Pairlist 刷新日志确认每 61 分钟触发一次（与 1H timeframe 刷新同步），最大延迟约 61 分钟。
+
+**方案三已实现**：新增 `scripts/candle_refresh_trigger.sh`，由 cron 在每小时 :01 发送 `SIGHUP` 给 `freqtrade-dryrun` 服务，触发 config reload + 数据刷新，将延迟从 0~61min 压缩至 ~1min。
+
+```
+# crontab 配置
+1 * * * * /home/gyan/freqtrade/scripts/candle_refresh_trigger.sh
+```
+
+**实测验证**：2026-06-10 11:01 SIGHUP 触发 → 11:02 开仓 Trade #2（v8_short_wsdown），延迟 ~1 分钟，修复效果确认。
+
+---
+
+## Dryrun 运行期 Bug 修复（2026-06-10）
+
+### Bug 1：confirm_trade_entry PNF 第二层拦截（fd58558）
+
+**根因链**：
+```
+enter_short 信号触发 ✓（wave_breakdown_gate 已豁免 pnf_valid_short）
+  → freqtrade: Short signal found ✓
+  → confirm_trade_entry L1138: pd.isna(v8_target_1) → return False
+```
+
+L855 的 `wave_breakdown_gate` 已豁免 PNF，但 `confirm_trade_entry` 对所有路径统一检查 `v8_target_1`，形成第二层拦截。
+
+**修复**：`confirm_trade_entry` 增加 `_wb_entry = 'wsdown' in entry_tag` 判断，wave_breakdown 路径跳过 PNF 目标位检查。
+
+**验证**：修复后 Trade #2 正常开仓（v8_short_wsdown，61,335 USDT）。
+
+---
+
+## TASK 33：wave_breakdown 止损锚点结构化（待回测）
+
+### 背景
+
+Trade #2（v8_short_wsdown，entry 61,335）触发止损分析：
+
+- **现有逻辑**：`wb_swing_high_ref`（ffill 最近 wave_start high）在级联暴跌中被反弹小摆高更新，导致止损锚点偏低
+- **实际情况**：entry 61,335，ffill 锚点 = 02:00 反弹高 61,939 → 止损 62,565（距入场仅 ~1%）
+- **结构合理止损**：06-09 21:00 摆高 62,718 → 止损 63,345（~2.2%）
+
+### 根因
+
+```
+06-09 21:00  H=62,718  ← 真实结构摆高（wave_start）
+    ↓ 下跌
+06-10 02:00  H=61,939  ← 反弹也触发 wave_start → ffill 更新到此
+06-10 03:00  entry 61,335  wb_swing_high_ref = 61,939（已被反弹高更新）
+```
+
+`entry_idx` 处 ffill 值防住了持仓期漂移，但防不住入场前 ffill 已被反弹更新。
+
+### 修复方案
+
+**设计原则**：入场信号窗口（rolling 8h）与止损锚点窗口对称，在同一窗口内取 MAX 而非最近值。
+
+**设计决策**：
+
+| 问题 | 决策 | 理由 |
+|------|------|------|
+| 窗口大小 | 8h（entry_idx-7 ~ entry_idx） | 与 rolling(8) 入场信号对称，64k 前高自然排除 |
+| 聚合方式 | MAX（不是 ffill 最近值） | 级联暴跌时取最高结构摆高 |
+| ZigZag lag | 每个 wave_start 向前扩展 3 根邻域 | ZigZag 确认滞后，真实峰值在标注前 1~3 根 |
+| 过滤条件 | high ≥ entry_price | 低于入场价的摆高无止损意义 |
+| Fallback | 20-bar high × 1.01（原逻辑） | 窗口内无合规 wave_start 时兜底 |
+
+**当前 case 验证**：8h 窗口内 {62,718, 61,939}，MAX = 62,718 → 止损 63,345（2.2%）✅
+
+**被否决的方案**：
+- 全量扫 + entry_price 过滤：选到 64,076（5.5%），结构意义不明，依赖 -12% 全局兜底
+- 48h 有界窗口 + MAX：64,076 仍在 48h 内（29h 前），同样被选中
+
+### 代码变更
+
+`WyckoffV8.py` L941-956，`custom_stoploss` → `v8_short_wsdown` 分支：
+
+旧：读 `entry_idx` 处 ffill 值 `wb_swing_high_ref`
+新：扫 8h 窗口内所有 `is_wave_start & down` 点，每点取前 3 根邻域 MAX high，过滤 ≥ entry_price，取全局 MAX
+
+### 回测结果（20220101-20260602）
+
+| 指标 | TASK 32 基线 | TASK 33 | Delta |
+|------|-------------|---------|-------|
+| 收益率 | 134,485% | **451,917%** | +317,432pp（+236%） |
+| 交易数 | 686（470L/216S） | 724（467L/257S） | +38，空头+41 |
+| 胜率 | 87.3% | **92.0%** | +4.7pp |
+| 最大 DD | 2.06% | **0.59%** | -1.47pp（-71%） |
+| 平均持仓 | — | 1d 11h | — |
+
+### wave_breakdown 路径专项对比
+
+| 指标 | TASK 32 | TASK 33 | Delta |
+|------|---------|---------|-------|
+| 交易数 | 201 | 243 | +42 |
+| 胜率 | 72.6% | 88.1% | +15.4pp |
+| 止损次数 | 37 | 13 | -24 |
+| 止损率 | 18.4% | 5.3% | -13.1pp |
+| 平均收益 | 2.33% | 3.18% | +0.84pp |
+| 平均持仓 | 27.2h | 32.8h | +5.6h |
+
+### 根因解释
+
+1. **止损扫出减少 -24 笔**：33 笔共同交易改变 exit_reason，stop_loss 25→9，变为 v8_up_wave_reverse（正常结构退出）。原来被局部反弹高（1%）扫掉的单子现在穿越回调等到真正的趋势反转。
+
+2. **新增 73 笔全部是 2022 年熊市**：2022 年 wave_breakdown 信号频繁触发，但旧止损在正常熊市回调（2-3%）中持续被触发。新止损锚在 8h 窗口最高结构摆高，不被回调扫出，WR 93.2%，avg profit 3.99%。这是 2022 大熊市里止损过紧造成的复利链断裂——修复后补回。
+
+3. **无 lookahead bias**：custom_stoploss 仅读 entry_idx 及之前 7 根的 is_wave_start 数据，全部向后看，结构上不引入未来函数。
+
+### 结论
+
+**改善，采纳。** 旧逻辑（ffill 最近摆高）是设计缺陷，在级联暴跌中止损过紧、频繁扫出正常持仓。新逻辑（8h 窗口 MAX）在结构上与入场信号对称，与 Wyckoff 趋势跟随的止损哲学一致。
+
 ### 当前状态
 
-watchdog 强杀 + rolling(8) 修复后，进程已连续运行 8h+。数据延迟问题暂不紧迫，等下一次实盘观察窗口后决定是否推进方案三。
+- [x] 代码实现（Code Review 通过）
+- [x] 回测验证（20220101-20260602，--cache none）
+- [x] 与基线（134,485%）数值对比：+317,432pp（+236%），DD 改善 71%
+- [x] 结论写入

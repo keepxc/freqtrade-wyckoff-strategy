@@ -946,12 +946,24 @@ class WyckoffV8(IStrategy):
                 if hasattr(df_dates.iloc[0], 'tzinfo') and df_dates.iloc[0].tzinfo is not None:
                     df_dates = df_dates.dt.tz_convert(None)
                 entry_idx = int(df_dates.searchsorted(open_date, side='right')) - 1
+                wb_sl = np.nan
                 if 0 <= entry_idx < len(dataframe):
-                    wb_sl = dataframe.iloc[entry_idx].get('wb_swing_high_ref', np.nan)
-                else:
-                    wb_sl = np.nan
+                    # 8h 窗口（与 rolling(8) 入场信号对称）内找所有 is_wave_start & down 点
+                    # 对每个点取前 3 根邻域最高价（补偿 ZigZag lag），filter >= entry_price，取 MAX
+                    win_start = max(0, entry_idx - 7)
+                    window = dataframe.iloc[win_start:entry_idx + 1]
+                    is_sh_win = (window['is_wave_start'].fillna(False).astype(bool) &
+                                 (window['wave_direction'] == 'down'))
+                    for rel_i, is_sh in enumerate(is_sh_win):
+                        if not is_sh:
+                            continue
+                        abs_i = win_start + rel_i
+                        # ZigZag 标注在确认 candle，真实峰值在其前 1~3 根
+                        peak = float(dataframe.iloc[max(0, abs_i - 3):abs_i + 1]['high'].max())
+                        if peak >= entry_price and (np.isnan(wb_sl) or peak > wb_sl):
+                            wb_sl = peak
                 if not np.isnan(wb_sl) and wb_sl > 0:
-                    sl_price = float(wb_sl) * 1.01
+                    sl_price = wb_sl * 1.01
                     return (sl_price / current_rate) - 1
                 return (float(dataframe['high'].tail(20).max()) * 1.01 / current_rate) - 1
 
