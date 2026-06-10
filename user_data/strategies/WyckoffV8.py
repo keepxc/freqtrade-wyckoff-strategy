@@ -1133,9 +1133,14 @@ class WyckoffV8(IStrategy):
         last = dataframe.iloc[-1]
 
         # 必须有 PNF 目标位（有因果依据才进场）
+        # wave_breakdown 豁免（趋势跟随路径不依赖 PNF 结构）
+        _wb_entry = entry_tag and 'wsdown' in entry_tag
         if pd.isna(last.get('v8_target_1', np.nan)):
-            logger.info(f'{pair} entry rejected: no PNF target')
-            return False
+            if _wb_entry:
+                logger.info(f'{pair} wave_breakdown exempt: no PNF target')
+            else:
+                logger.info(f'{pair} entry rejected: no PNF target')
+                return False
 
         # P5：发射开仓事件
         if self.event_bridge is not None:
