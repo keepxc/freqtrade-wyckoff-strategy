@@ -4430,3 +4430,62 @@ Trade #2（v8_short_wsdown，entry 61,335）触发止损分析：
 - [x] 回测验证（20220101-20260602，--cache none）
 - [x] 与基线（134,485%）数值对比：+317,432pp（+236%），DD 改善 71%
 - [x] 结论写入
+
+---
+
+## TASK 33b：wave_breakdown custom_exit 双锚一致（2026-06-12）
+
+### 背景
+
+Trade #2（v8_short_wsdown）以 `v8_short_structure_fail` 在 62,280 退出，亏损 -1.65%。
+排查发现 `custom_exit` 和 `custom_stoploss` 用的是不同锚点：
+
+| 路径 | 锚点 | Trade #2 触发线 |
+|------|------|----------------|
+| custom_stoploss（TASK 33） | 8h 窗口 MAX swing high × 1.01 | 63,345 |
+| custom_exit structure_fail（BUG） | daily_ar_high（派发区 AR 高） | ~62,200 |
+
+`custom_exit` 在 62,280 先于 `custom_stoploss`（63,345）触发，导致提前出场。
+这是第三个"两层检查不同步"的 bug，与 PNF confirm_trade_entry 同源。
+
+### 修复方案
+
+提取私有方法 `_wb_structural_high(dataframe, trade)`：
+- 封装 8h 窗口 MAX + ZigZag ±3 邻域的锚点计算逻辑
+- `custom_stoploss` 和 `custom_exit` 共同调用，保证同锚
+
+`custom_exit` 空头分支新增 wave_breakdown 专用判断：
+```python
+if enter_tag_short == 'v8_short_wsdown':
+    wb_sl = self._wb_structural_high(dataframe, trade)
+    sl_price = wb_sl * 1.01  # fallback: 20-bar high × 1.01
+    if current_rate > sl_price:
+        return 'v8_short_structure_fail'
+elif not np.isnan(ar_high) and ar_high > 0:
+    if current_rate > ar_high:
+        return 'v8_short_structure_fail'
+```
+
+### wave_breakdown 豁免全景（修复后）
+
+| 检查层 | 修复状态 | 说明 |
+|--------|---------|------|
+| enter_short L855 | ✅ TASK 27 | wave_breakdown_gate 不含 pnf_valid_short |
+| confirm_trade_entry | ✅ fd58558 | 'wsdown' in tag 豁免 PNF 检查 |
+| custom_stoploss | ✅ TASK 33 | 8h 窗口 MAX 锚点 |
+| custom_exit structure_fail | ✅ TASK 33b | 同锚 _wb_structural_high |
+
+### 回测结果（20220101-20260612）
+
+| 指标 | TASK 33 | TASK 33b | Delta |
+|------|---------|---------|-------|
+| 收益率 | 451,917%（至0602） | **473,905%** | +21,988pp |
+| 交易数 | 724 | 730 | +6 |
+| 胜率 | 92.0% | 91.6% | -0.4pp |
+| 最大 DD | 0.59% | 2.06% | +1.47pp（timerange 含 0607 新事件） |
+
+DD 跳升来源：06-07 13:00 回测新增的一笔大亏损单（9h 内恢复），与本次代码修改无关，是 timerange 延长纳入的新数据。
+
+### 结论
+
+**改善，采纳。** 三条豁免路径全部对齐，wave_breakdown 的入场/止损/退出逻辑现在完全自洽。

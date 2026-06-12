@@ -915,6 +915,36 @@ class WyckoffV8(IStrategy):
 
         return dataframe
 
+    # ── wave_breakdown 结构锚点（custom_stoploss / custom_exit 共用）──
+    def _wb_structural_high(self, dataframe, trade) -> float:
+        """
+        返回 wave_breakdown 入场时的结构摆高（8h 窗口 MAX，ZigZag lag ±3 补偿）。
+        custom_stoploss 和 custom_exit 共用同一锚点，保证两条路径触发线一致。
+        返回 NaN 表示无合规候选，调用方应自行 fallback。
+        """
+        entry_price = trade.open_rate
+        open_date = pd.Timestamp(trade.open_date).tz_localize(None) \
+            if getattr(trade.open_date, 'tzinfo', None) is None else \
+            pd.Timestamp(trade.open_date).tz_convert(None)
+        df_dates = dataframe['date']
+        if hasattr(df_dates.iloc[0], 'tzinfo') and df_dates.iloc[0].tzinfo is not None:
+            df_dates = df_dates.dt.tz_convert(None)
+        entry_idx = int(df_dates.searchsorted(open_date, side='right')) - 1
+        wb_sl = np.nan
+        if 0 <= entry_idx < len(dataframe):
+            win_start = max(0, entry_idx - 7)
+            window = dataframe.iloc[win_start:entry_idx + 1]
+            is_sh_win = (window['is_wave_start'].fillna(False).astype(bool) &
+                         (window['wave_direction'] == 'down'))
+            for rel_i, is_sh in enumerate(is_sh_win):
+                if not is_sh:
+                    continue
+                abs_i = win_start + rel_i
+                peak = float(dataframe.iloc[max(0, abs_i - 3):abs_i + 1]['high'].max())
+                if peak >= entry_price and (np.isnan(wb_sl) or peak > wb_sl):
+                    wb_sl = peak
+        return wb_sl
+
     # ── custom_stoploss（结构止损）───────────────────────────
     def custom_stoploss(self, pair: str, trade, current_time,
                         current_rate: float, current_profit: float,
@@ -939,29 +969,7 @@ class WyckoffV8(IStrategy):
             # TASK 27: wave_breakdown 专用止损 — 入场时摆高 × 1.01（swing high 被突破=下跌结构失效）
             # 必须固化入场 bar 的摆高锚点，不能用 last：ffill 会随行情推进到新（更低）摆高，导致止损漂移
             if enter_tag_short == 'v8_short_wsdown':
-                open_date = pd.Timestamp(trade.open_date).tz_localize(None) \
-                    if getattr(trade.open_date, 'tzinfo', None) is None else \
-                    pd.Timestamp(trade.open_date).tz_convert(None)
-                df_dates = dataframe['date']
-                if hasattr(df_dates.iloc[0], 'tzinfo') and df_dates.iloc[0].tzinfo is not None:
-                    df_dates = df_dates.dt.tz_convert(None)
-                entry_idx = int(df_dates.searchsorted(open_date, side='right')) - 1
-                wb_sl = np.nan
-                if 0 <= entry_idx < len(dataframe):
-                    # 8h 窗口（与 rolling(8) 入场信号对称）内找所有 is_wave_start & down 点
-                    # 对每个点取前 3 根邻域最高价（补偿 ZigZag lag），filter >= entry_price，取 MAX
-                    win_start = max(0, entry_idx - 7)
-                    window = dataframe.iloc[win_start:entry_idx + 1]
-                    is_sh_win = (window['is_wave_start'].fillna(False).astype(bool) &
-                                 (window['wave_direction'] == 'down'))
-                    for rel_i, is_sh in enumerate(is_sh_win):
-                        if not is_sh:
-                            continue
-                        abs_i = win_start + rel_i
-                        # ZigZag 标注在确认 candle，真实峰值在其前 1~3 根
-                        peak = float(dataframe.iloc[max(0, abs_i - 3):abs_i + 1]['high'].max())
-                        if peak >= entry_price and (np.isnan(wb_sl) or peak > wb_sl):
-                            wb_sl = peak
+                wb_sl = self._wb_structural_high(dataframe, trade)
                 if not np.isnan(wb_sl) and wb_sl > 0:
                     sl_price = wb_sl * 1.01
                     return (sl_price / current_rate) - 1
@@ -1055,8 +1063,17 @@ class WyckoffV8(IStrategy):
                 ar_high = float(dataframe['high'].tail(20).max())
             target_short_std = last.get('target_short_standard', np.nan)
 
-            # 1. 结构失败：价格突破派发区 AR High（做空逻辑彻底失效）
-            if not np.isnan(ar_high) and ar_high > 0:
+            # 1. 结构失败：价格突破结构锚点（做空逻辑彻底失效）
+            # wave_breakdown 用 8h 窗口 MAX swing high × 1.01（与 custom_stoploss 同锚）
+            # 其他路径用派发区 AR High
+            enter_tag_short = getattr(trade, 'enter_tag', '') or ''
+            if enter_tag_short == 'v8_short_wsdown':
+                wb_sl = self._wb_structural_high(dataframe, trade)
+                sl_price = (wb_sl * 1.01) if (not np.isnan(wb_sl) and wb_sl > 0) \
+                    else float(dataframe['high'].tail(20).max()) * 1.01
+                if current_rate > sl_price:
+                    return 'v8_short_structure_fail'
+            elif not np.isnan(ar_high) and ar_high > 0:
                 if current_rate > ar_high:
                     return 'v8_short_structure_fail'
 
