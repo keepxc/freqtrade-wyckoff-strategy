@@ -10,6 +10,9 @@ set -euo pipefail
 SERVICE="freqtrade-dryrun"
 LOG="/home/gyan/freqtrade/logs/candle_refresh.log"
 
+# cron 环境可能丢失 XDG_RUNTIME_DIR，导致 systemctl --user 失败
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
 if systemctl --user is-active --quiet "${SERVICE}.service"; then
     systemctl --user kill --signal=HUP "${SERVICE}.service"
     echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC') SIGHUP sent to ${SERVICE}" >> "$LOG"
