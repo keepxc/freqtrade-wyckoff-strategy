@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS signals (
     max_open_trades_blocked INTEGER,
     risk_guard_blocked  INTEGER,
     regime_blocked      INTEGER,
+    wb_wave_efficiency  REAL,
+    wb_wave_displacement REAL,
 
     -- Future exit hook 预埋
     phase_exit_eligible         INTEGER DEFAULT 0,
@@ -236,3 +238,8 @@ CREATE INDEX IF NOT EXISTS idx_param_versions_run   ON parameter_versions(run_id
 
 CREATE INDEX IF NOT EXISTS idx_exit_decisions_run   ON exit_decisions(run_id);
 CREATE INDEX IF NOT EXISTS idx_exit_decisions_trade ON exit_decisions(trade_id);
+
+-- ============================================================
+-- 迁移记录（由 ingest_jsonl.apply_migrations() 幂等执行，勿在此直接写 ALTER）
+-- 2026-06-14: signals 表新增 wb_wave_efficiency、wb_wave_displacement
+-- ============================================================

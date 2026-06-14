@@ -39,6 +39,20 @@ def execute_sql_file(conn: sqlite3.Connection, path: Optional[Path]) -> None:
         conn.executescript(text)
 
 
+def apply_migrations(conn: sqlite3.Connection) -> None:
+    """幂等列迁移：ALTER TABLE ADD COLUMN，列已存在时静默跳过。"""
+    migrations = [
+        "ALTER TABLE signals ADD COLUMN wb_wave_efficiency  REAL",
+        "ALTER TABLE signals ADD COLUMN wb_wave_displacement REAL",
+    ]
+    for stmt in migrations:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+    conn.commit()
+
+
 def normalize_bool(value: Any) -> Any:
     if isinstance(value, bool):
         return 1 if value else 0
@@ -227,6 +241,7 @@ INSERT_DIRECT_TABLES = {
         "bear_market_mode", "phase_context_tag", "daily_gate_score", "daily_tr_exists",
         "composite_intent", "p3_swing_down_er_exhaustion", "p3_swing_up_er_weak",
         "wyckoff_warning", "max_open_trades_blocked", "risk_guard_blocked", "regime_blocked",
+        "wb_wave_efficiency", "wb_wave_displacement",
     ],
     "detector_events": [
         "event_id", "run_id", "ts", "pair", "timeframe", "event_family", "event_name",
@@ -312,6 +327,7 @@ def main() -> None:
     try:
         execute_sql_file(conn, Path(args.schema) if args.schema else None)
         execute_sql_file(conn, Path(args.views) if args.views else None)
+        apply_migrations(conn)
         count = 0
         # 确保 run.jsonl（含 run_start 事件）优先处理，避免外键约束失败
         all_paths = [Path(p) for p in args.events]
