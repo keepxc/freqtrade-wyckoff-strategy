@@ -144,28 +144,40 @@ class StrategyEventBridge:
             
             for idx in entry_signals.index:
                 row = entry_signals.loc[idx]
-                
+
                 # 确定方向
                 side = 'long' if row.get('enter_long', 0) == 1 else 'short'
                 enter_tag = row.get('enter_tag', 'unknown')
-                
+
                 # 提取信号质量
                 signal_quality_before = 1.0
                 signal_quality_after = row.get('signal_quality', 1.0)
-                
+
                 # 提取时间戳
                 ts = None
                 if 'date' in row:
                     ts = pd.to_datetime(row['date']).to_pydatetime()
-                
+
+                # wsdown 路径：捕获波段质量字段
+                extra_kwargs = {}
+                if enter_tag and 'wsdown' in enter_tag:
+                    wb_eff = row.get('wave_efficiency', None)
+                    wb_disp = row.get('wave_displacement', None)
+                    if wb_eff is not None and not pd.isna(wb_eff):
+                        extra_kwargs['wb_wave_efficiency'] = float(wb_eff)
+                    if wb_disp is not None and not pd.isna(wb_disp):
+                        extra_kwargs['wb_wave_displacement'] = float(wb_disp)
+
                 # 发射信号事件
+                # was_executed=False：此处为候选信号（populate_entry_trend 输出）
+                # 真正成交与否需通过 confirm_trade_entry reject 事件 + trades 表 JOIN 判断
                 self.event_emitter.emit_signal(
                     pair=pair,
                     timeframe=timeframe,
                     side=side,
                     signal_name=enter_tag,
                     candidate_enter_tag=enter_tag,
-                    was_executed=True,  # 在 populate_entry_trend 中标记的都是候选信号
+                    was_executed=False,
                     signal_quality_before=signal_quality_before,
                     signal_quality_after=signal_quality_after,
                     ts=ts,
@@ -182,6 +194,7 @@ class StrategyEventBridge:
                     wyckoff_warning=bool(row.get('wyckoff_warning', False)),
                     above_t1=bool(row.get('v8_above_t1', False)),
                     t2_exists=bool(row.get('v8_t2_exists', False)),
+                    **extra_kwargs,
                 )
             
             logger.debug(f'Emitted {len(entry_signals)} signal events for {pair}')

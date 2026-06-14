@@ -1169,6 +1169,26 @@ class WyckoffV8(IStrategy):
                 logger.info(f'{pair} wave_breakdown exempt: no PNF target')
             else:
                 logger.info(f'{pair} entry rejected: no PNF target')
+                # P5：记录 confirm 层拒绝事件（补充候选信号的漏斗数据）
+                if self.event_bridge is not None:
+                    try:
+                        ts = pd.Timestamp(last['date']).to_pydatetime() if 'date' in last.index else current_time
+                        self.event_bridge.event_emitter.emit_signal(
+                            pair=pair,
+                            timeframe=self.timeframe,
+                            side=side,
+                            signal_name=entry_tag or 'unknown',
+                            candidate_enter_tag=entry_tag or 'unknown',
+                            was_executed=False,
+                            signal_quality_before=1.0,
+                            signal_quality_after=1.0,
+                            rejection_reason='pnf_target_missing',
+                            ts=ts,
+                            market_env=str(last.get('market_env', '')),
+                            bear_market_mode=bool(last.get('bear_market_mode', False)),
+                        )
+                    except Exception as _e:
+                        logger.debug(f'[V8] P5 reject signal emit failed: {_e}')
                 return False
 
         # P5：发射开仓事件
