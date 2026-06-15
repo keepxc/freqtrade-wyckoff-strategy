@@ -59,6 +59,7 @@
 | TASK 32 | 134,485% | 216 | wave_breakdown 入场窗口 rolling(1→8)，趋势跟随多点入场（+15,012pp，+12.6%） |
 | TASK 33 | 451,917% | 257 | wave_breakdown 止损锚点结构化（8h 窗口 MAX，修复 ffill 反弹扫单缺陷）（+317,432pp，+236%，DD 2.06%→0.59%） |
 | TASK 33b | **473,905%** | **269** | wave_breakdown custom_exit 双锚一致（_wb_structural_high 私有方法，修复 structure_fail 用 ar_high 提前触发）（+21,988pp，timerange 延长至 20260612） |
+| TASK 34 | ❌ 证伪 | — | phase_b_min_days 20→7 + TR High 追踪：473,905%→372,863%（-101,042pp）；Phase D/E 提前激活阻断空头复利链；Phase B 早期突破 TR High 历史 100% UTAD；已回退 |
 
 ### V7 历史基线（已归档）
 
