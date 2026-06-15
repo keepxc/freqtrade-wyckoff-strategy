@@ -169,6 +169,29 @@ class WyckoffV8(IStrategy):
             self.event_bridge = None
             logger.warning(f'[V8] StrategyEventBridge init failed: {e}')
 
+        # ── Market Data Store（OI 实时落库）─────────────────
+        try:
+            from user_data.strategies.v8_modules.market_data_store import fetch_and_save_oi
+            self._fetch_and_save_oi = fetch_and_save_oi
+        except Exception as e:
+            self._fetch_and_save_oi = None
+            logger.warning(f'[V8] market_data_store import failed: {e}')
+        self._oi_last_fetch_date: str = ''   # YYYY-MM-DD，防止同一天重复拉取
+
+    def bot_loop_start(self, current_time, **kwargs) -> None:
+        """每个 loop 开始时调用（仅 dry run / live，回测中不执行）。每天拉一次 OI 落库。"""
+        if self._fetch_and_save_oi is None:
+            return
+        today = current_time.strftime('%Y-%m-%d')
+        if today == self._oi_last_fetch_date:
+            return
+        try:
+            result = self._fetch_and_save_oi()
+            if result:
+                self._oi_last_fetch_date = today
+        except Exception as e:
+            logger.warning(f'[V8] bot_loop_start OI fetch failed: {e}')
+
     # ── Informative Pairs ────────────────────────────────────
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
