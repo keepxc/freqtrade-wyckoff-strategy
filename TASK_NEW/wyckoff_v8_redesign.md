@@ -4839,3 +4839,79 @@ return min(possible_stake, available_amount)
 - 方向 B：dry run 改 mot=2，对齐已验证的 471k%/DD2.06%
 
 **本次仅记录，未改动任何 config / 策略代码。**
+
+---
+
+## 审计 P0-2：Walk-Forward 样本外验证（2026-06-20，进行中）
+
+> 目的：区分"真 edge"与"过拟合"。所有 V8 参数均在 2022-2026 全窗口调优，故 2025-2026 非真 OOS（参数见过）。**唯一真 OOS 窗口是 2022 年之前的数据。**
+
+### 数据约束
+
+| 数据 | 范围 | 可用于 OOS |
+|---|---|:---:|
+| futures 1h | 2021-01-01 起 | 仅 2021 |
+| futures 1d | 2019-09-08 起 | 日线预热充足 |
+| spot 1h/1d | 2018-01-01 起 | 2018-2021（含两个 SC 底） |
+
+### 第一部分：空头引擎 OOS（futures 2021 全年）✅ 真 edge
+
+2021 是牛市，参数从未见过。同口径回测（mot=2）：
+
+| 指标 | OOS 2021 | In-sample 2022-26 | 判定 |
+|---|---:|---:|:---:|
+| 交易数 | 50（**全空头 v8_short_wsdown**） | wave_breakdown 167 | — |
+| **胜率** | **88.0%**（44胜6负） | wave_breakdown 78.4% | ✅ OOS 反而更高 |
+| 均利润 | 3.58% | 2.93%（整体） | ✅ 保持 |
+| 主退出 v8_up_wave_reverse | 43笔 / 100% WR / +4.5% | 同结构 | ✅ |
+| 硬止损 | 5笔 / 0% WR / -2.71% | 正常摩擦 | ✅ |
+
+**结论**：wave_breakdown 趋势跟随空头（ZigZag ChoCh + ema200_persist）在完全陌生的 2021 价格（COVID 后牛市 / 519 腰斩 / 11月双顶）上跑出 88% 胜率，**高于样本内 78.4%。空头护城河是真 edge，非过拟合。**
+
+### 第二部分：多头引擎在 2021 零成交（结构性盲区）
+
+诊断：`daily: sc=0 / phase_D=0 / pnf_valid=0`，196 个多头 ChoCh 全被 pnf 门拦（`blocked_pnf=196`）。
+
+**根因正确且符合设计**：V8 多头需 SC（跌破 252 日新低的积累结构）。2021 牛市无年度新低 → 无积累结构 → 不开多。
+
+**后果**：futures 1h 仅到 2021，2021 无 SC、2022/2025 的 SC 又都在样本内 → **多头引擎（461/733 笔，edge 大头）的 91% 胜率 100% 是 in-sample，无法用 futures 数据做 OOS 验证。**
+
+### 第三部分：多头引擎 spot OOS（2018-2021）✅ 真 edge
+
+破解办法：用 spot 数据（2018 起）跑，含 **2018-12 SC 底 + 2020-03 COVID SC 底**（参数从未见过的真实积累结构）。
+
+- 工具：`WyckoffV8Spot`（薄子类，仅 `can_short=False`）+ `config_spot_oos.json`（trading_mode=spot, BTC/USDT）
+- 设计：spot 2018-2021（OOS）+ spot 2022-2026（桥接对照，隔离 instrument 混杂）
+
+**三方对比（多头引擎，隔离 instrument 与 period 两个混杂变量）：**
+
+| 测试 | 窗口 | 多头笔数 | 胜率 | 均利润 | sc | 性质 |
+|---|---|---:|---:|---:|:---:|---|
+| futures 样本内 | 2022-26 | 442 | 93.9% | 2.69% | — | 调优窗（v8_ws_e 基线） |
+| spot 桥接对照 | 2022-26 | 510 | **93.6%** | 2.72% | 6 | 隔离 instrument |
+| spot 真·OOS | **2018-21** | 415 | **94.8%** | 4.16% | 3 | **参数从未见过** |
+
+**两个混杂变量都被排除**：
+1. instrument 无影响——spot IS 93.6% ≈ futures IS 93.9%，spot 不虚高胜率。
+2. OOS ≈ IS——spot OOS 94.8% ≈ spot IS 93.6%，+1.2pp 在噪声内。
+
+**结论**：多头引擎在从未见过的 2018-2021（2018熊/2019复苏/2020 COVID崩盘/2021牛+519腰斩）上胜率与调优窗几乎完全一致。**多头 edge 为真，非过拟合。**
+
+> 注：spot 回测出现 7 笔 v8_short_* enter_tag 残留——源码确认（`backtesting.py:299` `_can_short = trading_mode != SPOT and strategy.can_short`）spot 下 `enter_short` 恒不触发，故 422 笔全为多头仓位，短标签仅为 `populate_entry_trend` 在重叠 bar 上的 long/short 标签碰撞，对结论无影响（值得后续单独核查标签逻辑）。
+
+### P0-2 总结论
+
+| 引擎 | OOS 胜率 | IS 胜率 | 判定 |
+|---|---:|---:|:---:|
+| 空头 wave_breakdown（futures 2021） | 88.0% | 78.4% | ✅ OOS 更高 |
+| 多头（spot 2018-21） | 94.8% | 93.6% | ✅ 持平 |
+
+**两个引擎都在完全陌生、跨越截然不同 regime 的数据上保持 88-95% 胜率。V8 的 per-trade 物理 edge 是真实的，不是对 2022-2026 的曲线拟合。**
+
+**关键限定**：「edge 是真的」≠「473,905% 会重现」。per-trade 胜率/期望稳健，但终值复利仍被后期少数大 stake 交易主导、高方差——护城河经得起 OOS 检验，具体复利数字不是可靠预测。接 P1（复利免疫指标复核历史结论）。
+
+### 验证工具（保留，非生产路径）
+
+- `user_data/strategies/WyckoffV8Spot.py`：仅 `can_short=False` 的薄子类，多头 OOS 验证用
+- `user_data/config_spot_oos.json`：spot 回测配置（BTC/USDT, trading_mode=spot）
+- 不参与封板基线、不进 dry run
