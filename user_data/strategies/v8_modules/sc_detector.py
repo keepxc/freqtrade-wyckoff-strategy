@@ -79,7 +79,7 @@ def add_v8_sc_detection(df: DataFrame, params: dict = None) -> DataFrame:
     # ========================
     # C1: 趋势强度（双模式：60日/3日 max）
     # ========================
-    decline_60 = df['close'] / df['close'].rolling(60).max() - 1   # ≤ 0
+    decline_60 = df['close'] / df['close'].rolling(60).max().shift(1) - 1   # ≤ 0
     decline_3  = df['close'] / df['close'].shift(3) - 1
     c1_60 = np.maximum(0, -decline_60) / p['X_60']
     c1_3  = np.maximum(0, -decline_3) / p['X_3']

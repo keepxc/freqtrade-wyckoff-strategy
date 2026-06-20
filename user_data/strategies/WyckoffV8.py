@@ -290,7 +290,8 @@ class WyckoffV8(IStrategy):
                     df_1d = add_v8_sc_detection(df_1d)
                     df_1d = add_v8_phase_detection(df_1d)
                     df_1d = add_v8_pnf_targets(df_1d)
-                    df_1d = add_v8_short_pnf_targets(df_1d)  # TASK S-3
+                    # add_v8_short_pnf_targets 依赖 daily_bc_detected（DailyEventDetector 产生）
+                    # 已移至 DailyEventDetector.detect() 之后调用，见下方 TASK S-3 标注
 
                     sc_count = int(df_1d.get('v8_sc_final', pd.Series(False)).sum())
                     phase_d = int((df_1d.get('v8_phase', pd.Series('')) == 'D').sum())
@@ -304,8 +305,7 @@ class WyckoffV8(IStrategy):
                         'v8_tr_high', 'v8_tr_low',
                         'v8_target_1', 'v8_target_2', 'v8_target_3',
                         'v8_sc_final', 'v8_sc_low',
-                        'target_short_conservative', 'target_short_standard',
-                        'target_short_aggressive', 'rr_short_standard',
+                        # target_short_* 已移至第二次 merge（dist_cols），依赖 daily_bc_detected
                     ]
                     daily_cols = [c for c in daily_cols if c in df_1d.columns]
                     df_1d_slim = df_1d[daily_cols].copy()
@@ -432,9 +432,9 @@ class WyckoffV8(IStrategy):
                         _sm_v2_arr[_si] = _sm_v2_on
                     df_1d['daily_sm_v2'] = _sm_v2_arr
 
-                    # ── TASK 14 Fix 2: daily_ema200_persist — 连续跌穿EMA200第四路径 ──
-                    # 触发：连续15天 close < EMA200（慢性熊市，不依赖120日回撤%）
-                    # 重置：连续5天 close > EMA200（与 sm_v2 保持一致）
+                    # ── TASK 14 Fix 2 / TASK 31b: daily_ema200_persist — 跌穿EMA200第四路径 ──
+                    # 触发：任意1天 close < EMA200 即激活（TASK 31b 实验结论，rolling=1，+19,987pp vs rolling=15）
+                    # 重置：连续5天 close > EMA200（保持不变，防止快速反弹误清除）
                     # 依据：2026-05-11至05-31连续20天在EMA200下方但sm_v2失效，此路径填补空白
                     _ema_persist_raw = (df_1d['close'] < _1d_ema200).astype(int)
                     _ema_persist_activate = (
@@ -613,7 +613,12 @@ class WyckoffV8(IStrategy):
                     _fb_sow_cnt = int(df_1d['daily_fallback_sow'].sum())
                     logger.info(f'[V8-DIAG] {pair} TASK13: daily_sm_v2={_sm_v2_cnt} daily_fallback_sow={_fb_sow_cnt}')
 
+                    # TASK S-3: 空头 PNF 目标位（依赖 daily_bc_detected，必须在 DailyEventDetector 之后）
+                    df_1d = add_v8_short_pnf_targets(df_1d)
+
                     dist_cols = ['date', 'daily_bc_detected', 'daily_bc_path',
+                                 'target_short_conservative', 'target_short_standard',
+                                 'target_short_aggressive', 'rr_short_standard',
                                  'daily_ar_high', 'daily_ar_low', 'dist_sequence_progress',
                                  'daily_utad_detected', 'daily_dist_sow_detected',
                                  'buying_exhaustion', 'be_zone_high', 'dist_cause_sufficient',
