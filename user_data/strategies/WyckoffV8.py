@@ -138,6 +138,9 @@ class WyckoffV8(IStrategy):
     wave_min_bars = IntParameter(2, 8, default=3, space='buy', optimize=False, load=True)
     sot_wave_count = IntParameter(3, 5, default=3, space='buy', optimize=False, load=True)
     sot_displacement_ratio = DecimalParameter(0.7, 0.9, default=0.8, space='buy', optimize=False, load=True)
+    # TASK 38: wave_breakdown 阴跌延续窗口。8=基线（仅波启动8h内入场）；放宽=捕捉持续阴跌
+    # 入场窗口与 _wb_structural_high 止损锚点窗口共用此值，保持一致
+    wb_rolling_window = IntParameter(8, 48, default=24, space='buy', optimize=False, load=True)
 
     # ── 参数 ─────────────────────────────────────────────────
     # 结构止损：TR Low 之下的缓冲比例
@@ -916,8 +919,9 @@ class WyckoffV8(IStrategy):
                           pd.Series(False, index=dataframe.index)).fillna(False).astype(bool) &
             (_persist_days >= 0)
         )
+        _wb_win = int(self.wb_rolling_window.value)
         _wb_signal = (
-            dataframe['is_wave_start'].rolling(8, min_periods=1).max().fillna(0).astype(bool) &
+            dataframe['is_wave_start'].rolling(_wb_win, min_periods=1).max().fillna(0).astype(bool) &
             (dataframe['wave_direction'] == 'down') &
             (dataframe['wave_efficiency'] > 0.001) &
             (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
@@ -1002,7 +1006,8 @@ class WyckoffV8(IStrategy):
         entry_idx = int(df_dates.searchsorted(open_date, side='right')) - 1
         wb_sl = np.nan
         if 0 <= entry_idx < len(dataframe):
-            win_start = max(0, entry_idx - 7)
+            # 窗口与入场 rolling 窗口一致（TASK 38），保证摆高锚点能覆盖阴跌延续入场
+            win_start = max(0, entry_idx - (int(self.wb_rolling_window.value) - 1))
             window = dataframe.iloc[win_start:entry_idx + 1]
             is_sh_win = (window['is_wave_start'].fillna(False).astype(bool) &
                          (window['wave_direction'] == 'down'))
