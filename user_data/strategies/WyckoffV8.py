@@ -149,6 +149,12 @@ class WyckoffV8(IStrategy):
     # T1 到达后止损移到保本的偏移（避免手续费磨损）
     breakeven_offset = DecimalParameter(0.001, 0.01, default=0.003, decimals=3,
                                         space='sell', optimize=False, load=True)
+    # TASK 41: wsdown 单根强力反转K线提前退出（Wyckoff 努力与结果）
+    # Hyperopt 最优：body≥0.8%（低门槛），CIR≥0.87（收盘在区间上方13%内 = 买压完全主导）
+    wsdown_rev_body = DecimalParameter(0.8, 2.5, default=0.8, decimals=1,
+                                       space='sell', optimize=False, load=True)
+    wsdown_rev_cir  = DecimalParameter(0.5, 0.9, default=0.87, decimals=2,
+                                       space='sell', optimize=False, load=True)
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
@@ -1156,6 +1162,19 @@ class WyckoffV8(IStrategy):
                     and target_short_std < entry_price
                     and current_rate <= target_short_std):
                 return 'v8_short_pnf_std'
+
+            # TASK 41: wsdown 单根强力反转K线提前退出（Wyckoff 努力与结果）
+            if enter_tag_short == 'v8_short_wsdown' and current_profit > 0.005:
+                candle_open  = float(last.get('open',  current_rate))
+                candle_close = float(last.get('close', current_rate))
+                candle_high  = float(last.get('high',  current_rate))
+                candle_low   = float(last.get('low',   current_rate))
+                candle_range = candle_high - candle_low
+                body_pct     = (candle_close - candle_open) / candle_open * 100
+                cir          = ((candle_close - candle_low) / candle_range
+                                if candle_range > 0 else 0.0)
+                if body_pct >= float(self.wsdown_rev_body.value) and cir >= float(self.wsdown_rev_cir.value):
+                    return 'wsdown_reversal_bar'
 
             return None
 

@@ -55,6 +55,19 @@ class EventEmitter:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         return f"run_{ts}_{self.mode}_{uuid.uuid4().hex[:8]}"
     
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for fh in state.get('_files', {}).values():
+            try:
+                fh.close()
+            except Exception:
+                pass
+        state['_files'] = {}
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     def _get_file_handle(self, event_category: str):
         """Get or create file handle for event category."""
         if event_category not in self._files:
