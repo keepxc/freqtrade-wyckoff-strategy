@@ -9,16 +9,12 @@
   "cancel_open_orders_on_exit": true,
   "trading_mode": "futures",
   "margin_mode": "isolated",
-  "minimal_roi": {
-    "0": 0.5,
-    "60": 0.35,
-    "180": 0.25,
-    "360": 0.2
-  },
+  "minimal_roi": {"0": 99.0},
+  "stoploss": -0.12,
   "unfilledtimeout": {
     "entry": 10,
-    "exit": 10,
-    "exit_timeout_count": 0,
+    "exit": 1,
+    "exit_timeout_count": 1,
     "unit": "minutes"
   },
   "entry_pricing": {
@@ -43,12 +39,12 @@
     "secret": "",
     "ccxt_config": {
       "proxies": {
-        "http": "http://127.0.0.1:7890",
-        "https": "http://127.0.0.1:7890"
+        "http": "http://host.docker.internal:7890",
+        "https": "http://host.docker.internal:7890"
       }
     },
     "ccxt_async_config": {
-      "aiohttp_proxy": "http://127.0.0.1:7890"
+      "aiohttp_proxy": "http://host.docker.internal:7890"
     },
     "pair_whitelist": [
       "BTC/USDT:USDT"
@@ -64,7 +60,7 @@
     "enabled": true,
     "token": "8692280863:AAGUad9WhRLP_EIgGRleP4CqGWhO3EG93ns",
     "chat_id": "440579069",
-    "proxy_url": "http://127.0.0.1:7890",
+    "proxy_url": "http://host.docker.internal:7890",
     "notification_settings": {
       "status": "on",
       "warning": "on",
@@ -89,8 +85,6 @@
     "username": "freqtrade",
     "password": "CHANGE_THIS_PASSWORD"
   },
-  "minimal_roi": {"0": 99.0},
-  "stoploss": -0.12,
   "bot_name": "WyckoffV8_DryRun",
   "timeframe": "1h",
   "initial_state": "running",
@@ -99,5 +93,5 @@
   "internals": {
     "process_throttle_secs": 30
   },
-  "db_url": "sqlite:////home/gyan/freqtrade/user_data/tradesv3.dryrun.sqlite"
+  "db_url": "sqlite:////freqtrade/user_data/tradesv3.v8dryrun.sqlite"
 }

@@ -1257,6 +1257,7 @@ class WyckoffV8(IStrategy):
 
         # 必须有 PNF 目标位（有因果依据才进场）
         # wave_breakdown 豁免（趋势跟随路径不依赖 PNF 结构）
+        # 注：redist/fti/ice 故意不豁免——PNF=NaN 时拒绝是有益过滤（TASK 39 回测验证，净 -2.05% 若放行）
         _wb_entry = entry_tag and 'wsdown' in entry_tag
         if pd.isna(last.get('v8_target_1', np.nan)):
             if _wb_entry:
