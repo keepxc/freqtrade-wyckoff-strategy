@@ -24,20 +24,27 @@
 
 ---
 
-## 当前基线（mot=1，2026-06-23，TASK 38）
+## 当前基线（固定仓口径，2026-07-04，TASK 44 起）
 
 | 指标 | 数值 |
 |------|------|
-| 收益率 | **9,235,899%**（20220101-20260602） |
-| 交易数 | 742（多头 468 / 空头 274） |
-| 胜率 | 91.0% |
-| 最大 DD | 0.26% |
+| 总利润 | **218,370 USDT（21.84%）** |
+| 交易数 | 783 |
+| 胜率 | 90.9% |
+| 平均利润/笔 | 2.80% |
+| 最大 DD | 0.08% |
 
-> ⚠️ **配置变更说明**：本基线为 **mot=1（80% 满油门部署）**，对齐 dry run（config commit ff08dd9）。
-> 旧基线 473,905%（TASK 33b）为 **mot=2 / timerange 20260612**——max_open_trades 不同导致每笔部署率不同（mot=2 每笔 40%，mot=1 每笔 80%），**两者复利终值不可直接对比**。
-> mot=1 下 TASK 38 前基线（rolling=8）= 9,101,316%；TASK 38（rolling=24）= 9,235,899%（+1.48%，DD 0.66%→0.26%）。
+**基线口径（三要素，对比实验必须完全一致）**：
+- `max_open_trades=1`（config_backtest.json，commit ff08dd9）
+- `stake_amount=10000` 固定 + `dry_run_wallet=1,000,000` + `tradable_balance_ratio=1.0`（config_v8_backtest.json，TASK 44 起）
+- `--timerange 20220101-20260704 --cache none`
+
+> ⚠️ **口径变更史（三代基线互不可比）**：
+> 1. **mot=2 复利口径**（~TASK 33b）：473,905%，每笔部署 40%
+> 2. **mot=1 复利口径**（TASK 38~43）：TASK 38 = 9,235,899%（20260602）；**TASK 41 封板 = 9,355,121%**（+1.29%，35笔 wsdown_reversal_bar 100% WR）。复利终值被小本金早期复利 + 后期 1000 BTC cap 双重扭曲，序列敏感（插入/删除少数早期交易即扰动整条终值），已弃用作为采纳/证伪判据
+> 3. **stake=10000 固定仓口径**（TASK 44 起，现行）：消除复利序列敏感性，per-trade edge 可直接对比。历史 pp delta（TASK 1~43）均在复利口径下测得，与现行口径数值不可比
 >
-> 策略文件：`user_data/strategies/WyckoffV8.py`
+> 策略文件：`user_data/strategies/WyckoffV8.py`（代码状态 = TASK 41 封板 + TASK 44/45 证伪回退）
 
 ### 基线演进历史
 
@@ -64,6 +71,8 @@
 | TASK 34 | ❌ 证伪 | — | phase_b_min_days 20→7 + TR High 追踪：473,905%→372,863%（-101,042pp）；Phase D/E 提前激活阻断空头复利链；Phase B 早期突破 TR High 历史 100% UTAD；已回退 |
 | — | mot 2→1 | — | config 对齐 dry run 满油门（ff08dd9）；基线口径切换为 mot=1，下方数值不再与上方 mot=2 时代可比 |
 | TASK 38 | 9,235,899%（mot=1） | 274 | wave_breakdown 阴跌延续窗口 rolling(8→24)：阴跌空头 80.4% WR 审计支撑；多头笔数不变(468)未被挤；+1.48%，DD 0.66%→0.26% |
+| TASK 41 | **9,355,121%**（mot=1，复利口径封板值） | 297 | wsdown 强反转K线提前退出（body≥0.8% + CIR≥0.87，Hyperopt 200 epochs）：35笔 reversal_bar 100% WR，+1.29%，DD 持平 0.26%。✅ OOS 复核通过（2026-07-04，futures 2021：10笔 100% WR / +5.41%，见 redesign 文档 P0-2b） |
+| — | stake unlimited→10000 | — | TASK 44 起切固定仓口径：新基线 **218,370 USDT / 21.84% / 783笔 / 90.9% WR / DD 0.08%**（timerange 20220101-20260704）。复利口径终值弃用作为决策指标 |
 
 ### V7 历史基线（已归档）
 
@@ -117,7 +126,9 @@ v8_ws_d / v8_ws_e：Phase D/E 中 1H wave_start（up）确认后入场
 1. 结构失败：current_rate < TR Low → v8_structure_fail（紧急）
 2. 1H down_wave 开始             → v8_down_wave（主要，95.3% 占比）
 3. PNF T2 到达                   → v8_pnf_t2（辅助）
+空头 wsdown 专属：单根强反转K（body≥0.8% + CIR≥0.87 + 浮盈>0.5%）→ wsdown_reversal_bar（TASK 41）
 custom_stoploss: TR Low 结构止损（统一）+ T1 到达移保本
+⚠️ 注意：Phase E 多头 TR Low 距入场 30-70%，实际起约束的是 -12% 硬止损（TASK 29 审计）
 ```
 
 ---
@@ -154,6 +165,25 @@ custom_stoploss: TR Low 结构止损（统一）+ T1 到达移保本
 | TASK 26 | ETH零参数压力测试 — 3笔全亏（-22%），Phase检测器BTC专项，RS前置条件不满足 | ❌ |
 | TASK 27 | wave_breakdown 趋势跟随空头第八路径（+40,697pp，579笔，108空头，DD 1.04%，零新参数） | ✅ |
 | TASK 28 | 多空槽位交互验证（双槽同时占用0%、零碰撞、置换有利、利用率+7.8pp）+ 九大检验覆盖评估 | ✅ |
+| TASK 29 | 九大检验三方向预研（RR门控/HH-HL序列/空头量价背离）— 三项全部证伪 | ❌ |
+| TASK 30 | wave_breakdown persist_days 15→0 敏感度审计（+10,334pp） | ✅ |
+| TASK 31/31b | daily_ema200_persist 激活窗口 rolling 15→5→1（+19,987pp / +22,964pp） | ✅ |
+| TASK 32 | wave_breakdown 入场窗口 rolling(1→8)（+15,012pp） | ✅ |
+| TASK 33/33b | wb 止损锚点结构化（8h 窗口 MAX）+ custom_exit 双锚一致（+317,432pp / +21,988pp） | ✅ |
+| TASK 34 | phase_b_min_days 20→7 + TR High 追踪 — 证伪（-101,042pp），已回退 | ❌ |
+| TASK 35 | lps_signal 置信度标注列（零侵入）+ bot_loop_start 守卫 | ✅ |
+| TASK 36 | VSA 前向信号四路径（绕过 ZigZag）— 全线证伪，胜率收敛 50-53% | ❌ |
+| TASK 37 | Phase C Spring 检测预研 — 预研未动代码 | 📋 |
+| TASK 38 | wave_breakdown 阴跌延续窗口 rolling(8→24)（+1.48%，DD 腰斩） | ✅ |
+| TASK 39 | confirm_trade_entry PNF 豁免扩展 — 证伪（PNF 检查是有益二次过滤），已回退 | ❌ |
+| TASK 40/40b | wsdown 追踪止损 + 冷却门控 — 双证伪（与 rolling(24h) 结构冲突），方向关闭 | ❌ |
+| TASK 41 | wsdown 强反转K线提前退出（CIR≥0.87）— 采纳封板（+1.29%） | ✅ |
+| TASK 42~42d | rolling(24h) 量价结构替代四方案 — 全部证伪，rolling(24h) 为有效新鲜度约束 | ❌ |
+| TASK 43 | ZigZag min_bars 3→2/1 — 证伪，wave_min_percent 才是主导过滤器 | ❌ |
+| TASK 44 | ar_min_pct 10%→7% — 无改善（-0.15%，4笔差异，噪声级），不采纳，可重试 | ⭕ |
+| TASK 45 | Phase B/C→D SOS 放量门控恢复 — 网格单调劣化，维持 v8.4 无门控 | ❌ |
+| TASK 47 | TR 持续时间→PNF 目标位乘数（时间因子）预研，未动代码 | 📋 |
+| TASK 48 | down_wave↔威科夫SOW 对应关系文档澄清，待补充 | 📋 |
 
 ---
 
@@ -165,7 +195,7 @@ docker compose run --rm "freqtrade" backtesting \
   --config user_data/config_backtest.json \
   --config user_data/config_v8_backtest.json \
   --strategy WyckoffV8 \
-  --timerange 20220101-20260602 --cache none
+  --timerange 20220101-20260704 --cache none
 
 # 数据更新（1H + 1D）
 docker compose run --rm "freqtrade" download-data \
