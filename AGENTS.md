@@ -40,9 +40,12 @@
 | 最大 DD | 1.09% |
 | Profit Factor / Sharpe | 1.04 / 0.13 |
 
-**因果口径下的分路径 edge（TASK 60 分解）**：
-- 正 edge 幸存者：`wsdown_reversal_bar` 27笔 avg +3.2% ｜ `v8_short_lpsy` 16笔 avg +1.0% ｜ `v8_pnf_t2` 4笔 avg +5.1% ｜ `v8_ws_d` 18笔 avg +1.2%
-- 归零：`v8_ws_e` 473笔 +0.03% ｜ `v8_short_wsdown` 290笔 −0.01% ｜ `v8_down_wave` 退出 482次 −0.02%
+**因果口径下的分路径 edge（TASK 60 分解，经 TASK 61/62 修正）**：
+- **实证种子**：`v8_ws_d` 18笔 avg +1.2%（TASK 61 独立佐证：Phase D fwd20d Δ+3.7pp 双数据集显著；缺陷是入场被饿死，4.5年仅18笔）
+- 观察名单：`v8_short_lpsy` 16笔 avg +1.0%（全部集中 2025-2026 单 regime，2025 净亏）
+- 已除名：`wsdown_reversal_bar`/`v8_pnf_t2` 的高均利是退出条件选择偏差（专挑赢家结算）；反事实回测（TASK 62）证实 reversal_bar 增量为噪声级 ⭕
+- 归零：`v8_ws_e` 473笔 +0.03%（TASK 61：Phase E futures 无条件 edge）｜ `v8_short_wsdown` 290笔 −0.01% ｜ `v8_down_wave` 退出 482次 −0.02%
+- **日线层独立审判（TASK 61）**：Phase B/D 与 EMA200 regime 是真资产（双显著）；BC/UTAD/SOW 事件层坏死（零触发/方向反转），Phase B 未被交易——新方向候选
 
 **基线口径（三要素 + 因果修复代码，对比实验必须完全一致）**：
 - `max_open_trades=1`（config_backtest.json，commit ff08dd9）
