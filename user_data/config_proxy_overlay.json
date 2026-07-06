@@ -1,0 +1,10 @@
+{
+    "exchange": {
+        "ccxt_config": {
+            "httpsProxy": "http://host.docker.internal:7890"
+        },
+        "ccxt_async_config": {
+            "httpsProxy": "http://host.docker.internal:7890"
+        }
+    }
+}

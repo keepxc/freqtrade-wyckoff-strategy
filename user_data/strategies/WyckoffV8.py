@@ -28,6 +28,10 @@ from pandas import DataFrame
 from typing import Optional, Tuple
 from functools import reduce
 import os
+import sys
+# 确保 /freqtrade 在 sys.path 中，使 user_data.* 包导入正常
+if '/freqtrade' not in sys.path:
+    sys.path.insert(0, '/freqtrade')
 
 from freqtrade.strategy import IStrategy, DecimalParameter, IntParameter
 import talib.abstract as ta
@@ -262,34 +266,31 @@ class WyckoffV8(IStrategy):
                     break
         dataframe['lps_signal'] = _lps_arr
 
-        # ── Wave 检测（1H）──────────────────────────────────
+        # ── Wave 检测（1H，因果化实现）──────────────────────
+        # 2026-07-06 未来函数修复：_segment_weis_waves 已因果化——
+        # is_wave_start 在 ZigZag 确认 bar（反向位移穿越阈值）发出，属性列为
+        # running 值，不再需要 shift 补偿（旧 shift(min_bars) 只覆盖延迟下界）
         if self.wave_analyzer is not None:
             try:
                 dataframe = self.wave_analyzer._segment_weis_waves(dataframe)
-                # ZigZag 回溯修复：wave_start 标记在 bar N 确认，但实盘要到 N+min_bars 才知道
-                # 把信号向后移 min_bars 根，消除 lookahead bias
-                _lag = int(self.wave_min_bars.value)
-                for _col in ['is_wave_start', 'is_wave_end']:
-                    if _col in dataframe.columns:
-                        dataframe[_col] = dataframe[_col].shift(_lag).fillna(False).astype(bool)
-                # wave_direction / efficiency / displacement 跟随 is_wave_start 的原始位，不移位
-                # （它们描述的是波段属性，不是触发信号）
                 wave_count = int(dataframe.get('is_wave_start', pd.Series(False)).sum())
                 up_count = int((dataframe.get('is_wave_start', pd.Series(False)) &
                                 (dataframe.get('wave_direction', pd.Series('')) == 'up')).sum())
-                logger.info(f'[V8-DIAG] {pair} WaveAnalyzer OK (lag={_lag}): is_wave_start={wave_count} up_waves={up_count}')
+                logger.info(f'[V8-DIAG] {pair} WaveAnalyzer OK (causal): is_wave_start={wave_count} up_waves={up_count}')
             except Exception as e:
                 logger.warning(f'[V8-DIAG] {pair} WaveAnalyzer failed: {e}')
                 dataframe['is_wave_start'] = False
                 dataframe['wave_direction'] = ''
                 dataframe['wave_efficiency'] = 0.0
                 dataframe['wave_displacement'] = 0.0
+                dataframe['wave_start_bar'] = -1
         else:
             logger.warning(f'[V8-DIAG] {pair} WaveAnalyzer NOT loaded — wave_start=0')
             dataframe['is_wave_start'] = False
             dataframe['wave_direction'] = ''
             dataframe['wave_efficiency'] = 0.0
             dataframe['wave_displacement'] = 0.0
+            dataframe['wave_start_bar'] = -1
 
         # ── 日线 Phase / PNF（TASK 1-3）─────────────────────
         if V8_MODULES_OK:
@@ -934,24 +935,30 @@ class WyckoffV8(IStrategy):
         )
         wave_breakdown_gate = _wb_bear_ok & _wb_signal & short_intent_ok
 
-        final_short_entry = (
+        sow_gate = (
             sow_entry &
             short_intent_ok & rr_short_ok & _bear_gate & pnf_valid_short
-        ) | be_gate | lpsy_gate | ice_lpsy_gate | redist_gate | fti_gate | wave_breakdown_gate
+        )
+        final_short_entry = (sow_gate | be_gate | lpsy_gate | ice_lpsy_gate |
+                             redist_gate | fti_gate | wave_breakdown_gate)
 
         # 优先级（顺序赋值：后者覆盖前者，故最高优先级放最后）
         # WB < FTI < REDIST < ICE_LPSY < BE < LPSY < SOW
+        # 2026-07-06 修复：tag 必须用门控后掩码（be_gate/sow_gate），不能用裸
+        # be_entry/sow_entry——SOW/BE 日线旗标展开为 24 根 1H bar，仅由其他门控
+        # 放行的 bar 若恰逢裸旗标为 True 会被错标，custom_stoploss 按 tag 分发
+        # 止损锚，错标 = 吃错止损
         dataframe.loc[final_short_entry & wave_breakdown_gate, 'enter_tag'] = 'v8_short_wsdown'
         dataframe.loc[final_short_entry & fti_gate,       'enter_tag'] = 'v8_short_fti'
         dataframe.loc[final_short_entry & redist_gate,    'enter_tag'] = 'v8_short_redist'
         dataframe.loc[final_short_entry & ice_lpsy_gate,  'enter_tag'] = 'v8_short_ice_lpsy'
-        dataframe.loc[final_short_entry & be_entry,       'enter_tag'] = 'v8_short_be'
+        dataframe.loc[final_short_entry & be_gate,        'enter_tag'] = 'v8_short_be'
         dataframe.loc[final_short_entry & lpsy_gate,      'enter_tag'] = 'v8_short_lpsy'
-        dataframe.loc[final_short_entry & sow_entry,      'enter_tag'] = 'v8_short_sow'
+        dataframe.loc[final_short_entry & sow_gate,       'enter_tag'] = 'v8_short_sow'
         dataframe.loc[final_short_entry, 'enter_short'] = 1
 
         _be_cnt   = int(be_gate.sum())
-        _sow_cnt  = int((final_short_entry & sow_entry).sum())
+        _sow_cnt  = int(sow_gate.sum())
         _lpsy_cnt = int(lpsy_gate.sum())
         _ice_cnt  = int(ice_lpsy_gate.sum())
         _redist_cnt = int(redist_gate.sum())
@@ -998,7 +1005,11 @@ class WyckoffV8(IStrategy):
     # ── wave_breakdown 结构锚点（custom_stoploss / custom_exit 共用）──
     def _wb_structural_high(self, dataframe, trade) -> float:
         """
-        返回 wave_breakdown 入场时的结构摆高（8h 窗口 MAX，ZigZag lag ±3 补偿）。
+        返回 wave_breakdown 入场时的结构摆高（入场 rolling 窗口内 MAX，
+        与 wb_rolling_window 一致，TASK 38 起为 24h）。
+        因果化（2026-07-06）：is_wave_start 标记已移至 ZigZag 确认 bar，
+        真实摆高在 wave_start_bar 指向的波段起点（extreme，必在确认 bar 之前，
+        纯过去数据）；旧 ±3 bar 邻域补偿仅作为无 wave_start_bar 列时的兜底。
         custom_stoploss 和 custom_exit 共用同一锚点，保证两条路径触发线一致。
         返回 NaN 表示无合规候选，调用方应自行 fallback。
         """
@@ -1017,11 +1028,17 @@ class WyckoffV8(IStrategy):
             window = dataframe.iloc[win_start:entry_idx + 1]
             is_sh_win = (window['is_wave_start'].fillna(False).astype(bool) &
                          (window['wave_direction'] == 'down'))
+            has_wsb = 'wave_start_bar' in dataframe.columns
             for rel_i, is_sh in enumerate(is_sh_win):
                 if not is_sh:
                     continue
                 abs_i = win_start + rel_i
-                peak = float(dataframe.iloc[max(0, abs_i - 3):abs_i + 1]['high'].max())
+                ws = int(dataframe['wave_start_bar'].iloc[abs_i]) if has_wsb else -1
+                if 0 <= ws <= abs_i:
+                    # 摆高 = 波段起点 extreme 邻域高点（起点前 1 根到确认 bar，全部为过去数据）
+                    peak = float(dataframe.iloc[max(0, ws - 1):abs_i + 1]['high'].max())
+                else:
+                    peak = float(dataframe.iloc[max(0, abs_i - 3):abs_i + 1]['high'].max())
                 if peak >= entry_price and (np.isnan(wb_sl) or peak > wb_sl):
                     wb_sl = peak
         return wb_sl
@@ -1080,13 +1097,15 @@ class WyckoffV8(IStrategy):
                 ar_high = float(dataframe['high'].tail(20).max())
             target_short_cons = last.get('target_short_conservative', np.nan)
 
-            # T1 (conservative) 到达 → 移到保本（空头：入场价 × (1 - offset)）
+            # T1 (conservative) 到达 → 移到保本（空头：入场价 × (1 - offset)，
+            # 止损价在入场价下方 = 锁定微利；2026-07-06 修复：原返回值误用多头
+            # 公式 (1 + offset)，把止损挂在入场价上方，锁的是 -offset 亏损）
             if (not np.isnan(target_short_cons) and target_short_cons > 0
                     and target_short_cons < entry_price
                     and current_rate <= target_short_cons):
                 breakeven_price = entry_price * (1 - be_offset)
                 if current_rate < breakeven_price:
-                    return (entry_price * (1 + be_offset) / current_rate) - 1
+                    return (breakeven_price / current_rate) - 1
 
             # 结构止损：AR High + buffer（价格突破派发区顶部 = 结构失败）
             if not np.isnan(ar_high) and ar_high > 0:

@@ -45,40 +45,138 @@ class WaveAnalyzer:
     
     def _segment_weis_waves(self, dataframe: DataFrame) -> DataFrame:
         """
-        Weis Wave波段分析 - Milestone 1.1 实现
-        
-        将K线数据转换为有意义的价格波段：
-        1. 识别显著转折点
-        2. 构建威科夫波段
-        3. 计算波段的努力和结果
-        4. 过滤噪音，保留有物理意义的波段
-        
-        验收标准：
-        - 能够将1小时K线数据转换为有意义的波段 ✓
-        - 波段数量合理（每月10-20个波段）
-        - 过滤掉90%以上的噪音K线
-        - 处理速度 < 50ms per 1000 bars
+        Weis Wave 波段分析 — 因果化实现（2026-07-06 未来函数修复）
+
+        旧实现的两处 lookahead（实现见 git 历史）：
+        1. 波段属性列（direction/displacement/efficiency）写入的是完结波段的
+           最终值——end_price 只有波段走完才可知；且 _validate_wave_significance
+           用最终位移决定 wave_start 标记是否存在，标记本身即未来的函数
+        2. 策略侧 shift(min_bars) 只补偿 ZigZag 确认延迟的下界；真实延迟 =
+           反向位移穿越 max(min_percent, ATR×mult) 的 bar 数，无上界
+
+        因果规则（本实现，单次前向扫描）：
+        - 转折点在"确认 bar"（反向位移首次穿越阈值且趋势翻转、且距 extreme
+          ≥ min_bars）才发出信号：
+            is_wave_start[conf] = True（新波段自 extreme 起，方向 = 翻转方向）
+            is_wave_end[conf]   = True（上一波段在 extreme 结束，此刻才可知）
+        - wave_direction / displacement / effort / efficiency 为"截至当前 bar"
+          的 running 值（从当前已确认波段的 extreme 起累计），不含未来信息
+        - wave_start_bar：当前已确认波段起点（extreme）的 bar 下标，供结构
+          锚点（_wb_structural_high 等）因果定位摆高/摆低；无波段时为 -1
+        - 不在数据末尾 append 人工转折点：右缘未确认的走势不产生波段信号，
+          消除旧实现的右缘假波段与指标重绘（repaint）
+        - 噪音过滤因果化：确认时点用截至确认 bar 的信息校验（位移由阈值穿越
+          天然保证；量能支持用 [extreme-20, conf) 均量），不再引用波段终值
+
+        注：下方 _identify_turning_points / _build_waves_from_turning_points /
+        _validate_wave_significance / _map_waves_to_dataframe 为 V7 遗留实现，
+        本方法不再调用（保留仅为 V7 heritage 参考）。
         """
         if len(dataframe) < 50:
-            # 数据不足，返回默认值
             return self._initialize_wave_columns(dataframe)
-        
-        # 1. 识别转折点
-        turning_points = self._identify_turning_points(dataframe)
-        
-        # 2. 构建波段
-        waves = self._build_waves_from_turning_points(dataframe, turning_points)
-        
-        # 3. 验证波段有效性
-        validated_waves = self._validate_wave_significance(waves, dataframe)
-        
-        # 4. 更新缓存 - 访问策略实例的缓存
-        self.strategy.waves_cache = validated_waves
-        
-        # 5. 将波段信息映射回dataframe
-        dataframe = self._map_waves_to_dataframe(dataframe, validated_waves)
-        
-        return dataframe
+
+        df = self._initialize_wave_columns(dataframe)
+        n = len(df)
+
+        min_change_percent = self.strategy.wave_min_percent.value
+        atr_multiplier = self.strategy.wave_atr_multiplier.value
+        min_bars = int(self.strategy.wave_min_bars.value)
+
+        closes = df['close'].values.astype(float)
+        volumes = df['volume'].values.astype(float)
+        atr20 = df['atr_20'].values.astype(float) if 'atr_20' in df.columns \
+            else np.full(n, np.nan)
+
+        # cumvol[i+1] - cumvol[j] = volume[j..i] 之和（含两端）
+        cumvol = np.concatenate([[0.0], np.cumsum(volumes)])
+        # 量能支持校验用 20 根均量（截至前一根，纯过去）
+        vol_ma20 = pd.Series(volumes).rolling(20, min_periods=5).mean().shift(1).values
+
+        direction_arr = np.array(['neutral'] * n, dtype=object)
+        displacement_arr = np.zeros(n)
+        effort_arr = np.zeros(n)
+        efficiency_arr = np.zeros(n)
+        is_start = np.zeros(n, dtype=bool)
+        is_end = np.zeros(n, dtype=bool)
+        wave_id_arr = np.full(n, -1, dtype=int)
+        wave_start_bar_arr = np.full(n, -1, dtype=int)
+
+        # ZigZag 状态（与旧 _identify_turning_points 的状态更新规则一致）
+        current_trend = None
+        last_extreme_idx = 0
+        last_extreme_price = closes[0]
+
+        # 当前已确认波段状态（因果）
+        conf_start = -1          # 已确认波段起点（extreme）bar 下标
+        conf_dir = None
+        wave_counter = -1
+        completed_waves = []     # 已确认结束的波段（供 waves_cache 兼容）
+
+        for i in range(n):
+            # ── 转折检测（从 min_bars 起，ATR 有效才判定）──
+            if i >= min_bars:
+                atr = atr20[i]
+                price = closes[i]
+                if not (np.isnan(atr) or atr == 0):
+                    threshold = max(min_change_percent, atr * atr_multiplier / price)
+                    change = abs(price - last_extreme_price) / (last_extreme_price + 1e-9)
+                    if change >= threshold:
+                        new_trend = 'up' if price > last_extreme_price else 'down'
+                        if (current_trend is not None and new_trend != current_trend
+                                and i - last_extreme_idx >= min_bars):
+                            # ── 确认事件：extreme 是转折点，此刻（bar i）才可知 ──
+                            # 1) 上一已确认波段在 extreme 处结束
+                            if conf_start >= 0:
+                                is_end[i] = True
+                                completed_waves.append(self.WyckoffWave(
+                                    start_idx=conf_start,
+                                    end_idx=last_extreme_idx,
+                                    start_price=closes[conf_start],
+                                    end_price=closes[last_extreme_idx],
+                                    high_price=float(df['high'].iloc[conf_start:last_extreme_idx + 1].max()),
+                                    low_price=float(df['low'].iloc[conf_start:last_extreme_idx + 1].min()),
+                                    total_volume=float(cumvol[last_extreme_idx + 1] - cumvol[conf_start]),
+                                    bar_count=last_extreme_idx - conf_start + 1,
+                                    direction=conf_dir,
+                                ))
+                            # 2) 新波段自 extreme 起、方向 new_trend，因果校验后发出信号
+                            #    位移校验：change ≥ threshold ≥ min_change_percent，天然满足
+                            #    量能支持：截至确认 bar 的累计量 vs 过去 20 根均量（因果）
+                            seg_effort = cumvol[i + 1] - cumvol[last_extreme_idx]
+                            vma = vol_ma20[i]
+                            vol_ok = (np.isnan(vma)) or (seg_effort >= vma * 0.5)
+                            wave_counter += 1
+                            conf_start = last_extreme_idx
+                            conf_dir = new_trend
+                            if vol_ok:
+                                is_start[i] = True
+                        # 状态更新（与旧实现一致：每次阈值穿越都推进 extreme）
+                        current_trend = new_trend
+                        last_extreme_idx = i
+                        last_extreme_price = price
+
+            # ── running 属性（截至当前 bar，纯过去）──
+            if conf_start >= 0:
+                disp = abs(closes[i] - closes[conf_start])
+                eff = cumvol[i + 1] - cumvol[conf_start]
+                direction_arr[i] = conf_dir
+                displacement_arr[i] = disp
+                effort_arr[i] = eff
+                efficiency_arr[i] = disp / (eff + 1e-9)
+                wave_id_arr[i] = wave_counter
+                wave_start_bar_arr[i] = conf_start
+
+        df['wave_direction'] = direction_arr
+        df['wave_displacement'] = displacement_arr
+        df['wave_effort'] = effort_arr
+        df['wave_efficiency'] = efficiency_arr
+        df['is_wave_start'] = is_start
+        df['is_wave_end'] = is_end
+        df['wave_id'] = wave_id_arr
+        df['wave_start_bar'] = wave_start_bar_arr
+
+        self.strategy.waves_cache = completed_waves
+        return df
     
 
     def _identify_turning_points(self, dataframe: DataFrame) -> List[int]:
@@ -236,6 +334,7 @@ class WaveAnalyzer:
         dataframe['is_wave_start'] = False
         dataframe['is_wave_end'] = False
         dataframe['wave_id'] = -1
+        dataframe['wave_start_bar'] = -1
         return dataframe
     
 

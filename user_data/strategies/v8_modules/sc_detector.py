@@ -233,31 +233,22 @@ def add_v8_sc_detection(df: DataFrame, params: dict = None) -> DataFrame:
         df.loc[sc_mask[sc_mask].index[valid], 'v8_sc_near_low'] = True
 
     # ========================
-    # Final SC 去重（30日窗口保留最低价 SC）
+    # Final SC 去重（因果实现，2026-07-06 未来函数修复）
     # ========================
+    # 旧实现在 ±final_window 窗口内选最低 low 的 SC——win_end 向未来看 30 天，
+    # 且已 final 的 SC 被排除出后续窗口导致去重失效 + 指标重绘（实测：2022-06
+    # 大底回测锚 06-19@17936，live 当时只能锚 06-15@20100，低 10.8%）。
+    # 因果规则：按时间顺序，首个候选即 final；其后 final_window 天内的候选抑制。
+    # 决策只依赖历史，新数据到达不改写既有标记（幂等，无重绘）。
     sc_filtered = df['v8_sc_confirmed'] & df['v8_sc_near_low']
     df['v8_sc_final'] = False
-    sc_indices = df.index[sc_filtered].tolist()
-
-    for idx in sc_indices:
-        if df.loc[idx, 'v8_sc_final']:
-            continue
+    last_final_iloc = None
+    for idx in df.index[sc_filtered]:
         iloc = df.index.get_loc(idx)
-        win_start = max(0, iloc - p['final_window'])
-        win_end = min(n - 1, iloc + p['final_window'])
-        win_indices = [i for i in sc_indices
-                       if win_start <= df.index.get_loc(i) <= win_end
-                       and not df.loc[i, 'v8_sc_final']]
-        if not win_indices:
+        if last_final_iloc is not None and (iloc - last_final_iloc) <= p['final_window']:
             continue
-        best = min(win_indices, key=lambda i: df['low'].iloc[df.index.get_loc(i)])
-        # 如果首个 SC 的 low 和最低 SC 的 low 差距 < 10%，保留首个
-        first_idx = min(win_indices, key=lambda i: df.index.get_loc(i))
-        first_low = df['low'].iloc[df.index.get_loc(first_idx)]
-        best_low = df['low'].iloc[df.index.get_loc(best)]
-        if best != first_idx and best_low / first_low > 0.90:
-            best = first_idx
-        df.loc[best, 'v8_sc_final'] = True
+        df.loc[idx, 'v8_sc_final'] = True
+        last_final_iloc = iloc
 
     # ========================
     # 清理临时列
