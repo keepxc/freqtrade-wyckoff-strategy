@@ -134,6 +134,7 @@ def add_v8_phase_detection(df: DataFrame, params: dict = None) -> DataFrame:
 
                     # B → D/E: 跳过 C（V 型反弹）
                     # v8.4: 去量化——价格站上中线即为有效 SoS，不强制放量
+                    # TASK 45（2026-07-04）网格扫描 sos_vol_ratio 1.0~2.0，单调劣化，无门控最优，已证伪
                     if current_phase == 'B' and not np.isnan(tr_mid_val):
                         if close > tr_mid_val:
                             if not np.isnan(tr_high_val) and close > tr_high_val:
@@ -148,6 +149,7 @@ def add_v8_phase_detection(df: DataFrame, params: dict = None) -> DataFrame:
         if current_phase == 'C' and tr_locked:
             # C → D: SOS
             # v8.4: 去量化——价格站上中线即可
+            # TASK 45（2026-07-04）网格扫描放量门控，单调劣化，已证伪，维持无门控
             # 守卫：i > phase_c_start，防止 Spring 进入和 SOS 在同一 bar 瞬间跳转
             # （Spring 回收 bar 收盘通常 > TR 中线，否则 Phase C 永远 = 0%）
             if (not np.isnan(tr_mid_val) and df['close'].iloc[i] > tr_mid_val
