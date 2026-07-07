@@ -27,12 +27,22 @@ from datetime import date, timedelta
 import pandas as pd
 import requests
 
-BASE_URL = "https://data.binance.vision/data/futures/um/daily/metrics/BTCUSDT/BTCUSDT-metrics-{d}.zip"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # 注意：不能放进 user_data/data/binance/futures/ —— freqtrade 会把
 # *-1h-oi_metrics.feather 当 K 线数据扫描，'oi_metrics' 非法 CandleType 直接 Fatal
-RAW_DIR = os.path.join(SCRIPT_DIR, "..", "data", "oi_metrics", "raw")
-OUT_FEATHER = os.path.join(SCRIPT_DIR, "..", "data", "oi_metrics", "BTC_USDT_USDT-1h-oi_metrics.feather")
+BASE_URL = RAW_DIR = OUT_FEATHER = None  # 由 set_symbol() 初始化
+
+
+def set_symbol(symbol: str):
+    """符号参数化（TASK 78 ETH 复制需求）。BTC 沿用旧 raw 目录保持续传兼容。"""
+    global BASE_URL, RAW_DIR, OUT_FEATHER
+    BASE_URL = (f"https://data.binance.vision/data/futures/um/daily/metrics/"
+                f"{symbol}/{symbol}-metrics-{{d}}.zip")
+    sub = "raw" if symbol == "BTCUSDT" else f"raw_{symbol}"
+    RAW_DIR = os.path.join(SCRIPT_DIR, "..", "data", "oi_metrics", sub)
+    base = symbol.replace("USDT", "") + "_USDT_USDT"
+    OUT_FEATHER = os.path.join(SCRIPT_DIR, "..", "data", "oi_metrics",
+                               f"{base}-1h-oi_metrics.feather")
 
 START = date(2020, 8, 1)   # 起点前探一个月，404 自动跳过
 END = date(2026, 7, 4)     # 对齐 futures 1h K 线数据终点
@@ -151,7 +161,9 @@ def aggregate():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--aggregate-only", action="store_true")
+    ap.add_argument("--symbol", default="BTCUSDT")
     args = ap.parse_args()
+    set_symbol(args.symbol)
     if not args.aggregate_only:
         ok = download()
         if not ok:
