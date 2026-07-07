@@ -32,6 +32,10 @@ DEFAULT_PHASE_PARAMS = {
     'spring_max_days': 7,   # Spring 收回最大天数（放宽：Crypto Spring 回收更慢）
     'cooldown_days': 5,     # 回退冷却期
     'tr_buffer': 0.995,     # TR Low 缓冲
+    # TASK 71: 深破位重置阈值——tr_locked 相位中收盘 < SC low × 0.95 视为
+    # 积累论题失效（新一轮供应浪，非 Spring 浅刺），结构重置等待新 SC。
+    # 0.95 的 5% 缓冲保护 Phase C Spring（其自有 C→A 规则阈值 0.97 更浅、先触发）
+    'deep_break_pct': 0.95,
 }
 
 
@@ -92,6 +96,26 @@ def add_v8_phase_detection(df: DataFrame, params: dict = None) -> DataFrame:
             cooldown_until = -1
 
         # ========================
+        # TASK 71: 深破位重置（2018-19/2020-21 周期 D 标注为零的根因修复）
+        # tr_locked 相位（B/C/D/E）中收盘深破 SC low → 积累论题失效，
+        # 结构整体重置（含 TR 锚清空，同时修复 AR 超时/重置后 v8_tr_* 输出
+        # 陈旧值的缺陷），等待新 SC 重新锚定
+        # ========================
+        if tr_locked and not np.isnan(sc_low_val):
+            if df['close'].iloc[i] < sc_low_val * p['deep_break_pct']:
+                current_phase = 'unknown'
+                sc_low_val = np.nan
+                tr_locked = False
+                tr_high_val = np.nan
+                tr_low_val = np.nan
+                tr_mid_val = np.nan
+                phase_b_start = -1
+                phase_c_start = -1
+                spring_low = np.nan
+                consec_below_mid = 0
+                consec_below_tr_high = 0
+
+        # ========================
         # Phase A: 等待 AR
         # ========================
         if current_phase == 'A' and sc_confirm_idx >= 0:
@@ -109,10 +133,13 @@ def add_v8_phase_detection(df: DataFrame, params: dict = None) -> DataFrame:
                 phase_b_start = i
                 ar_confirmed[i] = True
             elif days_since_sc > p['ar_days']:
-                # AR 超时 → 结构废弃
+                # AR 超时 → 结构废弃（TASK 71: 连带清空 TR 锚，修复陈旧值输出）
                 current_phase = 'unknown'
                 sc_low_val = np.nan
                 tr_locked = False
+                tr_low_val = np.nan
+                tr_high_val = np.nan
+                tr_mid_val = np.nan
 
         # ========================
         # Phase B: TR 震荡

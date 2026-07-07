@@ -240,15 +240,27 @@ def add_v8_sc_detection(df: DataFrame, params: dict = None) -> DataFrame:
     # 大底回测锚 06-19@17936，live 当时只能锚 06-15@20100，低 10.8%）。
     # 因果规则：按时间顺序，首个候选即 final；其后 final_window 天内的候选抑制。
     # 决策只依赖历史，新数据到达不改写既有标记（幂等，无重绘）。
+    # TASK 71 补充：冷却期内候选若 low 比上一 final 的 low 低超过 5%
+    # （deeper_pct=0.95），视为新一轮 climax 事件而非重复信号，照常标 final——
+    # 修复 2018-12 真实底部候选被 30 天冷却吞掉、结构无锚可用的缺陷。
+    # 判断只用历史 final + 当前候选，因果、无重绘。
+    DEEPER_PCT = 0.95
     sc_filtered = df['v8_sc_confirmed'] & df['v8_sc_near_low']
     df['v8_sc_final'] = False
     last_final_iloc = None
+    last_final_low = np.nan
     for idx in df.index[sc_filtered]:
         iloc = df.index.get_loc(idx)
+        cand_low = df['v8_sc_low'].loc[idx]
+        if np.isnan(cand_low):
+            cand_low = df['low'].loc[idx]
         if last_final_iloc is not None and (iloc - last_final_iloc) <= p['final_window']:
-            continue
+            is_deeper = (not np.isnan(last_final_low)) and cand_low < last_final_low * DEEPER_PCT
+            if not is_deeper:
+                continue
         df.loc[idx, 'v8_sc_final'] = True
         last_final_iloc = iloc
+        last_final_low = cand_low
 
     # ========================
     # 清理临时列
