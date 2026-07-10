@@ -228,7 +228,9 @@ class WyckoffV8(IStrategy):
 
         # ── LPS 置信度标注（纯标注，不影响入场/出场逻辑）───
         # 物理含义：SOS（强势上升波）之后 1~6根内出现缩量窄价差回踩 = LPS供应枯竭确认
-        # 审计依据：2022-2026回测 469笔多头，有LPS前导利润因子 83.89 vs 无LPS 58.02（+45%）
+        # ⚠️ TASK 92（2026-07-10）：原 +45% PF 先验（469笔，TASK 35）为污染口径伪影；
+        # 因果口径复核三臂全灭且方向反转（LPS组 per-trade 期望更低），本列无鉴别力，
+        # 仅作历史标注保留，禁止引用为质量依据（audit_lps_causal_recheck.py）
         # Lookahead 验证：SOS 检测基于当根自身属性；LPS 向后回溯过去 SOS，无未来函数
         _vol_ma10 = dataframe['volume'].rolling(10, min_periods=3).mean()
         _spread   = dataframe['high'] - dataframe['low']
