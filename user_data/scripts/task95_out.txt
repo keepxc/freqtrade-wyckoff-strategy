@@ -1,0 +1,48 @@
+BTC: 事件 31
+ETH: 事件 31
+BNB: 事件 28
+XRP: 事件 27
+ADA: 事件 27
+SOL: 事件 27
+DOGE: 事件 22
+DOT: 事件 25
+LTC: 事件 28
+LINK: 事件 36
+AVAX: 事件 23
+TRX: 事件 24
+BCH: 事件 30
+ETC: 事件 26
+ATOM: 事件 28
+
+混池事件 413（无先例剔除 0），D20 中位 53 bar，HIGH-CAUSE 205 / LOW-CAUSE 208
+D20 分布: P10=24 P25=32 P50=53 P75=75 P90=113
+V0 非退化: PASS | S1 两臂n≥30: PASS
+
+V1 主臂: HIGH-CAUSE 均值 +11.070pp (PF 2.69) vs LOW-CAUSE +15.607pp (PF 2.99)
+   delta -4.537pp, bootstrap95CI [-18.534, +8.578] → FAIL
+V2 对半切: H1 -3.665pp / H2 -6.496pp → PASS
+V3 跨币:
+   BTC: n=12/19, delta +26.076pp
+   ETH: n=9/22, delta -18.725pp
+   BNB: n=11/17, delta -41.295pp
+   XRP: n=16/11, delta -4.303pp
+   ADA: n=15/12, delta -47.409pp
+   SOL: n=15/12, delta -13.739pp
+   DOGE: n=19/3, delta +24.946pp（样本不足，不计票）
+   DOT: n=15/10, delta -6.737pp
+   LTC: n=13/15, delta +13.412pp
+   LINK: n=15/21, delta +8.317pp
+   AVAX: n=13/10, delta +44.049pp
+   TRX: n=10/14, delta -12.455pp
+   BCH: n=13/17, delta +0.402pp
+   ETC: n=14/12, delta -31.196pp
+   ATOM: n=15/13, delta -20.037pp
+   计票币 14 个，同号 9 → FAIL
+V4 三分位对比: 上140/下145, delta -4.199pp（同号）
+V4 D10 中位切分: 事件 413, delta -7.863pp（同号）
+V4 D55 中位切分: 事件 410, delta -10.026pp（同号）
+V4 参数哨兵 → PASS
+V5 剂量响应: Spearman ρ(D20, ret) = +0.0246 → PASS
+
+==============================================================
+总判定: ⭕ 不成立（未全过且无反向机制证据）
