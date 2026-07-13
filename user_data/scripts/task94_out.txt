@@ -1,0 +1,49 @@
+BTC: 事件 31
+ETH: 事件 31
+BNB: 事件 28
+XRP: 事件 27
+ADA: 事件 27
+SOL: 事件 27
+DOGE: 事件 22
+DOT: 事件 25
+LTC: 事件 28
+LINK: 事件 36
+AVAX: 事件 23
+TRX: 事件 24
+BCH: 事件 30
+ETC: 事件 26
+ATOM: 事件 28
+
+混池事件 413（截断平仓 0），HIGH 95 / LOW 318（LOW 占比 77.0%）
+V0 非退化: PASS | S1 两臂n≥30: PASS
+
+V1 主臂: HIGH 均值 +17.494pp (PF 3.42) vs LOW +12.119pp (PF 2.69)
+   delta +5.375pp, bootstrap95CI [-10.047, +24.179] → FAIL
+V2 对半切: H1 -1.161pp / H2 +11.738pp → FAIL
+V3 跨币:
+   BTC: n=10/21, delta -13.601pp
+   ETH: n=10/21, delta +0.866pp
+   BNB: n=8/20, delta -28.131pp
+   XRP: n=2/25, delta -26.138pp（样本不足，不计票）
+   ADA: n=4/23, delta +194.262pp（样本不足，不计票）
+   SOL: n=7/20, delta +33.248pp
+   DOGE: n=3/19, delta -27.882pp（样本不足，不计票）
+   DOT: n=4/21, delta -3.938pp（样本不足，不计票）
+   LTC: n=8/20, delta -9.093pp
+   LINK: n=8/28, delta +7.165pp
+   AVAX: n=3/20, delta -4.414pp（样本不足，不计票）
+   TRX: n=8/16, delta -16.583pp
+   BCH: n=10/20, delta +8.081pp
+   ETC: n=3/23, delta -1.138pp（样本不足，不计票）
+   ATOM: n=7/21, delta +17.823pp
+   计票币 9 个，同号 5 → FAIL
+V4 Q=0.75@W=90: n=119/294, delta +13.851pp（同号）
+V4 Q=0.95@W=90: n=60/353, delta +8.595pp（同号）
+V4 W=60@Q=0.85: n=124/289, delta -1.276pp（异号）
+V4 W=180@Q=0.85: n=61/352, delta +11.595pp（同号）
+V4 参数稳健 → FAIL
+V5 准OOS（剔除发现集 123 事件，余 290）: HIGH +17.248pp (n=65) vs LOW +17.159pp (n=225), delta +0.089pp → PASS
+V6 非90d新高子集（n=364，HIGH 46/LOW 318）: HIGH +16.311pp vs LOW +12.119pp, delta +4.192pp → PASS
+
+==============================================================
+总判定: ⭕ 不成立（未全过且无反向机制证据）
