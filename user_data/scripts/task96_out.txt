@@ -1,0 +1,35 @@
+E:\freqtrade\user_data\scripts\audit_task96_rs_regime.py:57: FutureWarning: The default fill_method='pad' in DataFrame.pct_change is deprecated and will be removed in a future version. Either fill in any non-leading NA values prior to calling pct_change or specify 'fill_method=None' to not fill NA values.
+  ret = close.pct_change()
+E:\freqtrade\user_data\scripts\audit_task96_rs_regime.py:57: FutureWarning: The default fill_method='pad' in DataFrame.pct_change is deprecated and will be removed in a future version. Either fill in any non-leading NA values prior to calling pct_change or specify 'fill_method=None' to not fill NA values.
+  ret = close.pct_change()
+E:\freqtrade\user_data\scripts\audit_task96_rs_regime.py:57: FutureWarning: The default fill_method='pad' in DataFrame.pct_change is deprecated and will be removed in a future version. Either fill in any non-leading NA values prior to calling pct_change or specify 'fill_method=None' to not fill NA values.
+  ret = close.pct_change()
+E:\freqtrade\user_data\scripts\audit_task96_rs_regime.py:57: FutureWarning: The default fill_method='pad' in DataFrame.pct_change is deprecated and will be removed in a future version. Either fill in any non-leading NA values prior to calling pct_change or specify 'fill_method=None' to not fill NA values.
+  ret = close.pct_change()
+宇宙 15 币  2019-09-08 ~ 2026-07-03；BTC 冰线下天数占比 41.2%
+
+===== k=7d (起点 2020-02-14) （仅报告，反转档不判）=====
+  全体周: n=334, 周均 -0.0704%
+  熊市周: n=131, 周均 -0.4023% | 牛市周: n=203, 周均 +0.1438%
+
+===== k=14d (起点 2020-02-21) =====
+  全体周: n=333, 周均 +0.6776%
+  熊市周: n=131, 周均 +0.1506% | 牛市周: n=202, 周均 +1.0194%
+
+===== k=30d (起点 2020-03-08) =====
+  全体周: n=330, 周均 +0.2672%
+  熊市周: n=124, 周均 -0.2065% | 牛市周: n=206, 周均 +0.5523%
+
+===== k=90d (起点 2020-05-07) =====
+  全体周: n=322, 周均 +0.6742%
+  熊市周: n=122, 周均 +0.1083% | 牛市周: n=200, 周均 +1.0194%
+
+==============================================================
+R5 熊市周样本: n=124 (≥50) → PASS
+R1 k=30 熊市周均 -0.2065%, CI[-0.7899%, +0.3718%], 下限 0.30% → FAIL
+R2 熊市内三档: k=14 +0.1506% / k=30 -0.2065% / k=90 +0.1083% → FAIL（机制否证）
+R3 熊市周对半切: H1 -0.4705% / H2 +0.0575% → FAIL
+R4 熊−牛: -0.7587% → FAIL
+
+==============================================================
+总判定: 机制否证/不成立 → RS 方向（无条件+条件触发）全部收官关闭
