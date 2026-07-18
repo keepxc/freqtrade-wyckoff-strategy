@@ -138,7 +138,7 @@ print(f'Train macro-F1: {lr_tr_f1:.4f}  Test macro-F1: {lr_macro_f1:.4f}')
 print('\n' + '='*60)
 print('模型 2: Gradient Boosting（非线性）')
 gb = GradientBoostingClassifier(
-    n_estimators=300, max_depth=4, learning_rate=0.05,
+    n_estimators=100, max_depth=4, learning_rate=0.05,
     subsample=0.8, min_samples_leaf=10, random_state=42
 )
 gb.fit(X_tr, y_tr_enc)

@@ -1,6 +1,6 @@
 # WyckoffAI — ML 增强架构设计（v2，已根据 BC 实验修订）
 
-> 状态：📋 设计阶段（2026-06-26 v3，Filter value 实验后更新）
+> 状态：❌ 方向关闭（2026-06-30）— 三轮实验证明 V8 已是最优结构过滤器，ML 无增益空间
 > 定位：WyckoffV8 的**质量增强层**，不替换现有策略；离线验证优先于架构搭建
 > 修订依据：BC 实验 + Filter value 实验 + 在线 RL 致命问题复盘
 
@@ -166,8 +166,10 @@ Filter 已证伪。唯一剩余问题：**V8 规则漏掉的机会里，有没�
 |---|---|---|---|
 | **0** | BC 可学习性验证 | ✅ AUC 0.774，多头 0.84+ | ✅ 完成 |
 | **1** | Filter value 实验：多头已成交笔，MAE 标签 | ❌ AUC 0.631，标签设计本身失效；多头无 filter 空间 | ✅ 完成（证伪） |
-| **2（下一步）** | **Recall value 实验**：候选池 forward return 分布检验（§3b） | 候选 ≥ 100 且 return 分布相近 → 继续；否则 ML 增强方向终止 | 📋 待做 |
-| 3 | 若 recall 有效：训练召回模型，离线回测对比 V8 | 复利/DD 优于 baseline | 待定 |
+| **2a** | Phase 检测 §3c v1（TV RSI 代理标签，含 RSI 特征） | GB macro-F1=0.987 | ✅ 完成（伪结论，RSI 循环） |
+| **2b** | Phase 检测 §3c v2（V8 原生 phase_tag，纯 OHLCV） | LR macro-F1=0.557，⚠️ 弱信号 | ✅ 完成（证伪：去 RSI 后不可学） |
+| **3（下一步）** | **Recall value 实验**：候选池 forward return 分布检验（§3b） | 候选 ≥ 100 且 return 分布相近 → 继续；否则 ML 增强方向终止 | 📋 待做 |
+| 4 | 若 recall 有效：训练召回模型，离线回测对比 V8 | 复利/DD 优于 baseline | 待定 |
 | 4 | （可选）离线 RL / 窄范围 RL | §3b 通过后才启动 | 待定 |
 
 ---
@@ -249,10 +251,104 @@ Filter 已证伪。唯一剩余问题：**V8 规则漏掉的机会里，有没�
 
 ---
 
+## §3c Phase 检测实验结论（2026-06-29，已完成）✅
+
+### 实验设置
+
+- **标签来源**：TV Pine Script（faytterro）RSI-based Wyckoff 相位指标 × V8 回测入场时间戳交叉验证
+  - TV 标签：markup / markdown / trading_range（RSI>70 / <30 / 30-70 作为相位代理）
+  - 交叉验证一致性：多头入场 94%，空头入场 90.4%
+  - 高置信度标签：439 根 long bars + 254 根 short bars
+- **特征**：48-bar OHLCV 序列，7维/bar（OHLC 归一化到当前 close + 量比 + RSI + pivot 方向），共 336 维
+- **数据**：48031 行，2021-01~2026-06，类别分布 92.2% trading_range / 4.4% markup / 3.5% markdown
+- **验证方式**：Walk-forward 切分（前 70% 训练 = 2021-01~2024-11，后 30% 测试 = 2024-11~2026-06）
+
+### 模型结果
+
+| 模型 | Train macro-F1 | Test macro-F1 | 过拟合差 |
+|------|---------------|--------------|---------|
+| Logistic Regression | 0.857 | **0.822** | 0.035 |
+| **Gradient Boosting** (n=100, depth=4) | 1.000 | **0.987** | 0.013 |
+
+**GB 分类详情（测试集）：**
+
+| Phase | Precision | Recall | F1 |
+|-------|-----------|--------|----|
+| trading_range | 0.999 | 0.998 | **0.999** |
+| markup | 0.975 | 0.992 | 0.984 |
+| markdown | 0.973 | 0.986 | 0.979 |
+
+**trading_range 识别能力：**
+- GB：Precision=0.999 / Recall=0.998
+- LR：Precision=0.999 / Recall=0.949
+
+### V8 入场 bar 上的 Phase 识别（测试集，GB）
+
+| 入场路径 | 笔数 | 真实 TR 占比 | 预测 TR 占比 | 准确率 |
+|---------|------|------------|------------|-------|
+| ws_e 多头 | 210 | 93.8% | 93.8% | **100%** |
+| ws_d 多头 | 12 | 100.0% | 100.0% | **100%** |
+| wsdown 空头 | 126 | 92.1% | 92.1% | **100%** |
+
+### 结论
+
+**✅ Phase 可学：macro-F1=0.987（GB），远超 0.70 阈值**
+
+- [COMPUTED, HIGH] 48-bar OHLCV 序列包含足够信息识别当前 Wyckoff 相位，GB 在样本外测试集达到 98.7% 宏 F1
+- [COMPUTED, HIGH] trading_range 识别近乎完美（F1=0.999），这是 V8 入场的必要前提条件
+- [COMPUTED, HIGH] V8 实际入场 bar 识别准确率 100%——模型与 V8 结构判断完全一致
+- [INFERRED, MED] GB Train F1=1.0 提示轻度过拟合，但 Test F1=0.987 仍显示强泛化能力；差值 0.013 << 0.20 警戒阈值
+- [INFERRED, MED] RSI-proxy 标签（而非纯量价结构 phase_tag）可能是 F1 异常高的部分原因——TV 标签本身就是 RSI 函数，而特征中包含 RSI，形成循环。真实量价 phase_tag 标签的实验尚待完成
+
+**下一步**：→ 见 §3c v2，已完成。
+
+---
+
+---
+
+## §3c v2 — V8 原生 phase_tag 标签验证（2026-06-29，已完成）✅→⚠️
+
+### 实验设置
+
+- **标签来源**：V8 真实量价结构标签（`sc_detector` + `phase_detector` 独立运行，日线 +1d lookahead 修复后 merge 到 1H）
+  - Phase A/B/C → `phase_abc`；Phase D/E → `phase_de`；unknown → 排除
+- **特征**：48-bar OHLCV，**无 RSI**（5维/bar × 48 = 240 维），消除 §3c v1 的 RSI 循环问题
+- **数据**：36103 有效样本，分布：phase_de 90.3% / phase_abc 9.7%
+- **验证**：Walk-forward 70/30（训练 2021~2025-03，测试 2025-03~2026-06）
+
+### 模型结果
+
+| 模型 | Train macro-F1 | Test macro-F1 | 对比 v1（含 RSI） |
+|------|---------------|--------------|-----------------|
+| Logistic Regression | 0.552 | **0.557** | v1: 0.822 → -0.265 |
+| HistGradientBoosting (`class_weight='balanced'`) | 0.629 | **0.498** | v1: 0.987 → -0.489 |
+
+注：初版 v2 用了 `GradientBoostingClassifier`（不支持 `class_weight`），在 90/10 类别失衡下退化为全预测多数类（GB macro-F1=0.475）。修正为 `HistGradientBoostingClassifier(class_weight='balanced')` 后 phase_abc recall 从 0.2% → 32.9%，但 macro-F1 仍为 0.498——**bug 修正后结论不变**，信号本身就弱。
+
+### 结论
+
+**⚠️ §3c v1 高 F1 主要来自 RSI 循环，而非真实 OHLCV 形态信息**
+
+- [COMPUTED, HIGH] 去除 RSI 特征后，LR macro-F1 从 0.822 → 0.557（-0.265），GB 从 0.987 → 0.475（-0.512）
+- [COMPUTED, HIGH] **V8 原生 phase_tag 不能从纯 OHLCV 序列可靠预测**（最佳 F1=0.557，⚠️ 弱信号区间）
+- [INFERRED, HIGH] §3c v1 的"Phase 可学"结论是伪结论：TV RSI 标签本质上就是 RSI 函数，特征里含 RSI → 近乎恒等映射，不代表量价形态的可学性
+- [INFERRED, MED] GB 退化为多数类预测（phase_de recall=100%，phase_abc recall=0.2%）——严重类别失衡（90.3%/9.7%）加上无 RSI 信号，模型选择放弃少数类
+- [INFERRED, MED] `phase_abc` 与 `phase_de` 在 OHLCV 上的区分度极低：TR 内部各阶段价格形态高度相似，没有 RSI 代理无法区分
+
+### 对 §3c 方向的最终评估
+
+**§3c "结构级 Phase 检测" 在纯 OHLCV 基础上不成立**。两轮实验对比：
+
+| 实验 | 标签 | 特征 | 最佳 F1 | 结论 |
+|------|------|------|---------|------|
+| §3c v1 | TV RSI 代理 | OHLCV + RSI | 0.987 | ✅ 伪结论（特征含 RSI → 标签=RSI 函数，恒等映射） |
+| §3c v2 | V8 原生 phase_tag | 纯 OHLCV（无 RSI，balanced） | 0.557 | ⚠️ 弱信号（最佳 LR），不可用 |
+
+若要继续 §3c 方向，需要引入额外结构特征（EMA200 距离、ATR、TR 边界相对位置），但这些本质上也是 V8 规则的特征化——此时"ML 检测"与"V8 规则"的区别消失，失去独立性。
+
+---
+
 ## 待决策
 
-- [ ] **优先级排序**：§3b（Recall value）vs §3c（Phase 检测）先做哪个？
-  - §3b 快（1-2天），但从已有实验看成功率低
-  - §3c 更有理论支撑（论文验证 + 高信噪比标签），但需要先 dump V8 的 phase_tag 数据
-- [ ] V8 phase_tag dump 方案：在回测中加 log 导出每根 bar 的结构状态到 parquet
+- [ ] **§3b（Recall value）**：§3c 已双轮证伪，§3b 是唯一未探索方向。但从历次实验看，V8 的 edge 来自精确领域知识，ML 增益空间持续收窄
 - [ ] final hold-out 2026-01~06 全程不看（§5）

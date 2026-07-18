@@ -1,0 +1,36 @@
+{
+  "strategy_name": "WyckoffV8",
+  "params": {
+    "roi": {
+      "0": 99.0
+    },
+    "stoploss": {
+      "stoploss": -0.12
+    },
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": null,
+      "trailing_stop_positive_offset": 0.0,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 1
+    },
+    "sell": {
+      "breakeven_offset": 0.003,
+      "tr_low_buffer": 0.01,
+      "wsdown_rev_body": 0.8,
+      "wsdown_rev_cir": 0.87
+    },
+    "buy": {
+      "sot_displacement_ratio": 0.8,
+      "sot_wave_count": 3,
+      "wave_atr_multiplier": 1.5,
+      "wave_min_bars": 3,
+      "wave_min_percent": 0.008,
+      "wb_rolling_window": 24
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2026-06-26 00:39:43.925882+00:00"
+}
