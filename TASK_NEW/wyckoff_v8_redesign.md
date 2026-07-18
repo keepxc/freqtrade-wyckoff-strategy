@@ -7334,3 +7334,17 @@ H4（报告级）换手：两数据集换手笔数与基线完全一致（+0）�
 **代码修正说明（Code Review 内，非事后改判据）**：H2 初跑在 BTC-spot 上以 `dd_e <= dd_b` 严格比较判 FAIL，复核发现 dd_e−dd_b = 2.22e-16（float64 精度极限，本质是同一次回撤事件），预注册 H2 原文明确"允许持平"，故加 1e-9 容差消除浮点噪声误判，不构成改判据后重跑（判据文字未变，仅修正比较运算的数值实现缺陷）。
 
 **结论**：H1+H2+H3 在 BTC spot+futures 双数据集全部通过——集成投票相对单窗口 20/10 基线 Calmar 有小幅正增量（0.67→0.72 / 0.64→0.64持平），MaxDD 不劣化，半段一致，且**不增加换手成本**（三变体高度共振，很少出现"仅2/3一致"的边际状态切换）。**判定：列入策略集成候选**，但按三层终止校验，本审计属第二层数据探测，尚未做组合级三层校验（未接入 Freqtrade 实盘框架）与 OOS 复核，**不构成采纳**，不更新 AGENTS.md 基线。下一步若要推进，需要走完整 Freqtrade 集成 + OOS 流程（futures 20210101-20220101 + spot 20180101-20220101）才能升级为✅采纳。
+
+**Freqtrade 集成 + OOS 复核**（2026-07-18，`user_data/strategies/DonchianV2Ensemble.py`，与 `DonchianV1.py` 唯一差异是入场/出场判据换成三窗口多数表决，仓位层/成本/止损占位完全未改动；config：`config_donchian_backtest.json`(futures)/`config_donchian_spot_backtest.json`(新建，spot，同 stake/wallet/tradable_ratio 口径)）：
+
+| 区间 | DonchianV1基线 | DonchianV2Ensemble | Delta |
+|---|---|---|---|
+| 主区间 futures 20220101-20260704 | 24笔，+0.30%(2957.3 USDT)，MaxDD 0.24% | 24笔，+0.33%(3332.3 USDT)，MaxDD 0.24% | **+12.7%相对，DD持平** |
+| OOS futures 20210101-20220101 | 5笔，+0.06%(614.2 USDT) | 4笔，**-0.06%**(-644.5 USDT) | **符号反转** |
+| OOS spot 20180101-20220101 | 15笔，+2.48%(24790.6 USDT) | 15笔，+2.52%(25175.8 USDT) | +1.6%相对，DD持平 |
+
+Code Review：三变体状态机与审计脚本 `donchian_positions` 逐行同口径复用（rolling 全 shift(1)），集成状态转移用 `.shift(1)` 判断 0→1/1→0，未引入新前视；仓位层 `custom_stake_amount` 与 DonchianV1 未改动。主区间 24 笔与审计脚本口径趋势一致（Calmar/DD 方向吻合），验证代码正确性。
+
+**判定**：主区间 delta +12.7%（相对基线）且 MaxDD 持平，满足✅采纳的数值门槛；但 **futures OOS 窗口符号反转**（+0.06%→-0.06%，n=4/5，噪声量级但方向相反）——三层终止校验第三层硬性要求"OOS 复核通过"为 AND 条件，不因样本小而豁免。**不满足✅采纳**（OOS 未全过）；futures OOS 反转样本过小（n=4），无机制性证据，**不构成❌证伪**。按三档分级判 **⭕ 无改善/等价**：主区间正向 delta 在 OOS 检验下不稳健，不采纳，不更新 AGENTS.md 基线。`DonchianV2Ensemble.py` 保留在仓库作为已跑通但未封板的候选，不接入 dry run。集成投票方向到此收官，除非未来有新证据（如更长 OOS 窗口、更多资产复现）支持重新评估。
+
+**状态**：已跑数，三层终止校验第三层未通过（OOS 未全过），⭕ 不采纳收官。
