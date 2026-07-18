@@ -1,0 +1,180 @@
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+E:\freqtrade\user_data\scripts\audit_task97_pa_range_fade.py:113: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  regime_shifted = regime.shift(1).infer_objects(copy=False).fillna(False)
+======================================================================
+主判：1h，L=100/K=20/zone=15%/wick=50%，臂A止损，含信号K，含RR门控
+混池事件 n=721（多头 352 / 空头 369）
+P1 混池n≥100且两方向各≥30 → PASS
+臂A: 均值 -0.1451pp, PF 0.87, 胜率 19.6%, 止损占比 79.3%, 目标占比 8.0%, 区间失效占比 0.1%, 强平占比 12.5%
+P2 臂A per-trade期望>0 且 CI排0 且 ≥+0.30%: 均值 -0.1451pp, CI[-0.3895,+0.1158] → FAIL
+P3 对半切: H1(n=360) +0.1325pp / H2(n=361) -0.4220pp → FAIL
+P4 跨币:
+   BTC: n=161, 均值 -0.1956pp
+   ETH: n=155, 均值 +0.1388pp
+   SOL: n=138, 均值 +0.2518pp
+   ADA: n=87, 均值 -0.6994pp
+   BNB: n=86, 均值 -0.6362pp
+   DOT: n=94, 均值 -0.1473pp
+   计票币 6 个，同号 4 → PASS
+
+P5 哨兵档:
+   L=60: n=438, 均值 -0.3208pp（同号）
+   L=150: n=926, 均值 -0.3338pp（同号）
+   K=10: n=985, 均值 -0.1265pp（同号）
+   K=30: n=516, 均值 -0.1658pp（同号）
+   zone=0.1: n=293, 均值 -0.2165pp（同号）
+   zone=0.25: n=1869, 均值 -0.2152pp（同号）
+   wick=0.4: n=773, 均值 -0.1480pp（同号）
+   wick=0.6: n=517, 均值 -0.3859pp（同号）
+   4h=4h: n=156, 均值 -0.1316pp（同号）
+P5 全部哨兵同号 → PASS
+
+P6 形态增量: 含信号K -0.1451pp (n=721) vs 消融(触区即入) -0.1430pp (n=1849) → FAIL（形态层无增量，判死不进策略）
+P7 RR门控增量（报告级）: 门控后 -0.1451pp (n=721) vs 无门控 -0.1456pp (n=734) → PASS
+
+臂B（Brooks原著止损）报告: 平均RR_b=5.96（止损架构未实际用于出场模拟，仅报告距离）
+
+======================================================================
+总判定: ⭕ 不成立，价格行为区间族关闭
+P6 形态层判定: 无增量，形态层不得写入后续策略
