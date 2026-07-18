@@ -146,6 +146,64 @@ def scan_asset(tag, path):
                  best_cell=best_cell, verdict=verdict)
 
 
+TRUNC_CUTOFF = pd.Timestamp("2021-09-14")  # SOL 数据起点+1年，剔除首年52x暴涨期
+
+
+def scan_asset_truncated(tag, path, cutoff):
+    df = load(path)
+    df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+    df_t = df[df["date"] >= cutoff].reset_index(drop=True)
+    print(f"\n{'='*70}\n{tag}（稳健性哨兵：剔除首年暴涨期，起点后移至 {cutoff.date()}）"
+          f"\n  截断后窗口 {df_t['date'].iloc[0].date()} ~ {df_t['date'].iloc[-1].date()}"
+          f"，n={len(df_t)}\n{'='*70}")
+    grid_pass, grid_term = {}, {}
+    for ne in ENTRY_GRID:
+        row = []
+        for nx in EXIT_GRID:
+            if nx >= ne:
+                row.append(None)
+                continue
+            pos = donchian_positions(df_t, ne, nx)
+            term, h1, h2, dd = run_equity(df_t, pos, DEFAULT_COST_SIDE)
+            passed = (term > 0) and (h1 > 0) and (h2 > 0)
+            grid_pass[(ne, nx)] = passed
+            grid_term[(ne, nx)] = term
+            row.append((term, passed))
+        cells = " ".join(
+            ("  .  " if r is None else (f"{r[0]:+5.0%}" if r[1] else f"[{r[0]:+4.0%}]"))
+            for r in row
+        )
+        print(f"  entry={ne:3d}: {cells}")
+    print(f"  (exit列: {EXIT_GRID})  [x] = 未通过(终值或半段为负)")
+
+    neigh = [(ne, nx) for ne in ENTRY_GRID for nx in EXIT_GRID
+             if PLATEAU_ENTRY_RANGE[0] <= ne <= PLATEAU_ENTRY_RANGE[1]
+             and PLATEAU_EXIT_RANGE[0] <= nx <= PLATEAU_EXIT_RANGE[1] and nx < ne]
+    n_pass_neigh = sum(1 for k in neigh if grid_pass.get(k))
+    ratio = n_pass_neigh / len(neigh) if neigh else 0
+    n_pass_total = sum(1 for k, v in grid_pass.items() if v)
+    print(f"  高原邻域: {n_pass_neigh}/{len(neigh)} 格通过 ({ratio:.0%})  全网格通过格子: {n_pass_total}")
+
+    g1 = ratio >= PLATEAU_RATIO_MIN
+    g2 = n_pass_total >= MIN_PASS_CELLS
+    best_cell, best_term = None, -np.inf
+    for k, v in grid_pass.items():
+        if v and grid_term[k] > best_term:
+            best_cell, best_term = k, grid_term[k]
+    g3 = False
+    if best_cell is not None:
+        ne, nx = best_cell
+        pos = donchian_positions(df_t, ne, nx)
+        term_stress, h1_s, h2_s, dd_s = run_equity(df_t, pos, STRESS_COST_SIDE)
+        g3 = term_stress > 0
+        print(f"  最优格子 entry={ne}/exit={nx} (终值 {best_term:+.1%}): "
+              f"cost=0.20% 终值 {term_stress:+.1%} → G3 {'PASS' if g3 else 'FAIL'}")
+    verdict = g1 and g2 and g3
+    print(f"  {tag} 截断后判定: {'活' if verdict else '不具备可用结构'}"
+          f"  G1={g1}({ratio:.0%}) G2={g2}({n_pass_total}) G3={g3}")
+    return dict(tag=tag, g1=g1, g2=g2, g3=g3, ratio=ratio, n_pass_total=n_pass_total, verdict=verdict)
+
+
 def main():
     results = []
     for tag, path in CROSS_DATA:
@@ -171,6 +229,18 @@ def main():
     else:
         final = "⭕ 两资产均未全过，Donchian 结构不能推广到 ETH/SOL，通用趋势跟随扩展方向收官，仅 BTC 单资产结论继续有效"
     print(f"\n总判定: {final}")
+
+    print("\n\n" + "#" * 70)
+    print("稳健性哨兵：SOL 剔除首年暴涨期（2020-09-14~2021-09-14，3.27→170，52x）复核")
+    print("#" * 70)
+    sol_path = dict(CROSS_DATA)["SOL-futures"]
+    sol_trunc = scan_asset_truncated("SOL-futures", sol_path, TRUNC_CUTOFF)
+    print(f"\nSOL 稳健性哨兵判定: 截断前=活, 截断后={'活' if sol_trunc['verdict'] else '不具备可用结构'}")
+    if sol_trunc["verdict"]:
+        print("→ SOL 的'活'判定在剔除首年暴涨期后依然成立，非样本期红利驱动，判定维持。")
+    else:
+        print("→ SOL 的'活'判定主要由首年暴涨期贡献，剔除后结构不再成立，"
+              "原判定降级为⭕（与 ETH 同归'不具备可用结构'）。")
 
 
 if __name__ == "__main__":
