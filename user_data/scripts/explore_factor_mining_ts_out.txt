@@ -1,0 +1,831 @@
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:154: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  d["month"] = d["date"].dt.to_period("M")
+E:\freqtrade\user_data\scripts\explore_factor_mining_ts.py:155: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  monthly = d.groupby("month").apply(
+==========================================================================================
+探索性分析 —— 非结论，禁止引用为证据
+单币时间序列因子挖掘筛选（Phase 0，转换思路：不用 RD-Agent，手写因子库扫描）
+==========================================================================================
+
+加载并计算因子: BTC ...
+
+加载并计算因子: ETH ...
+
+加载并计算因子: SOL ...
+
+加载并计算因子: ADA ...
+
+加载并计算因子: DOT ...
+
+加载并计算因子: BNB ...
+
+==========================================================================================
+逐币逐因子逐窗口明细（前 40 行按 |train_icir| 排序，完整数据见输出文件）
+==========================================================================================
+ train_ic  train_ic_monthly_mean  train_icir  train_pct_months_same_sign  holdout_ic  sign_consistent_train_holdout coin                factor horizon
+  -0.0436                -0.1870       -1.32                        0.88     -0.0566                           True  BTC    funding_rate_level     72h
+   0.0223                -0.2200       -1.31                        0.90     -0.0341                          False  ETH    funding_rate_level     72h
+  -0.0372                -0.1423       -1.26                        0.95     -0.0264                           True  ADA              mom_168h     24h
+  -0.0378                -0.1555       -1.18                        0.95     -0.0881                           True  BNB              mom_168h     24h
+  -0.0341                -0.1203       -1.12                        0.88     -0.0275                           True  BTC    funding_rate_level     24h
+  -0.0260                -0.2163       -1.04                        0.91     -0.0913                           True  BNB              mom_168h     72h
+   0.0072                -0.1475       -1.02                        0.92     -0.0269                          False  ETH    funding_rate_level     24h
+   0.0158                -0.0980       -0.98                        0.84      0.0158                          False  SOL              mom_168h     24h
+  -0.0097                -0.1163       -0.96                        0.86     -0.0229                          False  DOT              mom_168h     24h
+  -0.0707                -0.1618       -0.95                        0.86      0.0451                          False  ADA    funding_rate_level     72h
+  -0.0487                -0.1880       -0.94                        0.77     -0.0364                           True  ADA              mom_168h     72h
+  -0.0144                -0.1304       -0.93                        0.85     -0.0127                          False  BTC              mom_168h     24h
+   0.0228                -0.1706       -0.90                        0.88      0.0070                          False  SOL              mom_168h     72h
+  -0.0672                -0.0971       -0.89                        0.82     -0.0496                           True  BNB               mom_24h     24h
+  -0.0058                -0.1950       -0.88                        0.75     -0.0152                          False  BTC              mom_168h     72h
+  -0.0138                -0.0800       -0.84                        0.73     -0.0634                          False  DOT               mom_72h     24h
+  -0.0523                -0.0921       -0.80                        0.72     -0.0130                          False  BTC               mom_24h     24h
+  -0.0547                -0.0904       -0.80                        0.82     -0.0480                           True  BNB       rsi_14_centered     24h
+  -0.0384                -0.0933       -0.78                        0.77      0.0264                          False  ADA    funding_rate_level     24h
+  -0.0556                -0.1634       -0.78                        0.72      0.0369                          False  SOL    funding_rate_level     72h
+  -0.0300                -0.0997       -0.78                        0.82      0.0123                          False  DOT    funding_rate_level     24h
+   0.0140                -0.1326       -0.77                        0.78     -0.0275                          False  ETH              mom_168h     24h
+  -0.0317                -0.0829       -0.76                        0.78     -0.0311                           True  ETH               mom_24h     24h
+   0.0193                -0.2073       -0.76                        0.78     -0.0323                          False  ETH              mom_168h     72h
+  -0.0375                -0.0850       -0.76                        0.78     -0.0024                          False  BTC       rsi_14_centered     24h
+  -0.0215                -0.1745       -0.76                        0.73     -0.0235                           True  DOT              mom_168h     72h
+  -0.0235                -0.1359       -0.76                        0.73     -0.0125                          False  DOT    funding_rate_level     72h
+  -0.0479                -0.0834       -0.75                        0.73     -0.0545                           True  BNB        price_ma_z_50h     24h
+  -0.0165                -0.0947       -0.74                        0.72     -0.0402                          False  BTC               mom_72h     24h
+  -0.0410                -0.0871       -0.71                        0.78      0.0051                          False  BTC        price_ma_z_50h     24h
+  -0.0241                -0.0742       -0.66                        0.78     -0.0177                          False  ETH        price_ma_z_50h     24h
+  -0.0072                -0.0819       -0.63                        0.82     -0.0928                          False  BNB               mom_72h     24h
+  -0.0167                -0.0655       -0.63                        0.72     -0.0243                          False  ETH       rsi_14_centered     24h
+  -0.0150                -0.0779       -0.63                        0.80     -0.0276                          False  BTC               mom_24h     72h
+  -0.0127                -0.0818       -0.62                        0.78      0.0360                          False  SOL    funding_rate_level     24h
+  -0.0122                -0.0849       -0.62                        0.68     -0.0269                          False  ADA               mom_72h     24h
+  -0.0950                -0.1458       -0.61                        0.75      0.0157                          False  ETH top_trader_ls_chg_24h     72h
+  -0.0092                -0.1045       -0.60                        0.72     -0.0460                          False  ETH               mom_72h     24h
+  -0.0447                -0.0653       -0.60                        0.73     -0.0301                           True  BNB           obv_chg_24h     24h
+   0.0120                -0.1261       -0.57                        0.70     -0.0747                          False  ETH               mom_72h     72h
+
+==========================================================================================
+跨币种一致性汇总（因子+horizon 维度，coverage 按该因子实际可算的币种数分母）
+==========================================================================================
+                 factor horizon  coins_tested  coins_train_holdout_sign_consistent  coins_train_ic_same_sign  median_train_icir
+        hl_range_z_168h     72h             6                                    3                         6               0.14
+                mom_24h     24h             6                                    3                         6              -0.62
+       realized_vol_24h     72h             6                                    3                         6               0.19
+          volume_z_168h     72h             6                                    3                         5               0.13
+               mom_168h     72h             6                                    3                         4              -0.89
+       realized_vol_24h     24h             6                                    2                         6               0.30
+        rsi_14_centered     24h             6                                    2                         6              -0.60
+       vol_ratio_24_168     24h             6                                    2                         6               0.15
+       vol_ratio_24_168     72h             6                                    2                         6               0.06
+       amihud_illiq_24h     72h             6                                    2                         4              -0.06
+     funding_rate_level     72h             6                                    2                         4              -0.86
+               mom_168h     24h             6                                    2                         4              -0.97
+             oi_chg_24h     24h             2                                    2                         2              -0.22
+         price_ma_z_50h     24h             6                                    1                         6              -0.60
+          skew_ret_168h     72h             6                                    1                         6              -0.22
+            obv_chg_24h     24h             6                                    1                         5              -0.42
+       amihud_illiq_24h     24h             6                                    1                         4               0.03
+     funding_rate_level     24h             6                                    1                         4              -0.78
+          volume_z_168h     24h             6                                    1                         4               0.10
+   funding_rate_chg_24h     72h             6                                    1                         3              -0.06
+   funding_rate_chg_24h     24h             6                                    0                         6              -0.12
+        hl_range_z_168h     24h             6                                    0                         6               0.15
+                mom_72h     72h             6                                    0                         6              -0.50
+            obv_chg_24h     72h             6                                    0                         6              -0.18
+         price_ma_z_50h     72h             6                                    0                         6              -0.44
+        rsi_14_centered     72h             6                                    0                         6              -0.40
+                mom_24h     72h             6                                    0                         5              -0.48
+                mom_72h     24h             6                                    0                         5              -0.62
+          skew_ret_168h     24h             6                                    0                         5              -0.20
+  top_trader_ls_chg_24h     24h             2                                    0                         2              -0.29
+             oi_chg_24h     72h             2                                    0                         1               0.01
+taker_ls_ratio_centered     24h             2                                    0                         1              -0.20
+taker_ls_ratio_centered     72h             2                                    0                         1              -0.04
+  top_trader_ls_chg_24h     72h             2                                    0                         1              -0.32
+
+==========================================================================================
+多重比较提示：本次共测试 14 个因子 x 2 个horizon x 6 (或2)个币种 = 180 组合。
+按 p<0.05 惯例，纯噪声下预期约 5% 的检验会偶然“显著”——
+上方 sign_consistent_train_holdout=True 且跨多币种同时成立的因子才值得关注，
+单一币种单一 horizon 显著不构成任何证据。
+以上全部为探索性输出，未过预注册/三层终止校验，禁止写入采纳/证伪表。
+==========================================================================================
+
+明细已存: user_data/scripts/explore_factor_mining_ts_detail.csv
+汇总已存: user_data/scripts/explore_factor_mining_ts_summary.csv

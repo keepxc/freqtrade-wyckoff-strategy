@@ -1,0 +1,341 @@
+2026-07-18 16:08:57,085 - freqtrade - INFO - freqtrade 2026.2
+2026-07-18 16:08:57,363 - numexpr.utils - INFO - NumExpr defaulting to 8 threads.
+2026-07-18 16:08:58,752 - freqtrade.configuration.load_config - INFO - Using config: user_data/config_backtest.json ...
+2026-07-18 16:08:58,756 - freqtrade.configuration.load_config - INFO - Using config: user_data/config_v8_backtest.json ...
+2026-07-18 16:08:58,760 - freqtrade.loggers - INFO - Enabling colorized output.
+2026-07-18 16:08:58,761 - freqtrade.loggers - INFO - Logfile configured
+2026-07-18 16:08:58,761 - freqtrade.loggers - INFO - Verbosity set to 0
+2026-07-18 16:08:58,762 - freqtrade.configuration.configuration - INFO - Using max_open_trades: 1 ...
+2026-07-18 16:08:58,762 - freqtrade.configuration.configuration - INFO - Parameter --timerange detected: 20260501-20260719 ...
+2026-07-18 16:09:06,337 - freqtrade.configuration.configuration - INFO - Using user-data directory: /freqtrade/user_data ...
+2026-07-18 16:09:06,339 - freqtrade.configuration.configuration - INFO - Using data directory: /freqtrade/user_data/data/binance ...
+2026-07-18 16:09:06,339 - freqtrade.configuration.configuration - INFO - Parameter --export detected: trades ...
+2026-07-18 16:09:06,340 - freqtrade.configuration.configuration - INFO - Parameter --cache=none detected ...
+2026-07-18 16:09:06,340 - freqtrade.configuration.configuration - INFO - Filter trades by timerange: 20260501-20260719
+2026-07-18 16:09:06,342 - freqtrade.exchange.check_exchange - INFO - Checking exchange...
+2026-07-18 16:09:06,351 - freqtrade.exchange.check_exchange - INFO - Exchange "binance" is officially supported by the Freqtrade development team.
+2026-07-18 16:09:06,351 - freqtrade.configuration.config_validation - INFO - Validating configuration ...
+2026-07-18 16:09:06,354 - freqtrade.commands.optimize_commands - INFO - Starting freqtrade in Backtesting mode
+2026-07-18 16:09:06,354 - freqtrade.exchange.exchange - INFO - Instance is running with dry_run enabled
+2026-07-18 16:09:06,355 - freqtrade.exchange.exchange - INFO - Using CCXT 4.5.39
+2026-07-18 16:09:06,355 - freqtrade.exchange.exchange - INFO - Applying additional ccxt config: {'options': {'defaultType': 'swap'}}
+2026-07-18 16:09:06,364 - freqtrade.exchange.exchange - INFO - Applying additional ccxt config: {'options': {'defaultType': 'swap'}}
+2026-07-18 16:09:06,373 - freqtrade.exchange.exchange - INFO - Using Exchange "Binance"
+2026-07-18 16:09:07,859 - freqtrade.resolvers.exchange_resolver - INFO - Using resolved exchange 'Binance'...
+2026-07-18 16:09:08,086 - WyckoffV8 - INFO - V8 modules loaded: sc_detector / phase_detector / pnf_calculator / entry_detector
+2026-07-18 16:09:08,196 - WyckoffV8 - INFO - WaveAnalyzer loaded
+2026-07-18 16:09:08,218 - WyckoffV8 - INFO - DailyEventDetector loaded
+2026-07-18 16:09:08,224 - freqtrade.resolvers.iresolver - INFO - Using resolved strategy WyckoffV8 from '/freqtrade/user_data/strategies/WyckoffV8.py'...
+2026-07-18 16:09:08,226 - freqtrade.strategy.hyper - INFO - Loading parameters from file /freqtrade/user_data/strategies/WyckoffV8.json
+2026-07-18 16:09:08,228 - wyckoff.wave_analyzer - INFO - WaveAnalyzer initialized with strategy instance
+2026-07-18 16:09:08,282 - user_data.strategy_event_bridge - INFO - ✅ StrategyEventBridge initialized (run_id: run_20260718_160908_backtest_30e9d7d4)
+2026-07-18 16:09:08,298 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'minimal_roi' with value from the configuration: {'0': 99.0, '60': 0.35, '180': 0.25, '360': 0.2}.
+2026-07-18 16:09:08,299 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'timeframe' with value from the configuration: 1h.
+2026-07-18 16:09:08,299 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_currency' with value from the configuration: USDT.
+2026-07-18 16:09:08,300 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'stake_amount' with value from the configuration: 10000.
+2026-07-18 16:09:08,300 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'unfilledtimeout' with value from the configuration: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 
+'unit': 'minutes'}.
+2026-07-18 16:09:08,300 - freqtrade.resolvers.strategy_resolver - INFO - Override strategy 'max_open_trades' with value from the configuration: 1.
+2026-07-18 16:09:08,301 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using minimal_roi: {'0': 99.0, '60': 0.35, '180': 0.25, '360': 0.2}
+2026-07-18 16:09:08,301 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using timeframe: 1h
+2026-07-18 16:09:08,301 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stoploss: -0.12
+2026-07-18 16:09:08,302 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop: False
+2026-07-18 16:09:08,302 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_stop_positive_offset: 0.0
+2026-07-18 16:09:08,302 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using trailing_only_offset_is_reached: False
+2026-07-18 16:09:08,303 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_custom_stoploss: True
+2026-07-18 16:09:08,303 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using process_only_new_candles: True
+2026-07-18 16:09:08,303 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_types: {'entry': 'limit', 'exit': 'limit', 'stoploss': 'limit', 'stoploss_on_exchange': False, 
+'stoploss_on_exchange_interval': 60}
+2026-07-18 16:09:08,304 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using order_time_in_force: {'entry': 'GTC', 'exit': 'GTC'}
+2026-07-18 16:09:08,304 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_currency: USDT
+2026-07-18 16:09:08,305 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using stake_amount: 10000
+2026-07-18 16:09:08,305 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using startup_candle_count: 300
+2026-07-18 16:09:08,305 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using unfilledtimeout: {'entry': 10, 'exit': 10, 'exit_timeout_count': 0, 'unit': 'minutes'}
+2026-07-18 16:09:08,306 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using use_exit_signal: True
+2026-07-18 16:09:08,306 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_only: False
+2026-07-18 16:09:08,306 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_roi_if_entry_signal: False
+2026-07-18 16:09:08,307 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using exit_profit_offset: 0.0
+2026-07-18 16:09:08,307 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using disable_dataframe_checks: False
+2026-07-18 16:09:08,307 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using ignore_buying_expired_candle_after: 0
+2026-07-18 16:09:08,308 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using position_adjustment_enable: False
+2026-07-18 16:09:08,309 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_entry_position_adjustment: -1
+2026-07-18 16:09:08,309 - freqtrade.resolvers.strategy_resolver - INFO - Strategy using max_open_trades: 1
+2026-07-18 16:09:08,310 - freqtrade.configuration.config_validation - INFO - Validating configuration ...
+2026-07-18 16:09:08,318 - freqtrade.resolvers.iresolver - INFO - Using resolved pairlist StaticPairList from '/freqtrade/freqtrade/plugins/pairlist/StaticPairList.py'...
+2026-07-18 16:09:08,323 - freqtrade.optimize.backtesting - INFO - Using fee 0.0600% from config.
+2026-07-18 16:09:08,366 - freqtrade.data.history.datahandlers.idatahandler - WARNING - BTC/USDT:USDT, futures, 1h, data ends at 2026-07-18 15:00:00
+2026-07-18 16:09:08,375 - freqtrade.optimize.backtesting - INFO - Loading data from 2026-04-18 12:00:00 up to 2026-07-18 15:00:00 (91 days).
+2026-07-18 16:09:08,390 - freqtrade.data.history.datahandlers.idatahandler - WARNING - BTC/USDT:USDT, funding_rate, 1h, data ends at 2026-07-18 16:00:00
+2026-07-18 16:09:08,418 - freqtrade.data.history.datahandlers.idatahandler - WARNING - BTC/USDT:USDT, mark, 1h, data ends at 2026-07-18 15:00:00
+2026-07-18 16:09:08,456 - freqtrade.optimize.backtesting - INFO - Dataload complete. Calculating indicators
+2026-07-18 16:09:08,460 - freqtrade.optimize.backtesting - WARNING - Backtest result caching disabled due to use of open-ended timerange.
+2026-07-18 16:09:08,461 - freqtrade.optimize.backtesting - INFO - Running backtesting for Strategy WyckoffV8
+2026-07-18 16:09:08,462 - freqtrade.strategy.hyper - INFO - Strategy Parameter: breakeven_offset = 0.003
+2026-07-18 16:09:08,462 - freqtrade.strategy.hyper - INFO - Strategy Parameter: tr_low_buffer = 0.01
+2026-07-18 16:09:08,463 - freqtrade.strategy.hyper - INFO - Strategy Parameter: wsdown_rev_body = 0.8
+2026-07-18 16:09:08,463 - freqtrade.strategy.hyper - INFO - Strategy Parameter: wsdown_rev_cir = 0.87
+2026-07-18 16:09:08,464 - freqtrade.strategy.hyper - INFO - Strategy Parameter: sot_displacement_ratio = 0.8
+2026-07-18 16:09:08,464 - freqtrade.strategy.hyper - INFO - Strategy Parameter: sot_wave_count = 3
+2026-07-18 16:09:08,464 - freqtrade.strategy.hyper - INFO - Strategy Parameter: wave_atr_multiplier = 1.5
+2026-07-18 16:09:08,465 - freqtrade.strategy.hyper - INFO - Strategy Parameter: wave_min_bars = 3
+2026-07-18 16:09:08,465 - freqtrade.strategy.hyper - INFO - Strategy Parameter: wave_min_percent = 0.008
+2026-07-18 16:09:08,465 - freqtrade.strategy.hyper - INFO - Strategy Parameter: wb_rolling_window = 24
+2026-07-18 16:09:08,486 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT WaveAnalyzer OK (causal): is_wave_start=83 up_waves=41
+2026-07-18 16:09:08,486 - freqtrade.data.dataprovider - INFO - Loading data for BTC/USDT:USDT 1d from 2025-07-05 00:00:00 to 2026-07-19 00:00:00
+2026-07-18 16:09:08,499 - freqtrade.data.history.datahandlers.idatahandler - WARNING - BTC/USDT:USDT, futures, 1d, data ends at 2026-07-17 00:00:00
+2026-07-18 16:09:08,532 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT daily: sc=1 phase_D=12 phase_E=0 pnf_valid=13
+2026-07-18 16:09:08,540 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT after merge: 1H rows with pnf_target=304/2188
+2026-07-18 16:09:08,553 - wyckoff.daily_event_detector - INFO - Task 4.1b-final DailyEventDetector: BC=0(A=0/B=0) | UTAD=0 | SOW=0 | BuyExhaust=2 | dist_cause_sufficient=70/378 (18.5%)
+/freqtrade/user_data/strategies/WyckoffV8.py:518: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  _lh_s      = pd.Series(_lower_highs7, index=df_1d.index).shift(1).fillna(False).astype(bool)
+/freqtrade/user_data/strategies/WyckoffV8.py:519: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  _nd_s      = pd.Series(_no_demand7,   index=df_1d.index).shift(1).fillna(False).astype(bool)
+2026-07-18 16:09:08,864 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT TASK22: daily_redist_ok=15
+2026-07-18 16:09:08,864 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT TASK14: daily_ema200_persist=305
+/freqtrade/user_data/strategies/WyckoffV8.py:571: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  _fti_consol_shifted = _fti_consol.shift(1).infer_objects(copy=False).fillna(False)
+2026-07-18 16:09:08,870 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT TASK23: daily_fti_msow_active=29
+2026-07-18 16:09:08,872 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT TASK13: daily_sm_v2=43 daily_fallback_sow=1
+2026-07-18 16:09:08,915 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT dist_seq: bc_bars=0 dist_cause_sufficient_bars=1672
+2026-07-18 16:09:08,924 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT entry funnel: {'choch_signals': 41, 'pass_phase': 27, 'blocked_phase': 14, 'pass_pnf': 5, 'blocked_pnf': 22, 'pass_oi': 5, 
+'blocked_phase_e_harmony': 0, 'final_entry': 5}
+2026-07-18 16:09:09,530 - freqtrade.optimize.backtesting - INFO - Backtesting with data from 2026-05-01 00:00:00 up to 2026-07-18 15:00:00 (78 days).
+2026-07-18 16:09:09,544 - WyckoffV8 - INFO - [V8-DIAG] BTC/USDT:USDT enter_short: sow=0 be=48 lpsy=60 ice=56 redist=51 fti=1 wb=564
+2026-07-18 16:09:09,829 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:09,912 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:09,932 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,934 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,936 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,938 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,939 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,941 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,942 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,944 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,945 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,946 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,947 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,948 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,950 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,951 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,952 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,953 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,954 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,955 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,957 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:09,959 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,056 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,058 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,060 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,061 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,063 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,064 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,065 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,066 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,068 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,069 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,070 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,071 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,073 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,074 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,076 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,077 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,078 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,079 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,080 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,081 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,083 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,084 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,085 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,086 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,088 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,089 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,091 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,092 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,135 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,138 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,141 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,143 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,144 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,221 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,222 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,225 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,227 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,597 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,599 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,626 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,627 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,686 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,687 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,721 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,724 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,726 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,728 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,729 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,936 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,938 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:10,982 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,984 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,985 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,987 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,988 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:10,990 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,124 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,126 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,127 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,128 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,130 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,131 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,132 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,133 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,230 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,245 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,281 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,315 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,338 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,379 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,416 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,497 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,575 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,594 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,634 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,635 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,637 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,638 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,640 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,642 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,644 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,645 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,646 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,648 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,649 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,650 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,652 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,653 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,654 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,656 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,657 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,659 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,660 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,661 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,663 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,699 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,700 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,702 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,704 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,706 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,707 - WyckoffV8 - INFO - BTC/USDT:USDT entry rejected: no PNF target
+2026-07-18 16:09:11,709 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,816 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,849 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,895 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:11,912 - WyckoffV8 - INFO - BTC/USDT:USDT wave_breakdown exempt: no PNF target
+2026-07-18 16:09:13,002 - freqtrade.misc - INFO - dumping json to "/freqtrade/user_data/backtest_results/backtest-result-2026-07-18_16-09-12.meta.json"
+威科夫模块包加载成功
+Result for strategy WyckoffV8
+                                                BACKTESTING REPORT                                                
+┏━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃          Pair ┃ Trades ┃ Avg Profit % ┃ Tot Profit USDT ┃ Tot Profit % ┃ Avg Duration ┃  Win  Draw  Loss  Win% ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ BTC/USDT:USDT │     39 │         0.25 │         960.913 │          0.1 │     23:49:00 │   19     0    20  48.7 │
+│         TOTAL │     39 │         0.25 │         960.913 │          0.1 │     23:49:00 │   19     0    20  48.7 │
+└───────────────┴────────┴──────────────┴─────────────────┴──────────────┴──────────────┴────────────────────────┘
+                                             LEFT OPEN TRADES REPORT                                              
+┏━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃          Pair ┃ Trades ┃ Avg Profit % ┃ Tot Profit USDT ┃ Tot Profit % ┃ Avg Duration ┃  Win  Draw  Loss  Win% ┃
+┡━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ BTC/USDT:USDT │      1 │         0.91 │          91.034 │         0.01 │     23:00:00 │    1     0     0   100 │
+│         TOTAL │      1 │         0.91 │          91.034 │         0.01 │     23:00:00 │    1     0     0   100 │
+└───────────────┴────────┴──────────────┴─────────────────┴──────────────┴──────────────┴────────────────────────┘
+                                                    ENTER TAG STATS                                                    
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃       Enter Tag ┃ Entries ┃ Avg Profit % ┃ Tot Profit USDT ┃ Tot Profit % ┃   Avg Duration ┃  Win  Draw  Loss  Win% ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ v8_short_wsdown │      34 │         0.17 │         568.153 │         0.06 │       23:07:00 │   15     0    19  44.1 │
+│         v8_ws_d │       4 │          0.9 │         360.913 │         0.04 │ 1 day, 9:15:00 │    3     0     1  75.0 │
+│         v8_ws_c │       1 │         0.32 │          31.847 │          0.0 │       10:00:00 │    1     0     0   100 │
+│           TOTAL │      39 │         0.25 │         960.913 │          0.1 │       23:49:00 │   19     0    20  48.7 │
+└─────────────────┴─────────┴──────────────┴─────────────────┴──────────────┴────────────────┴────────────────────────┘
+                                                    EXIT REASON STATS                                                     
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃         Exit Reason ┃ Exits ┃ Avg Profit % ┃ Tot Profit USDT ┃ Tot Profit % ┃    Avg Duration ┃  Win  Draw  Loss  Win% ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ wsdown_reversal_bar │     5 │         3.19 │        1588.160 │         0.16 │ 1 day, 19:12:00 │    5     0     0   100 │
+│        v8_down_wave │     4 │         0.76 │         301.726 │         0.03 │  1 day, 6:00:00 │    3     0     1  75.0 │
+│          force_exit │     1 │         0.91 │          91.034 │         0.01 │        23:00:00 │    1     0     0   100 │
+│           stop_loss │     2 │        -2.38 │        -473.736 │        -0.05 │        14:00:00 │    0     0     2     0 │
+│  v8_up_wave_reverse │    27 │         -0.2 │        -546.270 │        -0.05 │        20:04:00 │   10     0    17  37.0 │
+│               TOTAL │    39 │         0.25 │         960.913 │          0.1 │        23:49:00 │   19     0    20  48.7 │
+└─────────────────────┴───────┴──────────────┴─────────────────┴──────────────┴─────────────────┴────────────────────────┘
+                                                               MIXED TAG STATS                                                               
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃       Enter Tag ┃         Exit Reason ┃ Trades ┃ Avg Profit % ┃ Tot Profit USDT ┃ Tot Profit % ┃    Avg Duration ┃  Win  Draw  Loss  Win% ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ v8_short_wsdown │ wsdown_reversal_bar │      5 │         3.19 │        1588.160 │         0.16 │ 1 day, 19:12:00 │    5     0     0   100 │
+│         v8_ws_d │        v8_down_wave │      3 │          0.9 │         269.880 │         0.03 │ 1 day, 12:40:00 │    2     0     1  66.7 │
+│         v8_ws_d │          force_exit │      1 │         0.91 │          91.034 │         0.01 │        23:00:00 │    1     0     0   100 │
+│         v8_ws_c │        v8_down_wave │      1 │         0.32 │          31.847 │          0.0 │        10:00:00 │    1     0     0   100 │
+│ v8_short_wsdown │           stop_loss │      2 │        -2.38 │        -473.736 │        -0.05 │        14:00:00 │    0     0     2     0 │
+│ v8_short_wsdown │  v8_up_wave_reverse │     27 │         -0.2 │        -546.270 │        -0.05 │        20:04:00 │   10     0    17  37.0 │
+│           TOTAL │                     │     39 │         0.25 │         960.913 │          0.1 │        23:49:00 │   19     0    20  48.7 │
+└─────────────────┴─────────────────────┴────────┴──────────────┴─────────────────┴──────────────┴─────────────────┴────────────────────────┘
+                         SUMMARY METRICS                          
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Metric                        ┃ Value                          ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Backtesting from              │ 2026-05-01 00:00:00            │
+│ Backtesting to                │ 2026-07-18 15:00:00            │
+│ Trading Mode                  │ Isolated Futures               │
+│ Max open trades               │ 1                              │
+│                               │                                │
+│ Total/Daily Avg Trades        │ 39 / 0.5                       │
+│ Starting balance              │ 1000000 USDT                   │
+│ Final balance                 │ 1000960.913 USDT               │
+│ Absolute profit               │ 960.913 USDT                   │
+│ Total profit %                │ 0.10%                          │
+│ CAGR %                        │ 0.45%                          │
+│ Sortino                       │ 3.48                           │
+│ Sharpe                        │ 1.15                           │
+│ Calmar                        │ 18.53                          │
+│ SQN                           │ 0.74                           │
+│ Profit factor                 │ 1.39                           │
+│ Expectancy (Ratio)            │ 24.64 (0.20)                   │
+│ Avg. daily profit             │ 12.319 USDT                    │
+│ Avg. stake amount             │ 9966.097 USDT                  │
+│ Total trade volume            │ 777350.811 USDT                │
+│                               │                                │
+│ Long / Short trades           │ 5 / 34                         │
+│ Long / Short profit %         │ 0.04% / 0.06%                  │
+│ Long / Short profit USDT      │ 392.760 / 568.153              │
+│                               │                                │
+│ Best Pair                     │ BTC/USDT:USDT 0.10%            │
+│ Worst Pair                    │ BTC/USDT:USDT 0.10%            │
+│ Best trade                    │ BTC/USDT:USDT 8.16%            │
+│ Worst trade                   │ BTC/USDT:USDT -2.78%           │
+│ Best day                      │ 812.873 USDT                   │
+│ Worst day                     │ -276.716 USDT                  │
+│ Days win/draw/lose            │ 18 / 41 / 19                   │
+│ Min/Max/Avg. Duration Winners │ 0d 02:00 / 5d 08:00 / 1d 10:32 │
+│ Min/Max/Avg. Duration Losers  │ 0d 03:00 / 1d 12:00 / 0d 13:39 │
+│ Max Consecutive Wins / Loss   │ 6 / 6                          │
+│ Rejected Entry signals        │ 0                              │
+│ Entry/Exit Timeouts           │ 0 / 0                          │
+│                               │                                │
+│ Min balance                   │ 999653.087 USDT                │
+│ Max balance                   │ 1001363.671 USDT               │
+│ Max % of account underwater   │ 0.13%                          │
+│ Absolute drawdown             │ 1271.579 USDT (0.13%)          │
+│ Drawdown duration             │ 31 days 20:00:00               │
+│ Profit at drawdown start      │ 1363.671 USDT                  │
+│ Profit at drawdown end        │ 92.092 USDT                    │
+│ Drawdown start                │ 2026-06-06 06:00:00            │
+│ Drawdown end                  │ 2026-07-08 02:00:00            │
+│ Market change                 │ -16.13%                        │
+└───────────────────────────────┴────────────────────────────────┘
+
+Backtested 2026-05-01 00:00:00 -> 2026-07-18 15:00:00 | Max open trades : 1
+                                                          STRATEGY SUMMARY                                                           
+┏━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
+┃  Strategy ┃ Trades ┃ Avg Profit % ┃ Tot Profit USDT ┃ Tot Profit % ┃ Avg Duration ┃  Win  Draw  Loss  Win% ┃             Drawdown ┃
+┡━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
+│ WyckoffV8 │     39 │         0.25 │         960.913 │          0.1 │     23:49:00 │   19     0    20  48.7 │ 1271.579 USDT  0.13% │
+└───────────┴────────┴──────────────┴─────────────────┴──────────────┴──────────────┴────────────────────────┴──────────────────────┘
