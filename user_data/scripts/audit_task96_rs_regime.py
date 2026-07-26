@@ -1,7 +1,7 @@
 """
 TASK 96（2026-07-13）：RS 条件轮动——BTC regime 门控跨截面动量的机制检验
 
-预注册见 wyckoff_v8_redesign.md TASK 96（判据跑数前冻结）。纯数据审计。
+预注册见 quant_system_tasks.md TASK 96（判据跑数前冻结）。纯数据审计。
 引擎与 audit_task83_cross_sectional.py 逐行同口径（宇宙/动量/再平衡/成本/
 几何周复合），新增唯一变量：regime = BTC 日线收盘 < EMA200（ewm span=200,
 adjust=False）在再平衡信号日 t 的取值（t 收盘可知，因果）；周桶按起始

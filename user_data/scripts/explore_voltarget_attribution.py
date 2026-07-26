@@ -14,7 +14,7 @@ sized_positions，逐行复用，未改动）分别套在
 vol-target 收益主要是风险平价效应，不是 Donchian 突破择时的功劳——这会直接
 影响"该不该继续在信号层做文章"的资源分配判断。
 
-不是 TASK，不写入 wyckoff_v8_redesign.md 判定表，不进采纳/证伪表。
+不是 TASK，不写入 quant_system_tasks.md 判定表，不进采纳/证伪表。
 沿用 TASK75b 的 shift(1) 因果口径，无未来函数。
 """
 import os

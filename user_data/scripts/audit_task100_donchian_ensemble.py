@@ -1,7 +1,7 @@
 """
 TASK 100（预注册，2026-07-18）：Donchian 多窗口集成投票——BTC 核心引擎信号平滑
 
-预注册见 wyckoff_v8_redesign.md TASK 100（判据跑数前冻结）。纯数据审计，
+预注册见 quant_system_tasks.md TASK 100（判据跑数前冻结）。纯数据审计，
 禁碰 strategies/。单窗口状态机/权益计算与 audit_task74_donchian_robustness.py
 逐行同口径复用，不改写；仅新增"三变体多数投票"集成层。
 

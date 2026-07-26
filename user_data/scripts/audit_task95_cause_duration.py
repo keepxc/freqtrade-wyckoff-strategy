@@ -3,7 +3,7 @@ TASK 95（2026-07-13）：因果律时长分层——盘整基期长度 × Donch
 （TASK 47 宿主移植：TR持续时间→PNF乘数 的结构等价，宿主换 Donchian，
  不复活 PNF 目标位框架）
 
-预注册见 wyckoff_v8_redesign.md TASK 95（判据跑数前冻结）。纯数据审计。
+预注册见 quant_system_tasks.md TASK 95（判据跑数前冻结）。纯数据审计。
 
 假设（威科夫因果律）：信号日前价格离开 20 日通道顶越久（基期 D 越长，
 因越大），突破后 per-trade 收益越高（果越大）。

@@ -1,7 +1,7 @@
 """
 TASK 93（2026-07-11）：VAP 筹码密集区 × Donchian 突破定性——供应重现过滤电池
 
-预注册见 wyckoff_v8_redesign.md TASK 93（判据跑数前冻结）。纯数据审计：
+预注册见 quant_system_tasks.md TASK 93（判据跑数前冻结）。纯数据审计：
 不动策略代码，不跑 Freqtrade 回测。
 
 假设：Donchian 20/10 日线多头突破时，若突破日收盘仍 ≤ 近 90 天 VAP 价值

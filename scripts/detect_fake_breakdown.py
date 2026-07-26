@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """P5 假跌破（fake breakdown）检测器 — wave_breakdown 路径异常簇软告警。
 
-设计定稿：TASK_NEW/wyckoff_v8_redesign.md「P5 假跌破检测器设计定稿（2026-06-08）」
+设计定稿：TASK_NEW/quant_system_tasks.md「P5 假跌破检测器设计定稿（2026-06-08）」
 三条件 AND（12h 滑窗）：
   1. wave_breakdown（enter_tag=v8_short_wsdown）触发数 >= 3
   2. 止损类退出占比（stop_loss + v8_short_structure_fail）> 40%

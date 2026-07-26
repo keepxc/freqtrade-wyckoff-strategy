@@ -1,7 +1,7 @@
 """
 批量下载 Binance 官方历史归档站的 BTCUSDT OI 数据（5分钟粒度，2020-06起）
 数据源：https://data.binance.vision/data/futures/um/daily/metrics/BTCUSDT/
-用途：TASK 57（wyckoff_v8_redesign.md）OI 四象限分析的数据基建——用 OI×价格方向替代
+用途：TASK 57（quant_system_tasks.md）OI 四象限分析的数据基建——用 OI×价格方向替代
      已被 TASK 29 Sell Test 2 证伪的原始成交量失衡比（原始成交量无区分力，OI 能分辨开仓/平仓）
 
 与 download_oi.py 的区别：

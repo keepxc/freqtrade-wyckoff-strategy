@@ -1,7 +1,7 @@
 """
 TASK 101（预注册，2026-07-18）：Donchian 4H 粒度参数高原确认——1D→4H 结构迁移检验
 
-预注册见 wyckoff_v8_redesign.md TASK 101（判据跑数前冻结）。纯数据审计，
+预注册见 quant_system_tasks.md TASK 101（判据跑数前冻结）。纯数据审计，
 禁碰 strategies/。状态机/权益计算与 audit_task74_donchian_robustness.py 逐行
 同口径复用（仅将年化 bars_per_year 参数化，避免4H数据错误年化）。
 

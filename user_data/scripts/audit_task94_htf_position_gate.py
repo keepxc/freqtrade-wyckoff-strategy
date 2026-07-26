@@ -1,7 +1,7 @@
 """
 TASK 94（2026-07-11）：高时间框架位置门控 Donchian 突破——TASK 93 副产品独立立项
 
-预注册见 wyckoff_v8_redesign.md TASK 94（判据跑数前冻结）。纯数据审计：
+预注册见 quant_system_tasks.md TASK 94（判据跑数前冻结）。纯数据审计：
 不动策略代码，不跑 Freqtrade 回测。
 
 假设：Donchian 20/10 日线多头突破若发生在 90 天价格区间高位（信号日收盘

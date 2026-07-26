@@ -2,7 +2,7 @@
 TASK 99（预注册，2026-07-18）：ETH/SOL 独立 Donchian 参数高原扫描——
 跨资产结构非移植验证
 
-预注册见 wyckoff_v8_redesign.md TASK 99（判据跑数前冻结）。纯数据审计，
+预注册见 quant_system_tasks.md TASK 99（判据跑数前冻结）。纯数据审计，
 禁碰 strategies/。核心状态机（donchian_positions/run_equity）与
 audit_task74_donchian_robustness.py 逐行同口径复用，不改写。
 
