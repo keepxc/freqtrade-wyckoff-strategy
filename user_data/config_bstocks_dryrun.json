@@ -1,5 +1,5 @@
 {
-    "max_open_trades": 16,
+    "max_open_trades": 14,
     "stake_currency": "USDT",
     "stake_amount": 10000,
     "tradable_balance_ratio": 1.0,
@@ -35,11 +35,12 @@
         "name": "binance",
         "key": "",
         "secret": "",
-        "ccxt_config": {"options": {"fetchMarkets": ["spot"]}, "httpsProxy": "http://host.docker.internal:7890"},
+        "ccxt_config": {"options": {"fetchMarkets": ["spot"]}, "httpsProxy": "http://127.0.0.1:7890"},
         "ccxt_async_config": {},
+        "enable_ws": false,
         "pair_whitelist": [
             "NVDAB/USDT", "TSLAB/USDT", "CRCLB/USDT", "MUB/USDT", "SNDKB/USDT",
-            "AAPLB/USDT", "AMZNB/USDT", "GOOGLB/USDT", "NFLXB/USDT", "ASMLB/USDT",
+            "AAPLB/USDT", "AMZNB/USDT", "GOOGLB/USDT",
             "GSB/USDT", "PYPLB/USDT", "COINB/USDT", "HOODB/USDT", "IBMB/USDT", "NOKB/USDT"
         ],
         "pair_blacklist": []

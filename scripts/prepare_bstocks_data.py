@@ -17,7 +17,7 @@ TICKERS = [
     "NFLX", "ASML", "GS", "PYPL", "COIN", "HOOD", "IBM", "NOK",
 ]
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-DATA_DIR = Path(r"E:\freqtrade\user_data\data\binance")
+DATA_DIR = Path("/home/gyan/freqtrade/user_data/data/binance")
 VOL_LOOKBACK = 20
 
 
