@@ -1,5 +1,5 @@
 {
-    "max_open_trades": 14,
+    "max_open_trades": 16,
     "stake_currency": "USDT",
     "stake_amount": 10000,
     "tradable_balance_ratio": 1.0,
@@ -41,7 +41,8 @@
         "pair_whitelist": [
             "NVDAB/USDT", "TSLAB/USDT", "CRCLB/USDT", "MUB/USDT", "SNDKB/USDT",
             "AAPLB/USDT", "AMZNB/USDT", "GOOGLB/USDT", "GSB/USDT", "PYPLB/USDT",
-            "COINB/USDT", "HOODB/USDT", "IBMB/USDT", "NOKB/USDT"
+            "COINB/USDT", "HOODB/USDT", "IBMB/USDT", "NOKB/USDT",
+            "NFLXB/USDT", "ASMLB/USDT"
         ],
         "pair_blacklist": []
     },
