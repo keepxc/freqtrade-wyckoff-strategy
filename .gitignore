@@ -82,6 +82,9 @@ P5/p5.db
 user_data/market.db
 user_data/*.db
 
+# 每日采集的探索性快照(体量随时间增长, 只在dry-run服务器本地积累, 不进repo)
+user_data/discovery_snapshots/
+
 # Claude IDE local config
 .claude/
 
