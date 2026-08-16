@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate BStocksHybridV1DryRun with bot_start local-data injection."""
 import logging
-from datetime import datetime, time, UTC
+from datetime import datetime, time
 from typing import Optional
 
 from freqtrade.data.history import load_pair_history
@@ -68,10 +68,14 @@ class BStocksHybridV1DryRun(BStocksHybridV1):
                     logger.warning(f"[bot_start] 本地无数据: {pair}")
                     continue
                 exchange._klines[key] = df.reset_index(drop=True)
-                # 关键：同时设置最后刷新时间，否则 _build_coroutine 判定
-                # min_ts(995天前) > _pairs_last_refresh_time(0) → "Time jump" 清缓存
-                exchange._pairs_last_refresh_time[key] = dt_ts(datetime.now(UTC))
-                logger.info(f"[bot_start] 预加载本地历史: {pair} {len(df)} rows")
+                # 关键：把最后刷新时间设为预加载数据的最后 K 线时间（而非 now）。
+                # 设 now → _now_is_time_to_refresh 判定 plr(now)+1d > now → 永不 refresh，
+                # bot 数据永远停在 feather 快照（2026-08-16 实证：停 8/6 超 10 天）。
+                # 设最后 K 线时间 → 缓存保留（> min_ts 995天前，不触发 Time jump evict）
+                # 且 refresh 立即触发（plr < now-1d）。
+                last_ts = df["date"].iloc[-1]
+                exchange._pairs_last_refresh_time[key] = dt_ts(last_ts)
+                logger.info(f"[bot_start] 预加载本地历史: {pair} {len(df)} rows, last={last_ts}")
         except Exception as e:
             logger.warning(f"[bot_start] 预加载失败，降级为纯交易所数据: {e}")
 
