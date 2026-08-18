@@ -1,45 +1,17 @@
-"""
-BStocksHybridV1DryRun — BStocksHybridV1 + 美股时段执行层限制（dry-run 专用）
-=============================================================
-仅在 BStocksHybridV1 已回测验证的信号/仓位逻辑之外，加一层执行层过滤：
-只允许在美股常规交易时段（NYSE/Nasdaq，周一至周五 13:30-20:00 UTC，
-即 9:30-16:00 ET，不含盘前盘后）开新仓；不限制退出（通道退出与
--50% 回撤止损必须能随时触发，用户已确认："按你的建议"）。
-
-用户确认口径（2026-08-07）：
-  1. 实现方式 = confirm_trade_entry 限制入场时段，confirm_trade_exit 不限制
-  2. 节假日排除，交给 agent 自行判断实现（"我觉得不复杂"）
-  3. timeframe 维持 1d 不变（dry-run 阶段不做 4H/1H 粒度迁移，见 TASK109 附注）
-
-**不修改 BStocksHybridV1.py 本体**（该文件的回测结果已写入 TASK109 并
-作为采纳基线归档）——本文件继承并仅追加执行层过滤，保持"改动范围不
-过度扩大"（CLAUDE.md 三层校验第三层前禁止顺便扩大改动范围的同一纪律
-延伸到这里：信号/仓位逻辑与执行层限制是两件事，不应该混在同一次改动里）。
-
-节假日实现说明：当前 Docker 镜像（freqtradeorg/freqtrade:stable）不含
-pandas_market_calendars，未见项目自定义 Dockerfile 可加依赖，因此采用
-硬编码 NYSE 假期表（2024-2027，含因周末顺延的观察日）。此表需要每年
-人工维护更新；若未来接入 pandas_market_calendars（需自定义镜像），
-应替换为该库的官方日历，避免依赖手工表的维护风险。此限制仅影响
-dry-run/实盘执行层，不影响已封板的回测结论。
-
-**重要：本文件不适合用于回测，只用于 live/dry-run。** 已实测验证：
-用本文件跑 `backtesting` 命令会得到 0 笔交易，这是预期行为而非 bug——
-回测在 1d 时间框架下只在每根蜡烛收盘时刻（00:00 UTC）评估一次信号，
-不模拟一天内反复轮询，而 00:00 UTC 必然落在 13:30-20:00 UTC 窗口外，
-导致 confirm_trade_entry 每次都返回 False。live/dry-run 模式下机器人
-按 `internals.process_throttle_secs` 持续轮询，只要入场信号仍然有效
-（尚未到下一根日线收盘产生新信号），就会反复尝试 confirm_trade_entry，
-直到某次轮询落在美股开盘时段内才成交——这才是本过滤器的实际工作方式。
-回测/统计结论仍以不含此过滤器的 `BStocksHybridV1.py`（TASK109 基线）
-为准，本文件只影响实盘执行时机，不改变已验证的信号与仓位逻辑。
-"""
+#!/usr/bin/env python3
+"""Generate BStocksHybridV1DryRun with bot_start local-data injection."""
+import logging
 from datetime import datetime, time
 from typing import Optional
 
+from freqtrade.data.history import load_pair_history
+from freqtrade.enums import CandleType
+from freqtrade.util.datetime_helpers import dt_ts
 from freqtrade.persistence import Trade
 
 from BStocksHybridV1 import BStocksHybridV1
+
+logger = logging.getLogger(__name__)
 
 # NYSE/Nasdaq 全天休市日（UTC 日期，含周末顺延观察日），需逐年维护
 NYSE_HOLIDAYS = {
@@ -62,6 +34,50 @@ MARKET_CLOSE_UTC = time(20, 0)
 
 
 class BStocksHybridV1DryRun(BStocksHybridV1):
+
+    def bot_start(self, **kwargs) -> None:
+        """
+        预加载本地 nasdaq feather 数据到 exchange._klines 缓存。
+        dry-run 模式 freqtrade 默认只从交易所 fetch_ohlcv 拉数据，不读本地文件；
+        而 Binance bStocks 上架历史短（部分 pair 仅 10 根 K 线 < Donchian 20 窗口），
+        导致 don_upper 无法计算、永远无信号。本钩子把本地完整历史注入缓存，
+        后续 refresh 时 freqtrade 自动增量合并（concat([old, ohlcv_df])）。
+
+        设计约束：
+        - 用官方钩子 bot_start（ft_bot_start 内部调用），不修改 freqtrade 源码
+        - 报错时被 strategy_safe_wrapper 吞掉，自动降级为纯交易所数据
+        - 只对交易所数据 < 20 根的 pair 注入，已有足够历史的不覆盖
+        """
+        try:
+            exchange = self.dp._exchange
+            candle_type = self.config.get("candle_type_def", CandleType.SPOT)
+            pairs = self.config.get("exchange", {}).get("pair_whitelist", [])
+            datadir = self.config.get("datadir")
+            for pair in pairs:
+                key = (pair, self.timeframe, candle_type)
+                existing = exchange._klines.get(key)
+                if existing is not None and len(existing) >= 20:
+                    continue
+                df = load_pair_history(
+                    datadir=datadir,
+                    timeframe=self.timeframe,
+                    pair=pair,
+                    data_format=self.config.get("dataformat_ohlcv", "feather"),
+                )
+                if df is None or df.empty:
+                    logger.warning(f"[bot_start] 本地无数据: {pair}")
+                    continue
+                exchange._klines[key] = df.reset_index(drop=True)
+                # 关键：把最后刷新时间设为预加载数据的最后 K 线时间（而非 now）。
+                # 设 now → _now_is_time_to_refresh 判定 plr(now)+1d > now → 永不 refresh，
+                # bot 数据永远停在 feather 快照（2026-08-16 实证：停 8/6 超 10 天）。
+                # 设最后 K 线时间 → 缓存保留（> min_ts 995天前，不触发 Time jump evict）
+                # 且 refresh 立即触发（plr < now-1d）。
+                last_ts = df["date"].iloc[-1]
+                exchange._pairs_last_refresh_time[key] = dt_ts(last_ts)
+                logger.info(f"[bot_start] 预加载本地历史: {pair} {len(df)} rows, last={last_ts}")
+        except Exception as e:
+            logger.warning(f"[bot_start] 预加载失败，降级为纯交易所数据: {e}")
 
     def _is_market_open(self, current_time: datetime) -> bool:
         if current_time.weekday() >= 5:  # 5=Sat, 6=Sun

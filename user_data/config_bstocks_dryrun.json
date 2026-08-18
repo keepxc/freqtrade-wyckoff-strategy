@@ -3,7 +3,7 @@
     "stake_currency": "USDT",
     "stake_amount": 10000,
     "tradable_balance_ratio": 1.0,
-    "fiat_display_currency": "USD",
+    "fiat_display_currency": "",
     "dry_run": true,
     "dry_run_wallet": 1000000,
     "cancel_open_orders_on_exit": false,
@@ -35,12 +35,14 @@
         "name": "binance",
         "key": "",
         "secret": "",
-        "ccxt_config": {"options": {"fetchMarkets": ["spot"]}, "httpsProxy": "http://host.docker.internal:7890"},
-        "ccxt_async_config": {},
+        "ccxt_config": {"options": {"fetchMarkets": ["spot"]}, "timeout": 60000, "proxies": {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}},
+        "ccxt_async_config": {"timeout": 60000, "aiohttp_proxy": "http://127.0.0.1:7890"},
+        "enable_ws": false,
         "pair_whitelist": [
             "NVDAB/USDT", "TSLAB/USDT", "CRCLB/USDT", "MUB/USDT", "SNDKB/USDT",
-            "AAPLB/USDT", "AMZNB/USDT", "GOOGLB/USDT", "NFLXB/USDT", "ASMLB/USDT",
-            "GSB/USDT", "PYPLB/USDT", "COINB/USDT", "HOODB/USDT", "IBMB/USDT", "NOKB/USDT"
+            "AAPLB/USDT", "AMZNB/USDT", "GOOGLB/USDT", "GSB/USDT", "PYPLB/USDT",
+            "COINB/USDT", "HOODB/USDT", "IBMB/USDT", "NOKB/USDT",
+            "NFLXB/USDT", "ASMLB/USDT"
         ],
         "pair_blacklist": []
     },
