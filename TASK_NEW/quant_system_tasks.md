@@ -7836,3 +7836,43 @@ OOS 复核（后20%时间段，切点2025-08-06，与 TASK108 同样的相对切
 **已实现**：`scripts/discovery_daily_snapshot.py`——纯采集脚本（标准库 `urllib`，无额外依赖），每日拉取三个 CSV，candidates 按市场过滤后连同 papers/signals 一起存档到 `user_data/discovery_snapshots/{candidates,papers,signals}/*_YYYY-MM-DD.csv`（该目录已加入 `.gitignore`，体量随时间增长，只在部署服务器本地积累，不进 git 仓库）。本机代理环境下已跑通一次（2026-08-08 快照，53条美股候选+完整papers/signals），生成文件校验通过。crontab 部署（选择服务器本地收盘后时段执行，示例 UTC 22:00，需按服务器实际时区调整）留待用户在 dry-run 服务器上配置，本次未执行远程部署。
 
 **下一步**：4-8周（约2026年9月上旬-10月上旬）后，用累积的每日快照做一次**预注册**检验——判据需在跑第一次验证数据前单独冻结（如"T日总分前N名候选票在T+20交易日的前瞻收益 vs 全体候选票中位数前瞻收益"），不能等看到数据后再定标准。当前状态：**仅采集，无结论，不进证伪表/采纳表**。
+
+---
+
+### TASK 111（探索性——非结论，禁止引用为证据）：VergeX AI500 数据源尽调——免费端点仅 3 币 + 逆向发现完整 API + 数据源替换须回测验证（2026-08-18）
+
+**背景**：2026-08-17 部署 AI500V1DryRun 探索性 dry-run 策略（见 git commit 32ea2dd），策略数据源为 `https://vergex.trade/trending-category?lang=zh&key=ai500`。运行观测引发用户质疑："既然是 AI500，那应该会变化"——本文档记录对该数据源的完整尽调结论、逆向发现的 API 家族、以及用户拍板的"数据源替换必须回测"决策。
+
+**尽调结论**：
+
+1. **`/trending-category?key=ai500` 免费端点恒返回 3 个币（GPS/BTW/XPL），22 小时列表成员零变化**（2026-08-17 23:35 ~ 08-18 21:33，CSV 记录 5670 行）。尝试 limit/top_n/top/page/full 等全部参数均不影响数量；网站前端页面本身也仅渲染这 3 个（无隐藏接口）。
+2. **score 低频变化，非固定周期**：22 小时内 GPS 变化 28 次 / BTW 26 次 / XPL 15 次，间隔 2.5~497 分钟不等，中位 ~30 分钟，分钟位分布完全随机（0-59 全覆盖），不整点对齐。判定为**事件驱动/有行情才重算**，非定时任务。
+3. **generatedAt 字段每 ~30 秒刷新**，但返回内容始终是同样 3 个币——后端在实时重算，但该端点被裁剪为"当前评分最高 3 名的展示位"。
+4. **逆向前端 JS 发现完整 API 家族**（`/assets/trendingApi-*.js` 暴露 7 个端点）：
+   - `/trending-category?lang=&key=` — 分类展示（AI500 即此，仅 3 币）
+   - `/trending-crypto?tab=net_flow&duration=&limit=` — 资金流榜：amount(净流入额)/price/price_delta_percent/rank/symbol
+   - `/trending-crypto?tab=oi&duration=&limit=` — OI 榜：current_oi/net_long/net_short/oi_delta/oi_delta_percent/oi_delta_value/price
+   - `/trending-crypto?tab=depth&limit=` — 盘口深度：future(bid_volume/ask_volume/delta)/spot 两段
+   - `/trending-crypto?tab=rates&limit=` — 资金费率：funding_rate/mark_price/index_price/next_funding_time
+   - `/trending-crypto?tab=price&duration=&limit=` — 价格榜（实测返回空，参数可能不对）
+   - `/trending-hl?category=&sub=` — Hyperliquid 榜
+5. **AI500 的 3 个币在完整榜中确实名列前茅**（net_flow: GPS #4 / BTW #8 / XPL #10；oi: GPS #2 / BTW #3）——证明 AI500 评分与资金流/OI 强相关，但完整候选池远比 3 币大。
+6. **GitHub/X 无 VergeX AI500 公开实现或讨论**：`vergexai/vergex` 为 2026-08-15 新建空仓库；`canvasor/VergexTradeStrategy` 是第三方整理的 VergeX Studio 策略配置包（基于 NoFx 开源资料 + 用户实操），非 AI500 后端；X 需登录无法匿名搜索，nitter 镜像不可用。VergeX 为小众平台，AI500 为其私有评分系统。
+
+**用户确认口径（2026-08-18）**：
+1. 不需要查全 500 币——**交易排名前 5 的币**即可（以 `trending-crypto` 各榜前 5 为候选方向）
+2. **数据源替换（trending-category → trending-crypto）必须回测验证，不能简单直接改策略**——沿用项目第一原则：无回测数据支持前不得改动策略代码/口径
+3. 本 TASK 当前状态：**仅尽调记录，无结论，不进证伪表/采纳表**
+
+**数据源交易价值评估（尽调结论，供后续回测设计参考）**：
+- `net_flow`：✅ 主信号候选——真实资金流入额排序，与 AI500 同源但能看到全部而非 3 个
+- `oi`：✅ 过滤信号候选——OI 增量 + 多空结构，可排除"价格涨但空头加仓"的背离
+- `depth`：⚠️ 辅助——瞬时盘口快照噪声大，spot 段被稳定币污染（USDC/USD1/FDUSD 占榜）
+- `rates`：⚠️ 参考——高费率=拥挤度信号，但无价格变动字段（price_delta 全 0），单用危险
+
+**遗留问题（未完成）**：
+- `/trending-crypto` 各 tab 的 limit 上限未确认（limit=500 返回空，可能默认上限更小或需正确 duration）
+- `tab=price` 正确参数未确认（duration=1d&limit=10 返回空）
+- VergeX 免费端点是否有历史数据/回放能力未知——**回测可行性本身待验证**（若 API 无历史，只能靠持续快照积累前瞻验证，同 TASK 110 的模式）
+
+**下一步**：①确认 trending-crypto 各 tab 完整参数与 limit 上限；②评估回测可行性（是否有历史数据可回放）；③若可回测，按项目预注册流程冻结判据后验证"net_flow 前 5 选币"是否优于现有基线；④若不可回测，评估是否改为每日快照积累模式（同 TASK 110 discovery_daily_snapshot 先例）。
