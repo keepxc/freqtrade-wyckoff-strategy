@@ -94,7 +94,7 @@
     "password": "CHANGE_THIS_PASSWORD"
   },
   "bot_name": "AI500V1_DryRun",
-  "timeframe": "1h",
+  "timeframe": "30m",
   "initial_state": "running",
   "force_entry_enable": false,
   "markets_refresh_interval": 720,

@@ -1,36 +1,45 @@
 """
-AI500V1DryRun — VergeX AI500 评分驱动的探索性 dry-run 策略
+AI500V1DryRun — VergeX trending-crypto 资金流+OI 驱动的探索性 dry-run 策略
 =============================================================
-探索性——非结论，禁止引用为证据。本策略无法回测（AI500 score 依赖
-后端实时计算的 compositeZ，历史输入数据不可获取，详见对话记录 2026-08-17
-的 AI500 算法逆向分析）。本文件只用于 dry-run 观察，运行结果不构成
-CLAUDE.md 三层终止校验意义上的"结论"，不得据此判定策略✅/❌，也不
-写入任何策略基线文档。
+探索性——非结论，禁止引用为证据。本策略无法回测（数据源为实时榜单，
+无历史回放能力，见 TASK111 尽调）。本文件只用于 dry-run 观察，运行结果
+不构成 CLAUDE.md 三层终止校验意义上的"结论"，不得据此判定策略✅/❌，
+也不写入任何策略基线文档。
 
-用户确认口径（2026-08-17）：
-  1. 定位 = 先跑，记录数据，表现不好再优化；不是一次性通过/淘汰的验证
-  2. dry_run 强制，不上实盘
-  3. 只用免费端点 vergex.trade/trending-category?key=ai500（不接入付费
-     Claw402 API），接口经实测无 limit/top_n 参数，返回的即为当前达标
-     候选（score>=80 附近），数量随行情浮动
-  4. 仓位管理沿用现有 Donchian 系策略的波动率目标仓位算法（见
-     DonchianV1AtrMaExit.py），不采用原 NoFx config 里的
-     btc_eth_max_leverage/altcoin_max_position_value_ratio 等参数
-  5. score 顶替原 config 的 min_confidence 字段用途（选币兼信心过滤）
-  6. 不设固定止盈：score < 60（原 config"强制平仓"阈值）触发退出，
-     让强势币继续持有到信号本身转弱为止；止损用 ATR 硬止损防极端下跌
-  7. 无论是否触发交易，每次抓取都写入历史记录（
-     user_data/ai500_score_history.csv），为未来可能的历史回测积累数据
+数据源替换（2026-08-18 用户确认）：原 trending-category?key=ai500 免费
+端点仅恒返 3 币（GPS/BTW/XPL）、22 小时零变化，已证伪。替换为逆向发现的
+完整端点 trending-crypto：
+  - tab=net_flow：资金净流入榜（amount / rank / price_delta_percent）
+  - tab=oi：OI 榜（current_oi / oi_delta_percent / oi_delta_value ...）
+
+用户确认口径（2026-08-18）：
+  1. 入场：过去 1h net_flow 排名中位数 ≤ 3 且 当前 oi_delta_percent > 0
+     （中位数=50%分位，等价于"超过一半时间在前 3"，无需另设占比阈值）
+  2. 退出：过去 1h net_flow 排名中位数 > 3（对称版，用户拍板）
+  3. 执行粒度 30m K 线（原 1h）：缩短退出延迟（中位数跌破后最快 30m 触发，
+     而非最长 1h）
+  4. 弃用 net_long / net_short（语义不明：net_long 可为负、之和≠current_oi、
+     与页面 Bias 不对应）；OI 过滤只用当前 oi_delta_percent，不对其要求 1h 持续度
+  5. max_open_trades=3 保留；ATR 硬止损 + 波动率目标仓位沿用原实现（窗口按
+     30m 换算保持时间语义不变）
+  6. 每次抓取写入历史记录（netflow_rank + median_rank + oi_delta_percent 等），
+     为未来可能的前瞻验证积累数据（同 TASK110 discovery_daily_snapshot 先例）
+
+榜单变化频率实测（2026-08-18，每 60s × 30 次采样）：net_flow 前 5 每分钟
+55% 概率成员变化（约 1.5 分钟换 1 个）、oi 前 5 每分钟 32%；核心前 3 稳定、
+边缘第 4-5 名频繁进出。故信号用 1h 排名中位数平滑分钟级噪声，而非瞬时排名。
 
 架构限制（技术验证，非用户判据决定）：freqtrade 该版本的
 PairListResolver.user_subdir 为 None，不支持从 user_data/pairlists 加载
-自定义 pairlist 插件，因此无法做"AI500 动态生成白名单"。改为用内置
-VolumePairList 提供候选池（成交量活跃的 USDT-M 合约），策略内部按
-AI500 score 门槛过滤实际入场，白名单里其余 pair 不会被交易。
+自定义 pairlist 插件，无法做"动态白名单"。改为内置 VolumePairList 提供
+候选池（成交量活跃的 USDT-M 合约），策略内部按 net_flow+OI 条件过滤实际
+入场，白名单里其余 pair 不会被交易。
 """
 import csv
 import logging
 import os
+import statistics
+from collections import deque
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -44,28 +53,28 @@ from freqtrade.persistence import Trade
 
 logger = logging.getLogger(__name__)
 
-AI500_URL = "https://vergex.trade/trending-category"
-AI500_PARAMS = {"lang": "zh", "key": "ai500"}
-AI500_PROXY = {
+TRENDING_URL = "https://vergex.trade/trending-crypto"
+TRENDING_PROXY = {
     "http": "http://host.docker.internal:7890",
     "https": "http://host.docker.internal:7890",
 }
-AI500_FETCH_TIMEOUT = 10
+FETCH_TIMEOUT = 10
+LIST_LIMIT = 50
 
-SCORE_HISTORY_PATH = "/freqtrade/user_data/ai500_score_history.csv"
-SCORE_HISTORY_FIELDS = [
-    "fetched_at_utc", "symbol", "pair", "score", "signal_peak",
-    "price", "start_price", "start_time", "change_pct_value",
+HISTORY_PATH = "/freqtrade/user_data/ai500_netflow_oi_history.csv"
+HISTORY_FIELDS = [
+    "fetched_at_utc", "symbol", "pair", "netflow_rank", "median_rank",
+    "netflow_amount", "oi_delta_percent", "oi_delta_value", "price", "price_delta_percent",
 ]
 
 
 class AI500V1DryRun(IStrategy):
     INTERFACE_VERSION = 3
 
-    timeframe = '1h'
+    timeframe = '30m'
     can_short = False
     process_only_new_candles = True
-    startup_candle_count = 50
+    startup_candle_count = 100
 
     # 框架层 stoploss 占位；真正止损通过 custom_stoploss（ATR）实现
     stoploss = -0.99
@@ -78,66 +87,122 @@ class AI500V1DryRun(IStrategy):
 
     max_open_trades = 3
 
-    ENTRY_SCORE = 80.0
-    EXIT_SCORE = 60.0
+    ENTRY_MEDIAN = 3        # 入场：过去 1h net_flow 排名中位数 ≤ 3
+    RANK_WINDOW_SEC = 3600  # 中位数回看窗口 = 1h
+    MIN_WINDOW_SEC = 1800   # 中位数最少覆盖 30 分钟，样本不足视为不在前 3
+    RANK_ABSENT = 99        # 不在 net_flow 榜时的 rank 占位值
+    OI_MIN = 0.0            # OI 过滤：当前 oi_delta_percent > 0 才可入场
 
-    ATR_PERIOD = 20
+    ATR_PERIOD = 40         # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
     ATR_MULTIPLIER = 1.0
 
-    VOL_LOOKBACK = 20
+    VOL_LOOKBACK = 40       # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
     TARGET_VOL = 0.20
     MAX_LEV = 1.0
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self.ai500_scores: dict[str, float] = {}
+        self.rank_history: dict[str, deque] = {}     # symbol -> deque[(ts, rank)]
+        self.median_rank: dict[str, float] = {}      # symbol -> 1h 中位数排名
+        self.oi_delta_pct: dict[str, float] = {}     # symbol -> oi_delta_percent
 
-    def bot_loop_start(self, current_time: datetime, **kwargs) -> None:
+    @staticmethod
+    def _strip_usdt(symbol: str) -> str:
+        # "ACEUSDT" -> "ACE"
+        return symbol[:-4] if symbol.endswith("USDT") else symbol
+
+    @staticmethod
+    def _pair_to_symbol(pair: str) -> str:
+        # "ACE/USDT:USDT" -> "ACEUSDT"
+        return f"{pair.split('/')[0]}USDT"
+
+    def _fetch_list(self, tab: str):
+        """抓取 trending-crypto 某 tab 的 top 榜，返回 {symbol: item}。失败返回 None。"""
         try:
             resp = requests.get(
-                AI500_URL, params=AI500_PARAMS, proxies=AI500_PROXY,
-                headers={"User-Agent": "Mozilla/5.0"}, timeout=AI500_FETCH_TIMEOUT,
+                TRENDING_URL, params={"tab": tab, "limit": LIST_LIMIT},
+                proxies=TRENDING_PROXY,
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=FETCH_TIMEOUT,
             )
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            logger.warning(f"[AI500] fetch failed, keeping previous scores: {e}")
+            logger.warning(f"[AI500] fetch tab={tab} failed, keeping previous state: {e}")
+            return None
+        out = {}
+        for item in data.get("top") or []:
+            sym = item.get("symbol")
+            if sym:
+                out[sym] = item
+        return out
+
+    def bot_loop_start(self, current_time: datetime, **kwargs) -> None:
+        netflow = self._fetch_list("net_flow")
+        oi = self._fetch_list("oi")
+        if netflow is None or oi is None:
             return
 
-        assets = (data.get("category") or {}).get("assets") or []
+        now = current_time.timestamp()
+
+        # 更新 OI 状态（只用当前值，不要求持续度）
+        self.oi_delta_pct = {sym: it.get("oi_delta_percent") for sym, it in oi.items()}
+
+        # 更新排名历史：net_flow 榜内的记真实 rank，其余记 RANK_ABSENT（不在榜）
+        netflow_syms = set(netflow.keys())
+        tracked = set(self.rank_history.keys()) | netflow_syms
+        try:
+            for t in Trade.get_open_trades():
+                tracked.add(self._pair_to_symbol(t.pair))
+        except Exception:
+            pass
+        for sym in tracked:
+            hist = self.rank_history.setdefault(sym, deque())
+            hist.append((now, netflow[sym].get("rank") if sym in netflow_syms else self.RANK_ABSENT))
+
+        # 清理超过 1h 的旧采样，并计算中位数（窗口覆盖 < 30 分钟视为样本不足）
+        cutoff = now - self.RANK_WINDOW_SEC
+        self.median_rank = {}
+        for sym in list(self.rank_history.keys()):
+            hist = self.rank_history[sym]
+            while hist and hist[0][0] < cutoff:
+                hist.popleft()
+            if not hist:
+                del self.rank_history[sym]
+                continue
+            if (now - hist[0][0]) < self.MIN_WINDOW_SEC:
+                continue  # 样本不足，不产生有效中位数（视为不在前 3）
+            self.median_rank[sym] = statistics.median([r for _, r in hist])
+
+        # 写历史记录（含当前 rank 与 1h 中位数）
         fetched_at = current_time.astimezone(timezone.utc).isoformat()
         rows = []
-        new_scores: dict[str, float] = {}
-        for a in assets:
-            symbol = a.get("symbol")
-            score = a.get("score")
-            if not symbol or score is None:
-                continue
-            pair = f"{symbol}/USDT:USDT"
-            new_scores[pair] = float(score)
+        for sym in sorted(tracked):
+            nf = netflow.get(sym) or {}
+            o = oi.get(sym) or {}
+            pair = f"{self._strip_usdt(sym)}/USDT:USDT"
             rows.append({
                 "fetched_at_utc": fetched_at,
-                "symbol": symbol,
+                "symbol": sym,
                 "pair": pair,
-                "score": score,
-                "signal_peak": a.get("signal"),
-                "price": a.get("price"),
-                "start_price": a.get("startPrice"),
-                "start_time": a.get("startTime"),
-                "change_pct_value": a.get("changePctValue"),
+                "netflow_rank": nf.get("rank"),
+                "median_rank": self.median_rank.get(sym),
+                "netflow_amount": nf.get("amount"),
+                "oi_delta_percent": o.get("oi_delta_percent"),
+                "oi_delta_value": o.get("oi_delta_value"),
+                "price": nf.get("price") if nf.get("price") is not None else o.get("price"),
+                "price_delta_percent": nf.get("price_delta_percent")
+                    if nf.get("price_delta_percent") is not None else o.get("price_delta_percent"),
             })
-
-        self.ai500_scores = new_scores
-        self._append_score_history(rows)
+        self._append_history(rows)
 
     @staticmethod
-    def _append_score_history(rows: list[dict]) -> None:
+    def _append_history(rows: list[dict]) -> None:
         if not rows:
             return
-        write_header = not os.path.exists(SCORE_HISTORY_PATH)
+        write_header = not os.path.exists(HISTORY_PATH)
         try:
-            with open(SCORE_HISTORY_PATH, "a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=SCORE_HISTORY_FIELDS)
+            with open(HISTORY_PATH, "a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=HISTORY_FIELDS)
                 if write_header:
                     writer.writeheader()
                 writer.writerows(rows)
@@ -148,10 +213,14 @@ class AI500V1DryRun(IStrategy):
         pair = metadata['pair']
         dataframe['atr'] = self._compute_atr(dataframe, self.ATR_PERIOD)
         ret = dataframe['close'].pct_change()
-        dataframe['realized_vol'] = ret.rolling(self.VOL_LOOKBACK).std().shift(1) * np.sqrt(365 * 24)
-        # AI500 score 是当前时点的实时值，非历史序列——只对最新一根 bar 有意义，
-        # 不可用于回测（详见文件头说明）。
-        dataframe['ai500_score'] = self.ai500_scores.get(pair, np.nan)
+        dataframe['realized_vol'] = ret.rolling(self.VOL_LOOKBACK).std().shift(1) * np.sqrt(365 * 24 * 2)
+        # net_flow/OI 榜单是当前时点的实时快照（无历史回放），只对最新一根 bar
+        # 有意义，不可用于回测（详见文件头说明）。
+        sym = self._pair_to_symbol(pair)
+        median = self.median_rank.get(sym, self.RANK_ABSENT)
+        oi_pct = self.oi_delta_pct.get(sym, None)
+        dataframe['median_rank'] = median
+        dataframe['oi_ok'] = 1 if (oi_pct is not None and oi_pct > self.OI_MIN) else 0
         return dataframe
 
     @staticmethod
@@ -166,16 +235,16 @@ class AI500V1DryRun(IStrategy):
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
-            dataframe['ai500_score'] >= self.ENTRY_SCORE,
+            (dataframe['median_rank'] <= self.ENTRY_MEDIAN) & (dataframe['oi_ok'] == 1),
             ['enter_long', 'enter_tag']
-        ] = (1, 'ai500_score_ge_80')
+        ] = (1, 'netflow_oi_entry')
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
-            dataframe['ai500_score'] < self.EXIT_SCORE,
+            dataframe['median_rank'] > self.ENTRY_MEDIAN,
             ['exit_long', 'exit_tag']
-        ] = (1, 'ai500_score_lt_60')
+        ] = (1, 'netflow_oi_exit')
         return dataframe
 
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
