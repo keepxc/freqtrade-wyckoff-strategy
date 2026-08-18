@@ -15,6 +15,7 @@ cd "$FREQTRADE_DIR"
   --config "$CONFIG1" --config "$CONFIG2" \
   --timerange 20260604- \
   --timeframe 1h \
+  --candle-types futures \
   > /dev/null 2>> "$LOG"
 
 # Download 1D (last 5 days)
@@ -22,6 +23,7 @@ cd "$FREQTRADE_DIR"
   --config "$CONFIG1" --config "$CONFIG2" \
   --timerange 20260601- \
   --timeframe 1d \
+  --candle-types futures \
   > /dev/null 2>> "$LOG"
 
 echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC') data download OK" >> "$LOG"

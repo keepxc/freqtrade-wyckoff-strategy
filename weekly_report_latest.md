@@ -1,1 +1,1 @@
-/home/gyan/freqtrade/weekly_report_20260511.md
+/home/gyan/freqtrade/weekly_report_20260817.md

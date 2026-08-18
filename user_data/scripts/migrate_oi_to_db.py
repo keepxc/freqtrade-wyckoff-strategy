@@ -1,12 +1,12 @@
 """一次性：把本地 feather 的 OI 数据迁移进 market_data.db"""
 import sys
-sys.path.insert(0, '/freqtrade')
+sys.path.insert(0, '/home/gyan/freqtrade')
 
 import pandas as pd
 from pathlib import Path
 from user_data.strategies.v8_modules.market_data_store import save_oi_records, get_oi_range
 
-FEATHER = Path('/freqtrade/user_data/data/binance/futures/BTC_USDT_USDT-1d-open_interest.feather')
+FEATHER = Path('/home/gyan/freqtrade/user_data/data/binance/futures/BTC_USDT_USDT-1d-open_interest.feather')
 
 df = pd.read_feather(FEATHER)
 df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
