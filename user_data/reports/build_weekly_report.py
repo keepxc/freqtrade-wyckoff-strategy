@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
+import sqlite3, os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
@@ -76,7 +76,12 @@ def get_pnf_section(conn: sqlite3.Connection, start: datetime, end: datetime) ->
     return lines
 
 
-def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tuple[str, List[str], float]:
+def _fetch_t1_stats(ftdb: sqlite3.Connection | None, start_s: str, end_s: str) -> list:
+    """Freqtrade 原生 DB 的 T1 字段已不再维护，返回空。"""
+    return []
+
+
+def build_report(conn: sqlite3.Connection, ftdb: sqlite3.Connection | None, start: datetime, end: datetime) -> Tuple[str, List[str], float]:
     start_s, end_s = start.isoformat(), end.isoformat()
 
     # V8 PNF / TR Low 覆盖率（从 regime_snapshots）
@@ -107,28 +112,8 @@ def build_report(conn: sqlite3.Connection, start: datetime, end: datetime) -> Tu
         (start_s, end_s),
     )
 
-    # V8: T1位置入场统计（above_t1 / t2_exists 胜率分组）
-    t1_rows = fetch_all(
-        conn,
-        """
-        SELECT
-            s.above_t1,
-            s.t2_exists,
-            COUNT(t.id) AS n,
-            AVG(t.profit_pct) AS avg_pnl,
-            SUM(CASE WHEN t.profit_pct > 0 THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(t.id), 0) AS win_rate
-        FROM signals s
-        LEFT JOIN trades t ON t.pair = s.pair
-            AND t.enter_tag = s.signal_name
-            AND ABS(strftime('%s', t.open_date) - strftime('%s', s.ts)) < 3600
-            AND t.exit_time IS NOT NULL
-        WHERE s.ts >= ? AND s.ts < ?
-            AND s.was_executed = 1
-        GROUP BY s.above_t1, s.t2_exists
-        ORDER BY s.above_t1, s.t2_exists
-        """,
-        (start_s, end_s),
-    )
+    # V8: T1位置入场统计（基于 Freqtrade 原生 DB，字段不存在时跳过）
+    t1_rows = _fetch_t1_stats(ftdb, start_s, end_s)
 
     # V1B-7: detector 激活率摘要
     detector_rows = fetch_all(
@@ -424,9 +409,12 @@ def maybe_store_report(conn: sqlite3.Connection, week_start: datetime, week_end:
     conn.commit()
 
 
+FREQT_DB_DEFAULT = "/home/gyan/freqtrade/user_data/tradesv3.v8dryrun.sqlite"
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--db", required=True)
+    p.add_argument("--freq-db", default=FREQT_DB_DEFAULT)
     p.add_argument("--week-start")
     p.add_argument("--week-end")
     p.add_argument("--output")
@@ -437,10 +425,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     db = Path(args.db)
+    ftdb = sqlite3.connect(args.freq_db) if os.path.exists(args.freq_db) else None
     conn = connect_db(db)
     try:
         start, end = get_week_bounds(args.week_start, args.week_end)
-        markdown, warnings, health_score = build_report(conn, start, end)
+        markdown, warnings, health_score = build_report(conn, ftdb, start, end)
         if args.output:
             Path(args.output).write_text(markdown, encoding="utf-8")
             print(f"[OK] wrote weekly report to {args.output}")

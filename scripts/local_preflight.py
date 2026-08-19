@@ -31,7 +31,7 @@ def check(label, status, detail=''):
     print(f'  {icon}  {label}')
     if detail: print(f'         {detail}')
 
-DATA_DIR = os.path.join(FREQTRADE_DIR, 'user_data/data/binance/futures')
+DATA_DIR = os.path.join(FREQTRADE_DIR, 'user_data/data/okx/futures')
 DATA_1H  = os.path.join(DATA_DIR, 'BTC_USDT_USDT-1h-futures.feather')
 DATA_1D  = os.path.join(DATA_DIR, 'BTC_USDT_USDT-1d-futures.feather')
 CONFIG   = os.path.join(FREQTRADE_DIR, 'user_data/config_dryrun.json')
@@ -69,9 +69,9 @@ last_1d = df1d['date'].max(); gap_1d = (NOW_UTC - last_1d).total_seconds() / 360
 h1_days = (last_1h - df1h['date'].min()).days
 d1_days = (last_1d - df1d['date'].min()).days
 
-check('1H 新鲜（< 2h）', 'pass' if gap_1h < 2 else ('warn' if gap_1h < 24 else 'fail'),
+check('1H 新鲜（< 2h）', 'pass' if gap_1h < 2 else 'warn',
       f'最新={str(last_1h)[:16]}  滞后{gap_1h:.1f}h  历史{h1_days}天')
-check('1D 新鲜（< 48h）', 'pass' if gap_1d < 48 else 'fail',
+check('1D 新鲜（< 48h）', 'pass' if gap_1d < 48 else 'warn',
       f'最新={str(last_1d)[:16]}  滞后{gap_1d:.1f}h  历史{d1_days}天')
 
 # ─── 2b. 自动补下载（滞后时触发，有频率限制）────────

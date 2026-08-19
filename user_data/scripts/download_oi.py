@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 SYMBOL   = 'BTCUSDT'
 PERIOD   = '1d'
 BASE_URL = 'https://fapi.binance.com'
-OUT_PATH = Path('/freqtrade/user_data/data/binance/futures/BTC_USDT_USDT-1d-open_interest.feather')
+OUT_PATH = Path('/home/gyan/freqtrade/user_data/data/binance/futures/BTC_USDT_USDT-1d-open_interest.feather')
 LIMIT    = 500
 
 

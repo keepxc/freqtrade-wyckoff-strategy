@@ -56,13 +56,13 @@ logger = logging.getLogger(__name__)
 
 TRENDING_URL = "https://vergex.trade/trending-crypto"
 TRENDING_PROXY = {
-    "http": "http://host.docker.internal:7890",
-    "https": "http://host.docker.internal:7890",
+    "http": "http://127.0.0.1:7890",
+    "https": "http://127.0.0.1:7890",
 }
 FETCH_TIMEOUT = 10
 LIST_LIMIT = 50
 
-HISTORY_PATH = "/freqtrade/user_data/ai500_netflow_oi_history.csv"
+HISTORY_PATH = "/home/gyan/freqtrade/user_data/ai500_netflow_oi_history.csv"
 HISTORY_FIELDS = [
     "fetched_at_utc", "symbol", "pair", "netflow_rank", "median_rank",
     "netflow_amount", "oi_delta_percent", "oi_delta_value", "price", "price_delta_percent",
@@ -222,11 +222,25 @@ class AI500V1DryRun(IStrategy):
         # net_flow/OI 榜单是当前时点的实时快照（无历史回放），只对最新一根 bar
         # 有意义，不可用于回测（详见文件头说明）。
         sym = self._pair_to_symbol(pair)
-        median = self.median_rank.get(sym, self.RANK_ABSENT)
-        cur_rank = self.current_rank.get(sym, self.RANK_ABSENT)
+        if sym in self.median_rank:
+            median = self.median_rank[sym]
+            median_valid = 1
+        else:
+            # 样本不足（冷启动 <30min 或榜外）：median_rank 无有效值，视为不在前 3
+            median = self.RANK_ABSENT
+            median_valid = 0
+        # current_rank（退出用）：最近采样 rank，冷启动未采样视为无效，避免误平仓
+        if sym in self.current_rank:
+            cur_rank = self.current_rank[sym]
+            cur_valid = 1
+        else:
+            cur_rank = self.RANK_ABSENT
+            cur_valid = 0
         oi_pct = self.oi_delta_pct.get(sym, None)
         dataframe['median_rank'] = median
+        dataframe['median_rank_valid'] = median_valid
         dataframe['current_rank'] = cur_rank
+        dataframe['current_rank_valid'] = cur_valid
         dataframe['oi_ok'] = 1 if (oi_pct is not None and oi_pct > self.OI_MIN) else 0
         return dataframe
 
@@ -242,14 +256,18 @@ class AI500V1DryRun(IStrategy):
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
-            (dataframe['median_rank'] <= self.ENTRY_MEDIAN) & (dataframe['oi_ok'] == 1),
+            (dataframe['median_rank_valid'] == 1)
+            & (dataframe['median_rank'] <= self.ENTRY_MEDIAN)
+            & (dataframe['oi_ok'] == 1),
             ['enter_long', 'enter_tag']
         ] = (1, 'netflow_oi_entry')
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        # 仅当 current_rank 有效（已采样）且 >10 才退出；冷启动未采样时保持持有
         dataframe.loc[
-            dataframe['current_rank'] > self.EXIT_RANK,
+            (dataframe['current_rank_valid'] == 1)
+            & (dataframe['current_rank'] > self.EXIT_RANK),
             ['exit_long', 'exit_tag']
         ] = (1, 'netflow_oi_exit')
         return dataframe
