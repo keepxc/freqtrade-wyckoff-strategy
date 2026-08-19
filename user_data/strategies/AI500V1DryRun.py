@@ -15,7 +15,8 @@ AI500V1DryRun — VergeX trending-crypto 资金流+OI 驱动的探索性 dry-run
 用户确认口径（2026-08-18）：
   1. 入场：过去 1h net_flow 排名中位数 ≤ 3 且 当前 oi_delta_percent > 0
      （中位数=50%分位，等价于"超过一半时间在前 3"，无需另设占比阈值）
-  2. 退出：过去 1h net_flow 排名中位数 > 3（对称版，用户拍板）
+  2. 退出：当前 net_flow rank 跌出前 10 立即退（灵敏退出，不经 1h 中位数平滑；
+     dry-run 观察发现对称版中位数退出滞后、退出即顶点）
   3. 执行粒度 30m K 线（原 1h）：缩短退出延迟（中位数跌破后最快 30m 触发，
      而非最长 1h）
   4. 弃用 net_long / net_short（语义不明：net_long 可为负、之和≠current_oi、
@@ -88,13 +89,14 @@ class AI500V1DryRun(IStrategy):
     max_open_trades = 3
 
     ENTRY_MEDIAN = 3        # 入场：过去 1h net_flow 排名中位数 ≤ 3
+    EXIT_RANK = 10          # 退出：当前 rank 跌出前 10 立即退（灵敏，不经中位数平滑）
     RANK_WINDOW_SEC = 3600  # 中位数回看窗口 = 1h
     MIN_WINDOW_SEC = 1800   # 中位数最少覆盖 30 分钟，样本不足视为不在前 3
     RANK_ABSENT = 99        # 不在 net_flow 榜时的 rank 占位值
     OI_MIN = 0.0            # OI 过滤：当前 oi_delta_percent > 0 才可入场
 
     ATR_PERIOD = 40         # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
-    ATR_MULTIPLIER = 1.0
+    ATR_MULTIPLIER = 2.0    # 30m 粒度 ATR 绝对值约 1h 的 1/√2，×2 补偿止损距离缩水
 
     VOL_LOOKBACK = 40       # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
     TARGET_VOL = 0.20
@@ -104,6 +106,7 @@ class AI500V1DryRun(IStrategy):
         super().__init__(config)
         self.rank_history: dict[str, deque] = {}     # symbol -> deque[(ts, rank)]
         self.median_rank: dict[str, float] = {}      # symbol -> 1h 中位数排名
+        self.current_rank: dict[str, int] = {}       # symbol -> 最近一次采样 rank（退出用）
         self.oi_delta_pct: dict[str, float] = {}     # symbol -> oi_delta_percent
 
     @staticmethod
@@ -157,7 +160,9 @@ class AI500V1DryRun(IStrategy):
             pass
         for sym in tracked:
             hist = self.rank_history.setdefault(sym, deque())
-            hist.append((now, netflow[sym].get("rank") if sym in netflow_syms else self.RANK_ABSENT))
+            rank = netflow[sym].get("rank") if sym in netflow_syms else self.RANK_ABSENT
+            hist.append((now, rank))
+            self.current_rank[sym] = rank
 
         # 清理超过 1h 的旧采样，并计算中位数（窗口覆盖 < 30 分钟视为样本不足）
         cutoff = now - self.RANK_WINDOW_SEC
@@ -218,8 +223,10 @@ class AI500V1DryRun(IStrategy):
         # 有意义，不可用于回测（详见文件头说明）。
         sym = self._pair_to_symbol(pair)
         median = self.median_rank.get(sym, self.RANK_ABSENT)
+        cur_rank = self.current_rank.get(sym, self.RANK_ABSENT)
         oi_pct = self.oi_delta_pct.get(sym, None)
         dataframe['median_rank'] = median
+        dataframe['current_rank'] = cur_rank
         dataframe['oi_ok'] = 1 if (oi_pct is not None and oi_pct > self.OI_MIN) else 0
         return dataframe
 
@@ -242,7 +249,7 @@ class AI500V1DryRun(IStrategy):
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
-            dataframe['median_rank'] > self.ENTRY_MEDIAN,
+            dataframe['current_rank'] > self.EXIT_RANK,
             ['exit_long', 'exit_tag']
         ] = (1, 'netflow_oi_exit')
         return dataframe
