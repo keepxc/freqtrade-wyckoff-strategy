@@ -6,6 +6,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
@@ -29,6 +30,8 @@ user_data/hyperopt_results/
 user_data/plot/
 user_data/data/
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.sqlite-journal
 
 # Docker
@@ -78,9 +81,19 @@ temp_extract_ca/
 temp_extract_fixpack/
 P5/p5.db
 
-# Database files
+# 数据库文件
 user_data/market.db
 user_data/*.db
+P5/db/
+
+# AI500 运行时 CSV 历史（每轮重写，不进 repo）
+user_data/ai500_*.csv
+
+# 根目录临时查询/调试脚本
+/get_cols.py
+/get_extra.py
+/query_db.py
+/query_p5.py
 
 # 每日采集的探索性快照(体量随时间增长, 只在dry-run服务器本地积累, 不进repo)
 user_data/discovery_snapshots/
