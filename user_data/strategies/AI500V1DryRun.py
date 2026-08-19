@@ -179,11 +179,22 @@ class AI500V1DryRun(IStrategy):
             self.median_rank[sym] = statistics.median([r for _, r in hist])
 
         # 写历史记录（含当前 rank 与 1h 中位数）
+        # 优化（2026-08-19）：只写有信息量的行——榜内有 rank 的币 + 当前持仓币。
+        # 原因：原实现每轮写全部 tracked（380+ 币，77% 是无 rank 占位行），
+        # 日增 ~62 万行、文件 54MB+，查询不便且无信息量。median_rank 计算
+        # 依赖内存 rank_history deque，与 CSV 存档解耦，砍冗余行不影响策略逻辑。
         fetched_at = current_time.astimezone(timezone.utc).isoformat()
         rows = []
+        try:
+            open_syms = {self._pair_to_symbol(t.pair) for t in Trade.get_open_trades()}
+        except Exception:
+            open_syms = set()
         for sym in sorted(tracked):
             nf = netflow.get(sym) or {}
             o = oi.get(sym) or {}
+            in_ranked = sym in netflow_syms
+            if not in_ranked and sym not in open_syms:
+                continue  # 不在榜且非持仓：跳过（纯占位行，无信息量）
             pair = f"{self._strip_usdt(sym)}/USDT:USDT"
             rows.append({
                 "fetched_at_utc": fetched_at,
