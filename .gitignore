@@ -85,6 +85,10 @@ user_data/*.db
 # 每日采集的探索性快照(体量随时间增长, 只在dry-run服务器本地积累, 不进repo)
 user_data/discovery_snapshots/
 
+# yss-signal 突破信号快照 + token(敏感, 不进repo)
+user_data/yss_signal_snapshots/
+user_data/yss_signal_token.txt
+
 # Claude IDE local config
 .claude/
 
