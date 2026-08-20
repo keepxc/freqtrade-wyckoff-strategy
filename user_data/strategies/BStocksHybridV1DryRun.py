@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate BStocksHybridV1DryRun with bot_start local-data injection."""
 import logging
-from datetime import datetime, time
+import requests
+from datetime import datetime, time, timezone
 from typing import Optional
 
 from freqtrade.data.history import load_pair_history
@@ -12,6 +13,14 @@ from freqtrade.persistence import Trade
 from BStocksHybridV1 import BStocksHybridV1
 
 logger = logging.getLogger(__name__)
+
+# 开仓前真实验证（TASK 124，2026-08-20）：币安 bStock 突破信号须经真实美股确认。
+# 背景：MUB 2026-08-17 币安虚涨 +10%（真实纹丝不动）制造假突破 → 8/18 开仓即套。
+# 反事实：真实 MUB 8/17 close 105.56 < 前20日高 106.40 → REJECT；真实 SNDK +8.9% → PASS。
+REAL_TICKER_MAP = {"MUB": "MUB"}  # 真实代码本身含 B，strip 会错
+REAL_VERIFY_TIMEOUT = 8  # 秒，超时降级放行
+REAL_VERIFY_PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+REAL_VERIFY_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 # NYSE/Nasdaq 全天休市日（UTC 日期，含周末顺延观察日），需逐年维护
 NYSE_HOLIDAYS = {
@@ -87,10 +96,72 @@ class BStocksHybridV1DryRun(BStocksHybridV1):
         t = current_time.time()
         return MARKET_OPEN_UTC <= t < MARKET_CLOSE_UTC
 
+    def _real_ticker(self, pair: str) -> str:
+        """币安 bStock pair → 真实美股代码（Yahoo）。"""
+        sym = pair.split("/")[0]
+        if sym in REAL_TICKER_MAP:
+            return REAL_TICKER_MAP[sym]
+        return sym[:-1] if sym.endswith("B") else sym
+
+    def _real_verify(self, pair: str, signal_date: str):
+        """
+        真实美股突破验证（TASK 124 级别 1）。
+        返回 (passed, evidence)。任何异常 → (True, '降级放行: 原因')。
+        """
+        ticker = self._real_ticker(pair)
+        try:
+            end = int(datetime.now(timezone.utc).timestamp())
+            start = end - 40 * 86400
+            url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+                   f"?period1={start}&period2={end}&interval=1d")
+            r = requests.get(url, timeout=REAL_VERIFY_TIMEOUT,
+                             proxies=REAL_VERIFY_PROXY, headers=REAL_VERIFY_UA)
+            res = r.json().get("chart", {}).get("result")
+            if not res:
+                return True, f"降级放行: Yahoo 无数据 ({ticker})"
+            ts = res[0]["timestamp"]
+            q = res[0]["indicators"]["quote"][0]
+            closes = []  # (date_str, close)
+            for i, t in enumerate(ts):
+                if q["close"][i] is None:
+                    continue
+                d = datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d")
+                closes.append((d, float(q["close"][i])))
+            if len(closes) < 21:
+                return True, f"降级放行: 真实数据不足 ({ticker}, {len(closes)}根<21)"
+            # 取 date <= signal_date 的最后一根完整 bar（美股休市日取最近交易日）
+            idx = None
+            for i, (d, c) in enumerate(closes):
+                if d <= signal_date:
+                    idx = i
+            if idx is None or idx < 20:
+                return True, f"降级放行: 信号日无真实数据 ({ticker}@{signal_date})"
+            real_close = closes[idx][1]
+            prev20_high = max(c for d, c in closes[max(0, idx - 20):idx])  # 不含当日
+            passed = real_close > prev20_high
+            ev = (f"真实验证 {ticker}: close={real_close:.2f} vs prev20H={prev20_high:.2f} "
+                  f"({(real_close / prev20_high - 1) * 100:+.1f}%) "
+                  f"{'PASS' if passed else 'REJECT'}")
+            return passed, ev
+        except Exception as e:
+            return True, f"降级放行: {type(e).__name__}: {e}"
+
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: Optional[str],
                             side: str, **kwargs) -> bool:
-        return self._is_market_open(current_time)
+        # 第一道：美股交易时段（周末/节假日/盘外不开仓）
+        if not self._is_market_open(current_time):
+            return False
+        # 第二道：真实美股突破验证（TASK 124）——只拦 don_break 波段腿入场
+        if entry_tag != "don_break":
+            return True
+        df = self.dp.get_dataframe(pair, self.timeframe)
+        if df is None or df.empty:
+            return True
+        signal_date = str(df["date"].iloc[-1])[:10]
+        ok, evidence = self._real_verify(pair, signal_date)
+        logger.info(f"[real_verify] {pair} {signal_date} → {evidence}")
+        return ok
 
     # confirm_trade_exit 不覆盖，保持父类/框架默认行为（不限制退出时段），
     # 通道退出与 -50% 回撤止损必须能随时触发。

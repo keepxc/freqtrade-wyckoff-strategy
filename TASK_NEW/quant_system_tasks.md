@@ -7986,3 +7986,145 @@ Delta = 2.83% − 4.61% = **-1.78%**，未跨过❌的-2%门槛。DD改善约45%
 - 持仓时长分组统计（<1h/1-2h/2-4h/4-8h/8h+）
 - 重点验证：2h 分水岭是否稳健、ETH 短持仓特例（#21 +7.49% 1.5h）是否重复
 - 若 2-4 周后 <1h 组仍显著负期望，考虑"最小持仓时间"参数（如入场后 1h 内禁止 rank 退出，仅止损）——但需回测模拟验证，不直接改实盘
+
+
+---
+
+### TASK 124：BStocks 开仓前真实价验证（级别 1）——confirm_trade_entry 钩子实现方案（提案，2026-08-20）
+
+**背景**：2026-08-18 批量开仓 3 笔（MUB/SNDKB/ASMLB）全部开仓即浮亏，8/20 又批量 3 笔（CRCLB/COINB/NFLXB）同模式。反事实分析（真实美股 Yahoo/Nasdaq 数据 vs 币安 bStock）区分出两类问题：
+
+| 标的 | 币安 8/17 突破 | 真实 8/17 突破 | 类型 | 验证判定 |
+|---|---|---|---|---|
+| MUB | +3.1%（1018 vs 前高 988）| **-0.8%（105.56 vs 前高 106.40）通道内** | 币安虚涨假突破（锚定比例 9.645 漂移）| **拦截** |
+| SNDKB | +7.6%（1806 vs 前高 1679）| **+8.9%（1786.85 vs 前高 1641）强突破** | 真实突破后回落（8/18 真实 -9%）| 放行（策略固有风险）|
+| CRCLB | +5.9% | +9.6% | 真实暴涨（8/19 +9.6%、8/20 +5.5%）| 放行 |
+| COINB | +13.9% | +9.6% | 真实暴涨（8/19 +9.6%、8/20 +7.1%）| 放行 |
+| NFLXB | +1.2% | +3.2% | 真实温和突破 | 放行 |
+
+**结论**：真实价验证能消灭"币安版假突破"（MUB 型——币安价格脱离真实锚定制造的假信号），不防"真突破后回落"（SNDKB 型——策略固有假突破概率）。**用户拍板实现级别 1（信号时点验证）**。
+
+#### 方案设计（级别 1：信号时点真实验证）
+
+**触发点**：`confirm_trade_entry`（freqtrade 官方钩子，只影响入场，零源码修改，报错自动降级——与 bot_start 注入同模式）。
+
+**验证逻辑**：
+```
+币安 K线 8/17 触发 don_break（close > don_upper）
+  -> confirm_trade_entry 被调用
+  -> 取策略信号日（当前处理的 K线日期，如 8/17）
+  -> 拉真实 ticker（Yahoo）日线，取 date <= 信号日的最后一根完整 bar
+  -> 计算真实前 20 日高点（不含当日，prev20H）
+  -> 真实 close > prev20H -> PASS（放行）
+  -> 真实 close <= prev20H -> REJECT（日志记录真实价证据）
+  -> 任何异常（网络/数据不足/新上市）-> 降级放行 + WARN 日志
+```
+
+**真实 ticker 映射**（与 check_bstock_deviation.py 一致）：
+```python
+REAL_TICKER_MAP = {"MUB": "MUB"}  # 真实代码本身含 B，strip 会错
+def real_ticker(pair):
+    sym = pair.split("/")[0]
+    if sym in REAL_TICKER_MAP:
+        return REAL_TICKER_MAP[sym]
+    return sym[:-1] if sym.endswith("B") else sym
+```
+
+**数据源选择**：Yahoo Finance chart API 为主（实测 8/17 起 SNDK/MUB/CRCL/COIN/NFLX/ASML 全部可拉）；Nasdaq API 仅 MUB 成功（sndk/asml 返回 NoneType 错误）-> **弃用 Nasdaq，主源 Yahoo**。请求走代理 `http://127.0.0.1:7890`（与监控脚本同配置）。
+
+**代码草案**（BStocksHybridV1DryRun.py 增加）：
+```python
+import requests  # 若策略未引入
+
+REAL_TICKER_MAP = {"MUB": "MUB"}
+REAL_VERIFY_TIMEOUT = 8  # 秒，超时降级放行
+REAL_VERIFY_PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+def _real_ticker(self, pair):
+    sym = pair.split("/")[0]
+    if sym in REAL_TICKER_MAP:
+        return REAL_TICKER_MAP[sym]
+    return sym[:-1] if sym.endswith("B") else sym
+
+def _real_verify(self, pair, signal_date):
+    """返回 (pass, 证据字符串)。任何异常 -> (True, '降级放行: <原因>')。"""
+    ticker = self._real_ticker(pair)
+    try:
+        end = int(datetime.now(timezone.utc).timestamp())
+        start = end - 40 * 86400
+        url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+               f"?period1={start}&period2={end}&interval=1d")
+        r = requests.get(url, timeout=REAL_VERIFY_TIMEOUT, proxies=REAL_VERIFY_PROXY, headers=UA)
+        res = r.json().get("chart", {}).get("result")
+        if not res:
+            return True, f"降级放行: Yahoo 无数据 ({ticker})"
+        ts = res[0]["timestamp"]
+        q = res[0]["indicators"]["quote"][0]
+        closes = []  # (date_str, close)
+        for i, t in enumerate(ts):
+            if q["close"][i] is None:
+                continue
+            d = datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%d")
+            closes.append((d, float(q["close"][i])))
+        if len(closes) < 21:
+            return True, f"降级放行: 真实数据不足 ({ticker}, {len(closes)}根<21)"
+        idx = None
+        for i, (d, c) in enumerate(closes):
+            if d <= signal_date:
+                idx = i
+        if idx is None or idx < 20:
+            return True, f"降级放行: 信号日无真实数据 ({ticker}@{signal_date})"
+        real_close = closes[idx][1]
+        prev20_high = max(c for d, c in closes[max(0, idx-20):idx])  # 不含当日
+        passed = real_close > prev20_high
+        ev = (f"真实验证 {ticker}: close={real_close:.2f} vs prev20H={prev20_high:.2f} "
+              f"({(real_close/prev20_high-1)*100:+.1f}%) "
+              f"{'PASS' if passed else 'REJECT'}")
+        return passed, ev
+    except Exception as e:
+        return True, f"降级放行: {type(e).__name__}: {e}"
+
+def confirm_trade_entry(self, pair, order_type, amount, rate, time_in_force,
+                        current_time, entry_tag, side, **kwargs):
+    # 只验证 don_break 入场（波段腿）；其他入场不拦
+    if entry_tag != "don_break":
+        return True
+    df = self.dp.get_dataframe(pair, self.timeframe)
+    if df is None or df.empty:
+        return True
+    signal_date = str(df["date"].iloc[-1])[:10]
+    ok, evidence = self._real_verify(pair, signal_date)
+    logger.info(f"[real_verify] {pair} {signal_date} -> {evidence}")
+    return ok
+```
+
+**失败降级策略（availability > data perfection）**：
+| 场景 | 行为 |
+|---|---|
+| Yahoo 超时/网络错误 | 降级放行 + WARN 日志（不能因验证挂掉错杀所有信号）|
+| 真实数据 <21 根 | 降级放行（新上市美股）|
+| 信号日无真实数据（节假日）| 降级放行 |
+| 真实 close > prev20H | PASS 放行 |
+| 真实 close <= prev20H | REJECT（记录真实价证据）|
+
+**日志格式**：`[real_verify] PAIR signal_date -> 证据`。便于回查每笔入场决策。
+
+#### 对抗式审查（翻车点清单）
+
+1. **日期对齐**：币安日线是 UTC 00:00-24:00（含美股盘后），Yahoo 是美股交易日（13:30-20:00 UTC）。信号日 8/17（币安）<-> Yahoo 8/17 存在且已收盘 -> 对齐正确。但**美股休市日**（如 9/7 劳动节）币安有 K线、Yahoo 无 -> 取最近真实交易日（代码已处理：`d <= signal_date`）。风险：币安周末 K线突破（周末漂移是已知现象），验证用周五数据 -> 大概率 REJECT（真实没跟）-> **行为正确（周末漂移不该开仓）**。
+2. **双验证不一致的极端 case**：真实突破但币安没突破（币安滞后，未触发信号）-> 不涉及（无信号不调用 confirm）。币安突破但真实突破幅度极小（+0.01%）-> 通过（阈值 0，不过滤）。当前设计不设真实突破幅度阈值（避免引入可调参数和过拟合空间）；若后续要过滤"真实弱突破"，加 `REAL_BREAK_MIN_PCT` 参数并回测。
+3. **网络阻塞主循环**：confirm_trade_entry 同步请求，超时 8s 封顶。信号触发频率低（日线策略，一天最多几笔）-> 可接受。实盘若担心滑点，可改 bot_start 预缓存真实日线 + 运行时增量。**本方案先实时拉（简单），观察延迟再优化**。
+4. **Yahoo 限流/封禁**：16 pairs 每次信号只拉 1-2 个 ticker，日请求量极小（<50/天）。Yahoo 对高频无 UA 请求可能 429——已带浏览器 UA。若 429 出现 -> 降级放行（不影响交易，只损失过滤）。
+5. **映射表遗漏**：真实代码含 B 的标的（如未来 BRKB->BRK-B）需维护 SPECIAL_MAP。当前池内仅 MUB。新标的加入时核对一次。
+6. **不会拦截 SNDKB 型**（预期内）：真实也突破时放行，亏损属策略固有风险。**方案承诺的是消灭币安版失真，不是消灭所有亏损**——用户已确认此边界。
+7. **真实价验证 != 锚定验证**：本方案不检查"币安价偏离真实锚定比例多少"（那是监控脚本的活）。两者互补：监控脚本（开仓后检查）标记失真；confirm 验证（开仓前）拦截失真信号。
+
+**上线步骤**：
+1. 实现代码（上述草案）-> 本机 dry-run 部署
+2. 验证路径：手动构造 MUB 场景（用 8/17 数据确认 REJECT 逻辑输出正确证据串）；再跑正常信号确认 PASS
+3. 观察 1-2 周：日志 `[real_verify]` 记录每笔决策；新开仓全部应有 PASS 或降级放行记录
+4. 若观察期发现"真实验证 vs 币安突破"频繁背离 -> 回 TASK 重新评估（可能涉及币安 bStock 生态整体可信度）
+5. 暂不做级别 2（执行时点验证）——需回测支撑，等全池回测结果一起评估
+
+**状态**：提案待实现（用户 2026-08-20 拍板"写方案"；实现需用户确认后动手，遵循"先回测再改码/诊断不修码"原则）
