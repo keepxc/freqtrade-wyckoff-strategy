@@ -99,7 +99,7 @@ class AI500V1DryRun(IStrategy):
     ATR_MULTIPLIER = 2.0    # 30m 粒度 ATR 绝对值约 1h 的 1/√2，×2 补偿止损距离缩水
 
     VOL_LOOKBACK = 40       # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
-    TARGET_VOL = 0.20
+    TARGET_VOL = 5.0     # 顶格：5.0 保证所有币 lev=min(1, 5/rv)=1，满额仓位（用户 08-23 决策）
     MAX_LEV = 1.0
 
     def __init__(self, config: dict) -> None:

@@ -8144,3 +8144,13 @@ def confirm_trade_entry(self, pair, order_type, amount, rate, time_in_force,
 **验证记录**：config pair_blacklist 已加，test-pairlist 白名单 PUMP 计数=0，服务重启 active。
 
 **后续**：TASK 122 窗口重验时统计黑名单前后整体收益变化；若其他 meme 币（如 RE）出现类似模式，按同标准评估。
+
+### TASK 125（2026-08-23）：TARGET_VOL 顶格 5.0——500U 满额仓位决策
+
+**背景**：500U 模拟日收益 +0.04%（9.2U/天）太低，根因是资金利用率仅 7%：TARGET_VOL=0.20 时高波动币（ZEC/PUMP/GPS 波动 170-220%）仓位被压到 1/8~1/11，MAX_LEV=1 又无法用杠杆放大，导致 400U 可用资金里 78% 闲置。
+
+**决策**：TARGET_VOL 0.20 → 5.0（用户"500顶格配"）。lev=min(1, 5/rv) 恒为 1，每仓 = proposed_stake = 133U（500×0.8/3），满 3 仓 = 400U 全用。
+
+**风险**：放弃波动率缩仓保护——单笔亏损按 133U 基数放大 ~4.5 倍（此前 PUMP -4.5% = -1.3U → 现在 -6U）。MAX_LEV=1 仍无爆仓风险，最坏亏掉仓位。
+
+**观察点**：下个开仓验证 stake≈133U；对比顶格前后日收益与回撤；若单笔亏损放大不可接受，回调 TARGET_VOL（0.40-0.60 区间仍可放大 2-3 倍资金利用率）。
