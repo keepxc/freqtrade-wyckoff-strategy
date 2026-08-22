@@ -5,7 +5,7 @@
   "tradable_balance_ratio": 0.8,
   "fiat_display_currency": "",
   "dry_run": true,
-  "dry_run_wallet": 10000,
+  "dry_run_wallet": 500,
   "cancel_open_orders_on_exit": true,
   "trading_mode": "futures",
   "margin_mode": "isolated",
@@ -113,7 +113,9 @@
       "QQQ/USDT:USDT",
       "TRUMP/USDT:USDT"
     ],
-    "pair_blacklist": []
+    "pair_blacklist": [
+      "PUMP/USDT:USDT"
+    ]
   },
   "pairlists": [
     {
@@ -153,7 +155,7 @@
     "username": "freqtrade",
     "password": "CHANGE_THIS_PASSWORD"
   },
-  "bot_name": "AI500V1_DryRun",
+  "bot_name": "AI500V1_500U_Sim",
   "timeframe": "30m",
   "initial_state": "running",
   "force_entry_enable": false,
