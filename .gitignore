@@ -129,3 +129,5 @@ temp_backtest_extract/
 analyze_*.py
 check_*.sh
 diagnose_*.sh
+user_data/config_ai500_live.json
+user_data/config_*live*.json
