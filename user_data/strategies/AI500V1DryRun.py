@@ -90,13 +90,28 @@ class AI500V1DryRun(IStrategy):
 
     ENTRY_MEDIAN = 3        # 入场：过去 1h net_flow 排名中位数 ≤ 3
     EXIT_RANK = 10          # 退出：当前 rank 跌出前 10 立即退（灵敏，不经中位数平滑）
+    MIN_HOLD_SEC = 7200     # 最小持仓 2h：开仓后 2h 内不响应 rank 退出（ATR 硬止损仍生效）
     RANK_WINDOW_SEC = 3600  # 中位数回看窗口 = 1h
     MIN_WINDOW_SEC = 1800   # 中位数最少覆盖 30 分钟，样本不足视为不在前 3
     RANK_ABSENT = 99        # 不在 net_flow 榜时的 rank 占位值
     OI_MIN = 0.0            # OI 过滤：当前 oi_delta_percent > 0 才可入场
+    FLOW_WINDOW_SEC = 1800  # 四象限资金流回看窗口 = 30 分钟（近期趋势，避免累计方向失真）
+    PEAK_DROP = 0.05        # 峰值回撤退出阈值：从持仓最高价回撤 5% 触发（保护利润）
+    RANK_EXIT_AFTER_H = 4   # rank 退出降级：持仓超过 4h 后 rank>10 才触发（给趋势存活时间）
+    OB_LOOKBACK = 10        # 订单块检测窗口：连续阴线后第一根阳线（30m K 线）
+    OB_NEAR_PCT = 0.03      # 订单块近距阈值：价格在 OB 上方 ≤3% 视为回踩区（可入场）
+    OB_MIN_DOWN = 3         # 订单块要求：阳线前至少 3 根连续阴线（大跌后的机构接盘区）
 
     ATR_PERIOD = 40         # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
     ATR_MULTIPLIER = 2.0    # 30m 粒度 ATR 绝对值约 1h 的 1/√2，×2 补偿止损距离缩水
+
+    # 利润 trailing（custom_stoploss 内实现，与 ATR 地板双保险）
+    # 默认关闭：单边上涨行情 trailing 会砍在峰值回撤处（少赚）。
+    # 由 agent 根据市场相位（market_regime_history.csv）自主决策启用：
+    # 相位从上涨切换为横盘/下跌时置 True，保护已盈利单不坐回地板。
+    TRAIL_ENABLED = False
+    TRAIL_OFFSET = 0.04     # 浮盈 ≥4% 激活 trailing（避免微小波动触发）
+    TRAIL_DROP = 0.025      # 激活后从最高价回撤 2.5% 触发止损（锁住利润）
 
     VOL_LOOKBACK = 40       # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
     TARGET_VOL = 5.0     # 顶格：5.0 保证所有币 lev=min(1, 5/rv)=1，满额仓位（用户 08-23 决策）
@@ -105,9 +120,12 @@ class AI500V1DryRun(IStrategy):
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         self.rank_history: dict[str, deque] = {}     # symbol -> deque[(ts, rank)]
+        self.price_history: dict[str, deque] = {}    # symbol -> deque[(ts, price)]（四象限用）
+        self.oi_history: dict[str, deque] = {}       # symbol -> deque[(ts, oi_delta_percent)]（四象限用）
         self.median_rank: dict[str, float] = {}      # symbol -> 1h 中位数排名
         self.current_rank: dict[str, int] = {}       # symbol -> 最近一次采样 rank（退出用）
         self.oi_delta_pct: dict[str, float] = {}     # symbol -> oi_delta_percent
+        self.ever_in_list: set[str] = set()          # symbol -> 曾出现在 net_flow 榜（掉出榜退出用）
 
     @staticmethod
     def _strip_usdt(symbol: str) -> str:
@@ -163,6 +181,32 @@ class AI500V1DryRun(IStrategy):
             rank = netflow[sym].get("rank") if sym in netflow_syms else self.RANK_ABSENT
             hist.append((now, rank))
             self.current_rank[sym] = rank
+            # 记录"曾经在榜"（用于掉出榜退出判定）
+            if sym in netflow_syms:
+                self.ever_in_list.add(sym)
+            # 记录价格历史（四象限价格方向用；取 net_flow 或 oi 里的价格）
+            nf = netflow.get(sym) or {}
+            o = oi.get(sym) or {}
+            price = None
+            try:
+                price = float(nf.get("price")) if nf.get("price") is not None else (
+                    float(o.get("price")) if o.get("price") is not None else None)
+            except (TypeError, ValueError):
+                price = None
+            if price is not None:
+                phist = self.price_history.setdefault(sym, deque())
+                phist.append((now, price))
+                cutoff_p = now - self.FLOW_WINDOW_SEC
+                while phist and phist[0][0] < cutoff_p:
+                    phist.popleft()
+            # 记录 OI 历史（四象限资金方向用）
+            oi_v = self.oi_delta_pct.get(sym)
+            if oi_v is not None:
+                ohist = self.oi_history.setdefault(sym, deque())
+                ohist.append((now, oi_v))
+                cutoff_o = now - self.FLOW_WINDOW_SEC
+                while ohist and ohist[0][0] < cutoff_o:
+                    ohist.popleft()
 
         # 清理超过 1h 的旧采样，并计算中位数（窗口覆盖 < 30 分钟视为样本不足）
         cutoff = now - self.RANK_WINDOW_SEC
@@ -253,6 +297,8 @@ class AI500V1DryRun(IStrategy):
         dataframe['current_rank'] = cur_rank
         dataframe['current_rank_valid'] = cur_valid
         dataframe['oi_ok'] = 1 if (oi_pct is not None and oi_pct > self.OI_MIN) else 0
+        # 订单块回踩过滤：当前价在最近做多 OB 回踩区（纯因果，逐 bar 计算）
+        dataframe['ob_ok'] = self._compute_ob_ok(dataframe)
         return dataframe
 
     @staticmethod
@@ -265,6 +311,77 @@ class AI500V1DryRun(IStrategy):
         ], axis=1).max(axis=1)
         return tr.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
 
+    @staticmethod
+    def _find_bull_ob(df: DataFrame, lookback: int) -> float:
+        """订单块检测（移植 Pine checkObCondition 的 bull 分支）：
+        最近 lookback 根 K 线内，第一根阳线（close>=open）且它前面连续阴线
+        → 该阳线的 low 即做多订单块下沿（机构成本区）。
+        返回 OB 下沿价（botValue），找不到返回 NaN。
+        纯因果：只用已收盘 K 线（shift 后），无未来函数。"""
+        if len(df) < lookback + 1:
+            return float('nan')
+        # 取最近 lookback 根（含当前，但当前可能未收盘——用 shift 保证只用已收盘）
+        closes = df['close']
+        opens = df['open']
+        lows = df['low']
+        n = len(df)
+        # 从最老到最新找"转涨点"：阳线且前面 lookback-1 根全阴
+        for i in range(n - lookback, n):
+            if pd.isna(closes[i]) or pd.isna(opens[i]) or pd.isna(lows[i]):
+                continue
+            if closes[i] >= opens[i]:  # 阳线
+                ok = True
+                # 检查它前面 lookback-1 根是否全阴
+                for j in range(max(0, i - lookback + 1), i):
+                    if pd.isna(closes[j]) or pd.isna(opens[j]):
+                        continue
+                    if closes[j] >= opens[j]:  # 前面有阳线，不符合
+                        ok = False
+                        break
+                if ok:
+                    return float(lows[i])
+        return float('nan')
+
+    def _compute_ob_ok(self, df: DataFrame) -> pd.Series:
+        """逐 bar 计算 ob_ok：当前价在最近做多订单块（OB）回踩区。
+        OB 定义（滑动找，非固定偏移）：最近 OB_LOOKBACK 根内，最后一个
+        "由跌转涨"的阳线（close>=open 且前一根阴线）——该阳线的 low 即
+        机构成本区下沿（订单块）。价格在其 low ±OB_NEAR_PCT 内 → ob_ok=1
+        （回踩机构成本区 = 好入场；远离 = 追高 = 拒绝）。
+        因果：每根 bar 只用 i 及之前已收盘数据，无未来函数。
+        返回 0/1 序列。"""
+        lookback = self.OB_LOOKBACK
+        near_pct = self.OB_NEAR_PCT
+        n = len(df)
+        closes = df['close'].values
+        opens = df['open'].values
+        lows = df['low'].values
+        ob_ok = np.zeros(n, dtype=int)
+        for i in range(lookback, n):
+            # 在窗口 [i-lookback+1, i] 内从最新往最老找"强转涨"阳线：
+            # 阳线 + 前面至少 OB_MIN_DOWN(3) 根连续阴线（大跌后的机构接盘区）
+            ob_bot = float('nan')
+            for k in range(i, max(0, i - lookback + 1), -1):
+                if k < self.OB_MIN_DOWN + 1:
+                    break
+                # 阳线（由跌转涨）
+                if closes[k] >= opens[k]:
+                    # 检查前面 OB_MIN_DOWN 根是否全阴
+                    down_ok = True
+                    for j in range(k - self.OB_MIN_DOWN, k):
+                        if closes[j] >= opens[j]:
+                            down_ok = False
+                            break
+                    if down_ok:
+                        ob_bot = lows[k]
+                        break
+            if not np.isnan(ob_bot):
+                price = closes[i]
+                # 回踩区：价格在 OB 下沿附近（OB 内或 OB 上方 ≤3%）
+                if price >= ob_bot * (1 - near_pct) and price <= ob_bot * (1 + near_pct):
+                    ob_ok[i] = 1
+        return pd.Series(ob_ok, index=df.index)
+
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
             (dataframe['median_rank_valid'] == 1)
@@ -275,17 +392,79 @@ class AI500V1DryRun(IStrategy):
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # 仅当 current_rank 有效（已采样）且 >10 才退出；冷启动未采样时保持持有
-        dataframe.loc[
-            (dataframe['current_rank_valid'] == 1)
-            & (dataframe['current_rank'] > self.EXIT_RANK),
-            ['exit_long', 'exit_tag']
-        ] = (1, 'netflow_oi_exit')
+        # rank 退出信号由 custom_exit 统一处理（含最小持仓过滤），
+        # 这里不再设置 exit_long，避免 bypass custom_exit 的屏蔽逻辑
         return dataframe
+
+    def custom_exit(self, pair: str, trade: Trade, current_time: datetime,
+                    current_rate: float, current_profit: float, **kwargs) -> Optional[str]:
+        """统一退出决策（趋势持有优先，保护利润兜底）：
+        1. 峰值回撤退出：从持仓最高价回撤 > PEAK_DROP(5%) → 退出（锁住利润，吃趋势中段）
+        2. 危险象限退出：持仓期间 OI↓+价跌(多头离) / OI↑+价跌(空头开) → 退出
+           （用 30min 趋势判定，逼空行情 OI↓+价涨 不算危险）
+        3. rank 退出降级：持仓超过 RANK_EXIT_AFTER_H(4h) 后 rank>10 才触发
+           （2-4h 内不再因 rank 抖动被洗出，让趋势单存活）
+        4. 掉出榜退出：曾经在榜、当前完全无 rank 数据 → 退出（兜底防永久持仓）
+        5. 最小持仓 MIN_HOLD_SEC(2h) 内不响应以上退出（ATR 硬止损始终生效）
+        6. ATR 硬止损（custom_stoploss）不受影响，始终生效。"""
+        df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if df.empty:
+            return None
+        last = df.iloc[-1]
+
+        # 最小持仓时间：开仓后 MIN_HOLD_SEC 内不响应退出（ATR 硬止损除外）
+        held_sec = (current_time - trade.open_date_utc).total_seconds()
+        if held_sec < self.MIN_HOLD_SEC:
+            return None
+
+        sym = self._pair_to_symbol(pair)
+
+        # ── 1. 峰值回撤退出（最高优先级）──
+        # trade.max_rate 由 freqtrade 自动跟踪持仓期间最高价
+        if trade.max_rate and trade.max_rate > 0 and current_rate > 0:
+            drawdown = (trade.max_rate - current_rate) / trade.max_rate
+            if drawdown > self.PEAK_DROP:
+                return 'peak_drop_exit'
+
+        # ── 2. 危险象限退出（资金流确认）──
+        # 资金方向：最近 FLOW_WINDOW_SEC(30min) 内 OI delta 趋势
+        # 价格方向：最近 FLOW_WINDOW_SEC(30min) 内价格趋势
+        # 危险（退出）: OI↑+价跌(空头开) / OI↓+价跌(多头离)
+        phist = self.price_history.get(sym)
+        ohist = self.oi_history.get(sym)
+        if phist and ohist and len(phist) >= 2 and len(ohist) >= 2:
+            price_first = phist[0][1]
+            price_last = phist[-1][1]
+            oi_first = ohist[0][1]
+            oi_last = ohist[-1][1]
+            price_up = price_last > price_first
+            oi_up = oi_last > oi_first
+            danger = (oi_up and not price_up) or (not oi_up and not price_up)
+            if danger:
+                return 'flow_quadrant_exit'
+
+        # ── 3. rank 退出（降级：持仓 >4h 才触发）──
+        # 2-4h 内 rank 抖动不触发退出（给趋势存活时间），>4h 后 rank 掉出前 10 才退
+        if held_sec >= self.RANK_EXIT_AFTER_H * 3600:
+            if last.get('current_rank_valid') == 1 and last.get('current_rank', 99) > self.EXIT_RANK:
+                return 'netflow_oi_exit'
+
+        # ── 4. 掉出榜退出（兜底防永久持仓）──
+        if (sym in self.rank_history
+                and last.get('current_rank_valid') == 0
+                and self.current_rank.get(sym) is None):
+            # 检查 rank_history 里是否有过真实 rank（非 RANK_ABSENT）
+            has_real_rank = any(r != self.RANK_ABSENT for _, r in self.rank_history[sym])
+            if has_real_rank:
+                return 'netflow_oi_exit_drop'
+        return None
 
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
                          current_rate: float, current_profit: float, **kwargs) -> Optional[float]:
-        """ATR 硬止损：入场信号K线 low - 1xATR(20)，入场时定死的绝对地板价。
+        """ATR 硬止损 + 利润 trailing 双保险：
+        1. ATR 地板：入场信号K线 low - 2xATR(20)，入场时定死的绝对地板价
+        2. 利润 trailing：浮盈 ≥TRAIL_OFFSET 后，止损上移至最高价×(1-TRAIL_DROP)，
+           锁住利润；未激活时仍用 ATR 地板兜底。
         用严格 '<' 只取信号K线收盘后已知的数据，避免用到尚未走完的K线（未来函数）。"""
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         entry_hist = df.loc[df['date'] < trade.open_date_utc]
@@ -298,7 +477,14 @@ class AI500V1DryRun(IStrategy):
         floor_price = entry_row['low'] - self.ATR_MULTIPLIER * atr_at_entry
         if floor_price <= 0:
             return None
-        return (floor_price / current_rate) - 1
+
+        # 利润 trailing：仅当 TRAIL_ENABLED 且最高价超过 open×(1+offset) 激活
+        stop_price = floor_price
+        if self.TRAIL_ENABLED and trade.max_rate is not None and trade.max_rate > trade.open_rate * (1 + self.TRAIL_OFFSET):
+            trail_price = trade.max_rate * (1 - self.TRAIL_DROP)
+            stop_price = max(stop_price, trail_price)  # 取更高者（更接近现价）
+
+        return (stop_price / current_rate) - 1
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
