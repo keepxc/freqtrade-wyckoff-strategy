@@ -51,6 +51,26 @@ PairListResolver.user_subdir 为 None，不支持从 user_data/pairlists 加载
 - 【TASK-待办】做空方向：等策略稳定后实现。当前 can_short=False，
   net_flow 是流入榜（多头信号），做空需另一套信号（net_short 或
   BTC 跌时反向），2026-08-27 用户确认"等策略稳定再实现"。
+
+=============================================================
+决策历史（2026-08-28 追加）
+=============================================================
+- 08-28 移动止损阶梯（custom_stoploss）：持仓峰值盈利触发止损上移。
+  档位 0.5%→保本(+0.1%手续费) / 1.0%→锁0.4% / 1.5%→锁0.9% /
+  2.0%→锁1.4% / 2.5%→锁1.9% / 3.0%→锁2.4%。不主动卖，netflow_oi_exit
+  仍管 rank 退出。66 笔验证：阶梯止盈 37.28% vs 实际 33.92%。
+- 08-28 BTC 1h 拦截【已证伪】: 试图加"BTC 前 1h 涨幅 < X 才开仓"避免
+  追高。数据否决：BTC 1h 涨 >0.3% 占 23% 时间（常态噪声非过热信号），
+  且误杀 #74 TRUMP 这类"BTC 涨但山寨独立启动"的好单。维持 30m 过滤。
+- 08-28 开仓后快速止损【已证伪】: 5min/10min 浮亏超阈值即砍。
+  数据否决：所有阈值都是负改善（0.5% 阈值 -3.01U），因 AI500 盈利单
+  普遍"先浮亏后盈利"（#52 BTR 浮亏-1.74%后涨到+34.6%峰值），
+  快速止损=在洗盘最低点割肉，杀掉最赚钱的单。
+- 08-28 BTC 方向过滤 bug 修复【重要】: _get_btc_bias 失败返回 None，
+  原逻辑 btc_ok=None 时放行 → #77 ETH 在 BTC 跌 -0.535% 时误开仓。
+  修复：失败保留上次成功值；btc_ok 仅当 btc_pct>0 才为 1（None 拦截）。
+- 08-28 观察结论：昨天 7 笔 -1.12U，#76 BTC -0.74U 是"BTC 涨但开仓后
+  反转"的固有成本（方向过滤救不了），#77 -0.07U 是 bug 已修复。
 """
 import csv
 import logging
@@ -116,6 +136,23 @@ class AI500V1DryRun(IStrategy):
 
     ATR_PERIOD = 40         # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
     ATR_MULTIPLIER = 2.0    # 30m 粒度 ATR 绝对值约 1h 的 1/√2，×2 补偿止损距离缩水
+
+    # 移动止损阶梯（2026-08-27 用户方案2：止损逐级上移，不主动卖）
+    # 触发条件 = 持仓期间峰值盈利（trade.max_rate vs open_rate）
+    # 每档把止损移到对应位置，回吐到止损位自动卖出（保护利润）
+    # 66 笔验证：阶梯止盈 37.28% vs 实际 33.92%，救回 4 笔盈利变亏
+    # 但为避免砍大单翅膀，用「移动止损」而非「主动分批卖」——netflow_oi_exit 仍管 rank 退出
+    # 手续费已计入：币安合约 0.05%×2（开+平）= 0.1%，保本档 = 开仓价+0.1%
+    # 后续每档锁定 X% 均为「扣除手续费后的净锁定」——锁 0.3% 实际锁 0.2% 净利
+    TRAIL_STAGES = [
+        # (触发峰值盈利%, 止损移到开仓价+%)
+        (0.5, 0.1),    # 盈利 0.5% → 止损到开仓价+0.1%（真保本，含手续费）
+        (1.0, 0.4),    # 盈利 1.0% → 锁 0.4%（净 0.3%）
+        (1.5, 0.9),    # 盈利 1.5% → 锁 0.9%（净 0.8%）
+        (2.0, 1.4),    # 盈利 2.0% → 锁 1.4%（净 1.3%）
+        (2.5, 1.9),    # 盈利 2.5% → 锁 1.9%（净 1.8%）
+        (3.0, 2.4),    # 盈利 3.0% → 锁 2.4%（净 2.3%）
+    ]
 
     VOL_LOOKBACK = 40       # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
     TARGET_VOL = 0.20
@@ -219,7 +256,7 @@ class AI500V1DryRun(IStrategy):
         """获取 BTC 前 30 分钟涨幅 %（方向过滤用）。
 
         用币安 5m K 线：取最近 6 根（30 分钟），对比第一根开盘 vs 最后一根收盘。
-        失败返回 None（此时视为方向未知，不阻塞入场——宁可放过不可错杀）。
+        失败返回 None（调用方处理：保留上次值或保守拦截，不因瞬时失败放行）。
         """
         if not self.binance:
             self._init_binance()
@@ -281,7 +318,10 @@ class AI500V1DryRun(IStrategy):
         self.oi_delta_pct = {sym: it.get("oi_delta_percent") for sym, it in oi.items()}
 
         # 更新 BTC 方向过滤（前 30min 涨幅）
-        self.btc_bias_pct = self._get_btc_bias()
+        # 失败时保留上次成功值（避免瞬时 API 失败导致过滤失效放行）
+        new_bias = self._get_btc_bias()
+        if new_bias is not None:
+            self.btc_bias_pct = new_bias
 
         # 更新排名历史：net_flow 榜内的记真实 rank，其余记 RANK_ABSENT（不在榜）
         netflow_syms = set(netflow.keys())
@@ -390,9 +430,10 @@ class AI500V1DryRun(IStrategy):
         dataframe['oi_ok'] = 1 if (oi_pct is not None and oi_pct > self.OI_MIN) else 0
         # BTC 方向过滤：前 30min 涨幅 > 0 才允许做多（数据验证 66 笔：
         # BTC_30m 微跌 26 笔 -10.63 vs 微涨 31 笔 +1.34）
-        # BTC 涨幅未知（None）时 btc_ok=1，不阻塞入场
+        # BTC 涨幅从未成功获取（初始 None）时保守拦截（btc_ok=0），
+        # 避免"API 瞬时失败 → 过滤失效放行"（修复 #77 ETH 漏网 bug）
         btc_pct = self.btc_bias_pct
-        dataframe['btc_ok'] = 1 if (btc_pct is None or btc_pct > 0) else 0
+        dataframe['btc_ok'] = 1 if (btc_pct is not None and btc_pct > 0) else 0
         return dataframe
 
     @staticmethod
@@ -422,20 +463,44 @@ class AI500V1DryRun(IStrategy):
 
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
                          current_rate: float, current_profit: float, **kwargs) -> Optional[float]:
-        """ATR 硬止损：入场信号K线 low - 1xATR(20)，入场时定死的绝对地板价。
-        用严格 '<' 只取信号K线收盘后已知的数据，避免用到尚未走完的K线（未来函数）。"""
+        """移动止损阶梯 + ATR 地板。
+
+        - ATR 硬止损：入场信号K线 low - 2xATR，绝对地板价（永不比这更宽松）
+        - 移动止损：持仓峰值盈利达到档位后，止损逐级上移到开仓价+X%
+          回吐到止损位自动卖出（保护利润，避免"盈利变亏"）
+        - 不主动卖（netflow_oi_exit 仍管 rank 退出，让大趋势奔跑）
+        """
+        # ATR 地板
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         entry_hist = df.loc[df['date'] < trade.open_date_utc]
-        if entry_hist.empty:
-            return None
-        entry_row = entry_hist.iloc[-1]
-        atr_at_entry = entry_row['atr']
-        if pd.isna(atr_at_entry) or atr_at_entry <= 0:
-            return None
-        floor_price = entry_row['low'] - self.ATR_MULTIPLIER * atr_at_entry
-        if floor_price <= 0:
-            return None
-        return (floor_price / current_rate) - 1
+        atr_floor_pct = None
+        if not entry_hist.empty:
+            entry_row = entry_hist.iloc[-1]
+            atr_at_entry = entry_row['atr']
+            if not pd.isna(atr_at_entry) and atr_at_entry > 0:
+                floor_price = entry_row['low'] - self.ATR_MULTIPLIER * atr_at_entry
+                if floor_price > 0:
+                    atr_floor_pct = (floor_price / current_rate) - 1
+
+        # 移动止损阶梯：用持仓期间峰值盈利触发
+        # trade.max_rate = 持仓期间最高价（freqtrade 维护）
+        open_rate = trade.open_rate
+        if open_rate and trade.max_rate and trade.max_rate > open_rate:
+            peak_profit_pct = (trade.max_rate - open_rate) / open_rate * 100
+            # 找到已触发的最高档
+            trail_pct = None
+            for trigger, lock_pct in self.TRAIL_STAGES:
+                if peak_profit_pct >= trigger:
+                    trail_pct = lock_pct  # 触发后锁 X% 利润
+            if trail_pct is not None:
+                # 止损价 = 开仓价 × (1 + 锁利%)
+                stop_price = open_rate * (1 + trail_pct / 100)
+                trail_stop_pct = (stop_price / current_rate) - 1
+                # 取更紧的（max 因为 pct 是负的亏损比例，越接近 0 越紧）
+                if atr_floor_pct is None or trail_stop_pct > atr_floor_pct:
+                    return trail_stop_pct
+
+        return atr_floor_pct
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
