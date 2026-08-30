@@ -107,6 +107,9 @@ from collections import deque
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+# 东八区北京时间（用户约定：所有对话/数据时间均为 CST/UTC+8）
+CST = timezone(timedelta(hours=8))
+
 import ccxt
 import numpy as np
 import pandas as pd
@@ -473,7 +476,7 @@ class AI500V1DryRun(IStrategy):
         new_mtf = self._get_btc_mtf_15m()
         if new_mtf is not None:
             self.btc_mtf_15m = new_mtf
-        self._append_mtf_history(current_time.astimezone(timezone.utc).isoformat())
+        self._append_mtf_history(current_time.astimezone(CST).isoformat())
 
         # 更新排名历史：net_flow 榜内的记真实 rank，其余记 RANK_ABSENT（不在榜）
         netflow_syms = set(netflow.keys())
@@ -504,7 +507,9 @@ class AI500V1DryRun(IStrategy):
             self.median_rank[sym] = statistics.median([r for _, r in hist])
 
         # 写历史记录（含当前 rank 与 30m 中位数）
-        fetched_at = current_time.astimezone(timezone.utc).isoformat()
+        # 时间统一为东八区北京时间（CST），方便与用户对话/Telegram 通知核对
+        # 2026-08-31 用户要求：CSV 记录时间全部改北京时间，避免与 DB 的 UTC 混淆
+        fetched_at = current_time.astimezone(CST).isoformat()
         rows = []
         for sym in sorted(tracked):
             nf = netflow.get(sym) or {}
