@@ -552,6 +552,10 @@ class AI500V1DryRun(IStrategy):
                 "btc_large_net_30m": self.btc_large_net_30m,
                 "btc_large_net_15m": self.btc_large_net_15m,
             })
+            # 过滤用 OI 源写回（币安优先，失败回退 Vergex）：确保入场过滤与 CSV 记录一致
+            # 08-30 修复：原 self.oi_delta_pct 直接来自 Vergex（oi tab），币安 30m 算了只进 CSV
+            # 导致 OI_MIN/window_min 改动形同虚设。现统一为币安源（自主可控，不依赖 Vergex 稳定性）
+            self.oi_delta_pct[sym] = oi_delta_percent
         self._append_history(rows)
 
     @staticmethod
