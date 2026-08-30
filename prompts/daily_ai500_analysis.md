@@ -2,7 +2,7 @@
 
 # 数据源（只读，禁止修改）
 - 交易库: /home/gyan/freqtrade/user_data/tradesv3.ai500dryrun.sqlite（python sqlite3 读取，本机无 sqlite3 CLI）
-- 信号快照: /home/gyan/freqtrade/user_data/ai500_netflow_oi_history.csv（fetched_at_utc 为 UTC，注意与 DB 的 naive UTC 对齐）
+- 信号快照: /home/gyan/freqtrade/user_data/ai500_netflow_oi_history.csv（fetched_at_utc 为东八区北京时间 UTC+8，与对话/Telegram 通知一致；DB 的 open_date 为 UTC 需 +8 转 CST 对照）
 - 策略文件: /home/gyan/freqtrade/user_data/strategies/AI500V1DryRun.py（如需查入场/退出条件）
 
 # 时间口径
