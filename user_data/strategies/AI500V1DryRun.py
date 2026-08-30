@@ -13,14 +13,13 @@ AI500V1DryRun — VergeX trending-crypto 资金流+OI 驱动的探索性 dry-run
   - tab=oi：OI 榜（current_oi / oi_delta_percent / oi_delta_value ...）
 
 用户确认口径（2026-08-18）：
-  1. 入场：过去 1h net_flow 排名中位数 ≤ 3 且 当前 oi_delta_percent > 0
+  1. 入场：过去 30m net_flow 排名中位数 ≤ 3 且 当前 oi_delta_percent > OI_MIN
      （中位数=50%分位，等价于"超过一半时间在前 3"，无需另设占比阈值）
-  2. 退出：当前 net_flow rank 跌出前 10 立即退（灵敏退出，不经 1h 中位数平滑；
+  2. 退出：当前 net_flow rank 跌出前 10 立即退（灵敏退出，不经 30m 中位数平滑；
      dry-run 观察发现对称版中位数退出滞后、退出即顶点）
-  3. 执行粒度 30m K 线（原 1h）：缩短退出延迟（中位数跌破后最快 30m 触发，
-     而非最长 1h）
+  3. 执行粒度 30m K 线：所有时间窗口（rank 中位数 / OI / BTC bias）均对齐 30m
   4. 弃用 net_long / net_short（语义不明：net_long 可为负、之和≠current_oi、
-     与页面 Bias 不对应）；OI 过滤只用当前 oi_delta_percent，不对其要求 1h 持续度
+     与页面 Bias 不对应）；OI 过滤只用当前 oi_delta_percent，不对其要求 30m 持续度
   5. max_open_trades=3 保留；ATR 硬止损 + 波动率目标仓位沿用原实现（窗口按
      30m 换算保持时间语义不变）
   6. 每次抓取写入历史记录（netflow_rank + median_rank + oi_delta_percent 等），
@@ -28,7 +27,7 @@ AI500V1DryRun — VergeX trending-crypto 资金流+OI 驱动的探索性 dry-run
 
 榜单变化频率实测（2026-08-18，每 60s × 30 次采样）：net_flow 前 5 每分钟
 55% 概率成员变化（约 1.5 分钟换 1 个）、oi 前 5 每分钟 32%；核心前 3 稳定、
-边缘第 4-5 名频繁进出。故信号用 1h 排名中位数平滑分钟级噪声，而非瞬时排名。
+边缘第 4-5 名频繁进出。故信号用 30m 排名中位数平滑分钟级噪声，而非瞬时排名。
 
 架构限制（技术验证，非用户判据决定）：freqtrade 该版本的
 PairListResolver.user_subdir 为 None，不支持从 user_data/pairlists 加载
@@ -71,6 +70,33 @@ PairListResolver.user_subdir 为 None，不支持从 user_data/pairlists 加载
   修复：失败保留上次成功值；btc_ok 仅当 btc_pct>0 才为 1（None 拦截）。
 - 08-28 观察结论：昨天 7 笔 -1.12U，#76 BTC -0.74U 是"BTC 涨但开仓后
   反转"的固有成本（方向过滤救不了），#77 -0.07U 是 bug 已修复。
+
+=============================================================
+决策历史（2026-08-29 追加）
+=============================================================
+- 08-29 BTC 大单净流信号【数据验证强信号，暂观察】: 糖哥 stock.tanggestock.com
+  大单追溯接口（币安 aggTrade 落库 57 天，免鉴权）。89 笔回溯：开仓时
+  BTC 大单净流<0 的 45 笔 -11.98U vs 净流>=0 的 44 笔 -0.12U——亏损几乎
+  全部集中在"大单资金流出时开仓"。拦截 30 笔亏损 -15.88U，误杀 15 笔
+  盈利 +3.89U，净改善 +11.98U（-12.10 → -0.12）。
+- 08-29 决策：按用户"CSV同步积累数据"，只记录不改入场——CSV 新增
+  btc_large_net_30m（与策略周期对齐，滞后~30min）+ btc_large_net_15m
+  （更灵敏，滞后~15min）两列，每轮 bot_loop_start 拉取写入（失败保留
+  上次值）。积累 3-5 天真实数据后再决定是否作为入场条件（AND 大单
+  净流>0）。曾用 5m/1h 两列，实测 30m 接口存在后改为 30m/15m。
+- 08-29 数据源备注：接口只对主流币（BTC/ETH spot+perp、SOL 仅 spot）
+  有数据，山寨币（TRUMP）无——但对 BTC 方向过滤应用足够。
+- 08-29 OI_MIN 0→2【上线】：数据验证 OI 阈值与做多收益单调正相关，
+  89 笔实盘回测 OI>=2% 保留 8 笔全赚 +0.71U vs 当前 68 笔 -12.51U；
+  代价开仓频率 -83%（一天可能 1-2 单）。只影响做多；做空 TASK 待研。
+  大单净流分析结论：-50~-10M 中度流出是最大毒区（16 笔 -9.49U），
+  OI>0 + 大单>-10M 组合 -12.51 → -1.61U（改善未转正），暂不作为
+  入场条件，继续 CSV 观察积累。
+- 08-30 BTC 15m MTF 评分【观察版上线】：复刻 MACD v2.4 MTF 矩阵单周期
+  逻辑（MACD>Signal / MACD 升 / Signal 升 / Hist 区域 四项各 ±1 → -4~+4），
+  拉币安 15m 合约 K 线算 BTC 评分。只写独立 CSV
+  ai500_btc_mtf_history.csv（含 bias/大单净流对照列），不进入场。
+  与 AI500 开仓/收益对照 2-4 周后决定是否转正为入场过滤。
 """
 import csv
 import logging
@@ -104,6 +130,12 @@ HISTORY_PATH = "/home/gyan/freqtrade/user_data/ai500_netflow_oi_history.csv"
 HISTORY_FIELDS = [
     "fetched_at_utc", "symbol", "pair", "netflow_rank", "median_rank",
     "netflow_amount", "oi_delta_percent", "oi_source", "oi_delta_value", "price", "price_delta_percent",
+    "btc_large_net_30m", "btc_large_net_15m",
+]
+# BTC MTF 评分独立 CSV（BTC 全局量，避免污染 215 万行主 CSV 的列结构）
+MTF_HISTORY_PATH = "/home/gyan/freqtrade/user_data/ai500_btc_mtf_history.csv"
+MTF_HISTORY_FIELDS = [
+    "fetched_at_utc", "btc_mtf_15m", "btc_bias_pct", "btc_large_net_30m", "btc_large_net_15m",
 ]
 
 
@@ -126,12 +158,18 @@ class AI500V1DryRun(IStrategy):
 
     max_open_trades = 3
 
-    ENTRY_MEDIAN = 3        # 入场：过去 1h net_flow 排名中位数 ≤ 3
+    ENTRY_MEDIAN = 3        # 入场：过去 30m net_flow 排名中位数 ≤ 3（与 30m K 线粒度对齐）
     EXIT_RANK = 10          # 退出：当前 rank 跌出前 10 立即退（灵敏，不经中位数平滑）
-    RANK_WINDOW_SEC = 3600  # 中位数回看窗口 = 1h
-    MIN_WINDOW_SEC = 1800   # 中位数最少覆盖 30 分钟，样本不足视为不在前 3
+    RANK_WINDOW_SEC = 1800  # 中位数回看窗口 = 30m（与 30m K 线粒度对齐，原 1h）
+    MIN_WINDOW_SEC = 900    # 中位数最少覆盖 15 分钟，样本不足视为不在前 3
     RANK_ABSENT = 99        # 不在 net_flow 榜时的 rank 占位值
-    OI_MIN = 0.0            # OI 过滤：当前 oi_delta_percent > 0 才可入场
+    OI_MIN = 1.0            # OI 过滤：当前 oi_delta_percent > 1% 才可入场（30m 窗口等价阈值）
+    # 08-30 数据验证（71 笔实盘双窗口回测）：
+    #   1h OI>2% 保留 12 笔 -2.60U（含 #12 ENA -0.71U / #71 PROM -0.42U 等 1h 强但 30m 已熄火陷阱）
+    #   30m OI>1.0% 保留 7 笔 -0.87U（拦截 5 笔 1h 假强单，净改善 +1.73U）
+    #   30m OI>0.8% 9 笔 -1.17U | 30m OI>1.5% 5 笔 -0.89U → 1.0 为最优档
+    #   阈值随窗口缩放：1h 2.0% ≈ 30m 1.0%（OI 增长是慢变量，窗口减半阈值约减半）
+    #   只作用于做多（can_short=False）；做空信号待后续单独研究
     BTC_BIAS_WINDOW_MIN = 30  # BTC 方向过滤：前 30 分钟涨幅 > 0 才允许做多
 
     ATR_PERIOD = 40         # 30m K 线 ×40 = 20h 窗口（原 1h ×20）
@@ -161,10 +199,13 @@ class AI500V1DryRun(IStrategy):
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         self.rank_history: dict[str, deque] = {}     # symbol -> deque[(ts, rank)]
-        self.median_rank: dict[str, float] = {}      # symbol -> 1h 中位数排名
+        self.median_rank: dict[str, float] = {}      # symbol -> 30m 中位数排名
         self.current_rank: dict[str, int] = {}       # symbol -> 最近一次采样 rank（退出用）
         self.oi_delta_pct: dict[str, float] = {}     # symbol -> oi_delta_percent
         self.btc_bias_pct: float | None = None       # BTC 前 30min 涨幅 %（方向过滤）
+        self.btc_mtf_15m: int | None = None          # BTC 15m MACD 共振评分 -4~+4（观察版）
+        self.btc_large_net_30m: float | None = None  # BTC 大单净流 USD（最近 30 分钟，与策略周期对齐）
+        self.btc_large_net_15m: float | None = None  # BTC 大单净流 USD（最近 15 分钟，更灵敏）
         # 币安客户端（OI 数据来源，用于四象限/资金流判断的 fallback）
         # 懒加载：启动时可能因代理繁忙失败，运行中 _get_binance_oi_change 会重试
         self.binance = None
@@ -204,13 +245,14 @@ class AI500V1DryRun(IStrategy):
             logger.warning(f"Binance client init failed (will retry on next use): {e}")
             self.binance = None
 
-    def _get_binance_oi_change(self, symbol: str, window_min: int = 60) -> float:
+    def _get_binance_oi_change(self, symbol: str, window_min: int = 30) -> float:
         """从币安获取 OI 累计变化率（主源）。
 
         返回 (now - past) / past * 100 格式的累计百分比。
-        window_min 推荐 60: 实测 Vergex 的 oi_delta_percent 窗口就是 1h 累计
-        （10 个样本币种，币安 1h 累计 vs Vergex 误差 < 0.3pp 的有 7/10）。
-        其他可选: 5, 15, 30, 240。
+        window_min 默认 30（与 30m K 线粒度对齐，原 1h）。
+        08-30 数据验证（71 笔实盘双窗口回测）：30m OI>1% 优于 1h OI>2%
+        （-0.87U vs -2.60U），且能拦截 1h 假强但 30m 已熄火的陷阱单。
+        其他可选: 5, 15, 60, 240。
 
         合约名规则：币安给 <1美元 的小币加 1000 前缀（PEPE/BONK/FLOKI），
         BCH/SOL/AAOI 不加。双尝试：先原名，失败再试 1000 前缀。
@@ -243,6 +285,22 @@ class AI500V1DryRun(IStrategy):
                     'limit': limit,
                 })
                 if len(oi_hist) >= 2:
+                    # 时间跨度校验（数据可靠性，2026-08-30 修复 #93 PROM 假 OI bug）：
+                    # 币安按 limit 返回最近 N 根，若期间有数据空洞（新币/停更），
+                    # oi_hist[0] 可能远早于预期窗口 → 变化率被错误放大（#93 真实 OI 横盘
+                    # 却算出 +6.12% 导致误开仓）。要求首末时间跨度在预期窗口 ±20% 内，
+                    # 否则拒绝采信返回 None（保守拦截，宁可不入场也不吃假数据）。
+                    period_minutes = {'5m': 5, '15m': 15, '1h': 60, '4h': 240}.get(period, 5)
+                    span_ms = int(oi_hist[-1]['timestamp']) - int(oi_hist[0]['timestamp'])
+                    span_min = span_ms / 60000.0
+                    expected_min = (limit - 1) * period_minutes
+                    if span_min < expected_min * 0.8 or span_min > expected_min * 1.2:
+                        logger.warning(
+                            f"Binance OI span check FAIL for {bs} window={window_min}m: "
+                            f"got {len(oi_hist)} rows spanning {span_min:.0f}m "
+                            f"(expected ~{expected_min}m) -> reject"
+                        )
+                        continue
                     oi_now = float(oi_hist[-1]['sumOpenInterest'])
                     oi_past = float(oi_hist[0]['sumOpenInterest'])
                     if oi_past > 0:
@@ -274,6 +332,84 @@ class AI500V1DryRun(IStrategy):
             return (end_price - start_price) / start_price * 100.0
         except Exception as e:
             logger.debug(f"BTC bias fetch failed: {e}")
+            return None
+
+    def _get_btc_mtf_15m(self) -> int | None:
+        """BTC 15m 单周期 MACD 共振评分（-4 ~ +4，观察版，不进入场）。
+
+        复刻 MACD v2.4 的 MTF 矩阵评分逻辑（单周期版）：
+          1. MACD > Signal            -> +1（否则 -1）
+          2. MACD 较前一根上升        -> +1（否则 -1）
+          3. Signal 较前一根上升      -> +1（否则 -1）
+          4. Histogram > 0            -> +1（否则 -1）
+        标准 MACD(12,26,9)。用币安 15m 合约 K 线，60 根足够 EMA 预热。
+
+        用途（观察版）：只写 CSV + 日志积累，与 AI500 开仓/收益对照 2-4 周，
+        评分 <0 时开仓的单 vs >=0 时开仓的单盈亏差足够大才转正为入场过滤。
+        失败返回 None（调用方保留上次值）。
+        """
+        if not self.binance:
+            self._init_binance()
+        if not self.binance:
+            return None
+        try:
+            k = self.binance.fetch_ohlcv("BTC/USDT:USDT", "15m", limit=60)
+            if not k or len(k) < 35:  # EMA26 + EMA9 预热需要至少 35 根
+                return None
+            closes = [float(x[4]) for x in k]
+
+            def ema(values: list[float], period: int) -> list[float]:
+                alpha = 2.0 / (period + 1)
+                out = [values[0]]
+                for v in values[1:]:
+                    out.append(alpha * v + (1 - alpha) * out[-1])
+                return out
+
+            ema12 = ema(closes, 12)
+            ema26 = ema(closes, 26)
+            macd = [a - b for a, b in zip(ema12, ema26)]
+            signal = ema(macd, 9)
+            hist = [m - s for m, s in zip(macd, signal)]
+
+            m, s, h = macd[-1], signal[-1], hist[-1]
+            m_prev, s_prev = macd[-2], signal[-2]
+
+            score = 0
+            score += 1 if m > s else -1
+            score += 1 if m > m_prev else -1
+            score += 1 if s > s_prev else -1
+            score += 1 if h > 0 else -1
+            return score
+        except Exception as e:
+            logger.debug(f"BTC MTF 15m fetch failed: {e}")
+            return None
+
+    def _get_btc_large_net(self, interval: str = "30m") -> float | None:
+        """获取 BTC 大单净流 USD（糖哥 stock.tanggestock.com 大单追溯）。
+
+        接口：/api/realtime-events/large-trades?symbol=BTC&interval=<5m|15m|30m|1h>&anchor=<now>&market=perp
+        返回周期桶：buyUsd/sellUsd（主动买/卖金额），净流 = buyUsd - sellUsd。
+        实测刷新：后端流式实时落库，5m 桶滞后约 5min，30m 桶滞后约 30min。
+        数据源：币安现货逐笔成交流（aggTrade），2026-07 起落库，免费免鉴权。
+        失败返回 None（调用方处理：保留上次值）。
+        """
+        try:
+            anchor = int(time.time() * 1000)
+            url = ("https://stock.tanggestock.com/api/realtime-events/large-trades"
+                   f"?symbol=BTC&interval={interval}&anchor={anchor}&market=perp")
+            resp = requests.get(url, proxies=TRENDING_PROXY,
+                                headers={"User-Agent": "Mozilla/5.0"}, timeout=FETCH_TIMEOUT)
+            resp.raise_for_status()
+            data = resp.json()
+            rows = data.get("rows") or []
+            if not rows:
+                return None
+            last = rows[-1]
+            if "buyUsd" not in last or "sellUsd" not in last:
+                return None
+            return float(last["buyUsd"]) - float(last["sellUsd"])
+        except Exception as e:
+            logger.debug(f"BTC large net fetch failed ({interval}): {e}")
             return None
 
     @staticmethod
@@ -323,6 +459,22 @@ class AI500V1DryRun(IStrategy):
         if new_bias is not None:
             self.btc_bias_pct = new_bias
 
+        # 更新 BTC 大单净流（糖哥大单数据，观察积累用，暂不影响入场）
+        # 30m 桶=与策略周期对齐（滞后~30min），15m 桶=更灵敏（滞后~15min）
+        # 失败时保留上次成功值
+        new_large_net_30m = self._get_btc_large_net(interval="30m")
+        if new_large_net_30m is not None:
+            self.btc_large_net_30m = new_large_net_30m
+        new_large_net_15m = self._get_btc_large_net(interval="15m")
+        if new_large_net_15m is not None:
+            self.btc_large_net_15m = new_large_net_15m
+
+        # 更新 BTC 15m MTF 共振评分（观察版，不进入场；失败保留上次值）
+        new_mtf = self._get_btc_mtf_15m()
+        if new_mtf is not None:
+            self.btc_mtf_15m = new_mtf
+        self._append_mtf_history(current_time.astimezone(timezone.utc).isoformat())
+
         # 更新排名历史：net_flow 榜内的记真实 rank，其余记 RANK_ABSENT（不在榜）
         netflow_syms = set(netflow.keys())
         tracked = set(self.rank_history.keys()) | netflow_syms
@@ -337,7 +489,7 @@ class AI500V1DryRun(IStrategy):
             hist.append((now, rank))
             self.current_rank[sym] = rank
 
-        # 清理超过 1h 的旧采样，并计算中位数（窗口覆盖 < 30 分钟视为样本不足）
+        # 清理超过 30m 的旧采样，并计算中位数（窗口覆盖 < 15 分钟视为样本不足）
         cutoff = now - self.RANK_WINDOW_SEC
         self.median_rank = {}
         for sym in list(self.rank_history.keys()):
@@ -351,19 +503,19 @@ class AI500V1DryRun(IStrategy):
                 continue  # 样本不足，不产生有效中位数（视为不在前 3）
             self.median_rank[sym] = statistics.median([r for _, r in hist])
 
-        # 写历史记录（含当前 rank 与 1h 中位数）
+        # 写历史记录（含当前 rank 与 30m 中位数）
         fetched_at = current_time.astimezone(timezone.utc).isoformat()
         rows = []
         for sym in sorted(tracked):
             nf = netflow.get(sym) or {}
             o = oi.get(sym) or {}
             pair = f"{self._strip_usdt(sym)}/USDT:USDT"
-            # OI 主源：币安 1h 累计变化率（与 Vergex 口径对齐，实测误差 < 0.3pp）
+            # OI 主源：币安 30m 累计变化率（与 30m K 线粒度对齐）
             # Fallback：币安失败时退回 Vergex（数据可能更旧但总比没有强）
             # 不一致告警：双源都拿到且差 > 2pp 时 log warning（捕捉 RVN/ONT 这类异常）
             oi_delta_value = o.get("oi_delta_value")
             vergex_pct = o.get("oi_delta_percent")
-            binance_pct = self._get_binance_oi_change(sym, window_min=60) if self.binance else None
+            binance_pct = self._get_binance_oi_change(sym, window_min=30) if self.binance else None
             oi_delta_percent = None
             oi_source = None
             if binance_pct is not None and vergex_pct is not None:
@@ -397,6 +549,8 @@ class AI500V1DryRun(IStrategy):
                 "price": nf.get("price") if nf.get("price") is not None else o.get("price"),
                 "price_delta_percent": nf.get("price_delta_percent")
                     if nf.get("price_delta_percent") is not None else o.get("price_delta_percent"),
+                "btc_large_net_30m": self.btc_large_net_30m,
+                "btc_large_net_15m": self.btc_large_net_15m,
             })
         self._append_history(rows)
 
@@ -411,6 +565,27 @@ class AI500V1DryRun(IStrategy):
                 if write_header:
                     writer.writeheader()
                 writer.writerows(rows)
+        except OSError:
+            pass
+
+    def _append_mtf_history(self, fetched_at_utc: str) -> None:
+        """写 BTC MTF 评分快照（独立小 CSV，观察积累用）。"""
+        if self.btc_mtf_15m is None:
+            return
+        write_header = not os.path.exists(MTF_HISTORY_PATH)
+        row = {
+            "fetched_at_utc": fetched_at_utc,
+            "btc_mtf_15m": self.btc_mtf_15m,
+            "btc_bias_pct": self.btc_bias_pct,
+            "btc_large_net_30m": self.btc_large_net_30m,
+            "btc_large_net_15m": self.btc_large_net_15m,
+        }
+        try:
+            with open(MTF_HISTORY_PATH, "a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=MTF_HISTORY_FIELDS)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(row)
         except OSError:
             pass
 
