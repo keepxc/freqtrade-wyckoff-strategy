@@ -139,7 +139,13 @@ HISTORY_FIELDS = [
 MTF_HISTORY_PATH = "/home/gyan/freqtrade/user_data/ai500_btc_mtf_history.csv"
 MTF_HISTORY_FIELDS = [
     "fetched_at_utc", "btc_mtf_15m", "btc_bias_pct", "btc_large_net_30m", "btc_large_net_15m",
+    "btc_imb_buy_max", "btc_imb_sell_max",
 ]
+# 币安 aggTrades 逐笔目录（ai500_agg_collector.py 常驻采集）
+AGG_TRADES_DIR = "/home/gyan/freqtrade/user_data/agg_trades"
+IMB_LOOKBACK_MIN = 30   # imbalance 观察窗口 = 30m（与策略周期对齐）
+IMB_PRICE_STEP = 78.0   # 价格分层步长 ≈ 0.1%（78 USDT）
+IMB_RATIO_THRESH = 3.0  # 失衡阈值 300%
 
 
 class AI500V1DryRun(IStrategy):
@@ -163,14 +169,20 @@ class AI500V1DryRun(IStrategy):
 
     ENTRY_MEDIAN = 3        # 入场：过去 30m net_flow 排名中位数 ≤ 3（与 30m K 线粒度对齐）
     EXIT_RANK = 10          # 退出：当前 rank 跌出前 10 立即退（灵敏，不经中位数平滑）
+    RANK_EXIT_CONFIRM = 3   # 退出平滑（09-01 方案A）：连续 3 次采样 rank>10 才平（≈1.5min 确认）
+                            #   数据验证（16 笔 rank 轨迹重放）：N=2 与 N=3 效果相同（30s 采样粒度），
+                            #   真掉队持续 >10 不受影响，单次抖动被过滤；N=5 多保 2 笔但增加真掉队拖尾风险
     RANK_WINDOW_SEC = 1800  # 中位数回看窗口 = 30m（与 30m K 线粒度对齐，原 1h）
     MIN_WINDOW_SEC = 900    # 中位数最少覆盖 15 分钟，样本不足视为不在前 3
     RANK_ABSENT = 99        # 不在 net_flow 榜时的 rank 占位值
-    OI_MIN = 1.0            # OI 过滤：当前 oi_delta_percent > 1% 才可入场（30m 窗口等价阈值）
-    # 08-30 数据验证（71 笔实盘双窗口回测）：
-    #   1h OI>2% 保留 12 笔 -2.60U（含 #12 ENA -0.71U / #71 PROM -0.42U 等 1h 强但 30m 已熄火陷阱）
-    #   30m OI>1.0% 保留 7 笔 -0.87U（拦截 5 笔 1h 假强单，净改善 +1.73U）
-    #   30m OI>0.8% 9 笔 -1.17U | 30m OI>1.5% 5 笔 -0.89U → 1.0 为最优档
+    OI_MIN = 3.0            # OI 过滤：当前 oi_delta_percent > 3% 才可入场（30m 窗口等价阈值）
+    # 09-01 反推验证（977,016 采样点，8-20~8-26 与 8-27~9-01 两独立时段一致）：
+    #   "低点"=未来 2h 涨≥5%，命中率随 OI 单调上升（跨时段稳健，非过拟合）：
+    #     OI<1%: 5% | 1~2%: 10-11% | 2~3%: 14-16% | 3~5%: 17-20% | 5~10%: 22-26% | >10%: 28-30%
+    #   旧 1.0% 阈值命中率 ~10%，提到 3.0% → ~17-20%（+80%），代价是入场笔数减少
+    #   历史依据（08-30 71 笔实盘双窗口回测，留档）：
+    #     1h OI>2% 保留 12 笔 -2.60U（含 #12 ENA -0.71U / #71 PROM -0.42U 等 1h 强但 30m 已熄火陷阱）
+    #     30m OI>1.0% 保留 7 笔 -0.87U（拦截 5 笔 1h 假强单，净改善 +1.73U）
     #   阈值随窗口缩放：1h 2.0% ≈ 30m 1.0%（OI 增长是慢变量，窗口减半阈值约减半）
     #   只作用于做多（can_short=False）；做空信号待后续单独研究
     BTC_BIAS_WINDOW_MIN = 30  # BTC 方向过滤：前 30 分钟涨幅 > 0 才允许做多
@@ -204,11 +216,14 @@ class AI500V1DryRun(IStrategy):
         self.rank_history: dict[str, deque] = {}     # symbol -> deque[(ts, rank)]
         self.median_rank: dict[str, float] = {}      # symbol -> 30m 中位数排名
         self.current_rank: dict[str, int] = {}       # symbol -> 最近一次采样 rank（退出用）
-        self.oi_delta_pct: dict[str, float] = {}     # symbol -> oi_delta_percent
+        self.last_rank: dict[str, int] = {}          # symbol -> 上一次成功采样 rank（接口失败兜底，修复09-01）
+        self.oi_delta_pct: dict[str, float | None] = {}     # symbol -> oi_delta_percent（None=币安取不到，保守拦截）
         self.btc_bias_pct: float | None = None       # BTC 前 30min 涨幅 %（方向过滤）
         self.btc_mtf_15m: int | None = None          # BTC 15m MACD 共振评分 -4~+4（观察版）
         self.btc_large_net_30m: float | None = None  # BTC 大单净流 USD（最近 30 分钟，与策略周期对齐）
         self.btc_large_net_15m: float | None = None  # BTC 大单净流 USD（最近 15 分钟，更灵敏）
+        self.btc_imb_buy_max: float | None = None    # BTC 价格分层 buy imbalance 最大比（观察）
+        self.btc_imb_sell_max: float | None = None   # BTC 价格分层 sell imbalance 最大比（观察）
         # 币安客户端（OI 数据来源，用于四象限/资金流判断的 fallback）
         # 懒加载：启动时可能因代理繁忙失败，运行中 _get_binance_oi_change 会重试
         self.binance = None
@@ -390,14 +405,23 @@ class AI500V1DryRun(IStrategy):
     def _get_btc_large_net(self, interval: str = "30m") -> float | None:
         """获取 BTC 大单净流 USD（糖哥 stock.tanggestock.com 大单追溯）。
 
-        接口：/api/realtime-events/large-trades?symbol=BTC&interval=<5m|15m|30m|1h>&anchor=<now>&market=perp
+        接口：/api/realtime-events/large-trades?symbol=BTC&interval=<5m|15m|30m|1h>&anchor=<周期末根ms>&market=perp
         返回周期桶：buyUsd/sellUsd（主动买/卖金额），净流 = buyUsd - sellUsd。
         实测刷新：后端流式实时落库，5m 桶滞后约 5min，30m 桶滞后约 30min。
-        数据源：币安现货逐笔成交流（aggTrade），2026-07 起落库，免费免鉴权。
+        数据源：币安合约逐笔成交流（perp 池，非 aggTrade 现货），2026-07 起落库，免费免鉴权。
+        anchor 对齐：必须用「当前周期末根 K 线时间戳」而非实时时间，否则 rows[-1] 会错位
+        ~27min(30m)/~12min(15m)，与 BTC 30m bias / K 线周期对不齐（2026-08-31 实测确认）。
         失败返回 None（调用方处理：保留上次值）。
         """
         try:
-            anchor = int(time.time() * 1000)
+            # anchor = 当前周期末根时间戳（整除对齐到整点桶边界）
+            if interval == "15m":
+                bucket_ms = 900_000
+            elif interval == "1h":
+                bucket_ms = 3_600_000
+            else:  # 30m 默认
+                bucket_ms = 1_800_000
+            anchor = (int(time.time() * 1000) // bucket_ms) * bucket_ms
             url = ("https://stock.tanggestock.com/api/realtime-events/large-trades"
                    f"?symbol=BTC&interval={interval}&anchor={anchor}&market=perp")
             resp = requests.get(url, proxies=TRENDING_PROXY,
@@ -476,6 +500,12 @@ class AI500V1DryRun(IStrategy):
         new_mtf = self._get_btc_mtf_15m()
         if new_mtf is not None:
             self.btc_mtf_15m = new_mtf
+        # 更新 BTC 价格分层 imbalance（币安 aggTrades，观察积累用，不进入场）
+        new_imb = self._get_btc_imb()
+        if new_imb[0] is not None:
+            self.btc_imb_buy_max = new_imb[0]
+        if new_imb[1] is not None:
+            self.btc_imb_sell_max = new_imb[1]
         self._append_mtf_history(current_time.astimezone(CST).isoformat())
 
         # 更新排名历史：net_flow 榜内的记真实 rank，其余记 RANK_ABSENT（不在榜）
@@ -491,6 +521,7 @@ class AI500V1DryRun(IStrategy):
             rank = netflow[sym].get("rank") if sym in netflow_syms else self.RANK_ABSENT
             hist.append((now, rank))
             self.current_rank[sym] = rank
+            self.last_rank[sym] = rank   # 成功采样才更新兜底值（修复09-01：接口失败时保留上次）
 
         # 清理超过 30m 的旧采样，并计算中位数（窗口覆盖 < 15 分钟视为样本不足）
         cutoff = now - self.RANK_WINDOW_SEC
@@ -515,32 +546,14 @@ class AI500V1DryRun(IStrategy):
             nf = netflow.get(sym) or {}
             o = oi.get(sym) or {}
             pair = f"{self._strip_usdt(sym)}/USDT:USDT"
-            # OI 主源：币安 30m 累计变化率（与 30m K 线粒度对齐）
-            # Fallback：币安失败时退回 Vergex（数据可能更旧但总比没有强）
-            # 不一致告警：双源都拿到且差 > 2pp 时 log warning（捕捉 RVN/ONT 这类异常）
+            # OI 唯一源：币安 30m 累计变化率（与 30m K 线粒度对齐）
+            # 2026-08-31 用户拍板：去掉 Vergex fallback——vergex oi_delta_percent 是 1h 窗口
+            # （price_delta 验证 +0.727%≈0.785%），与币安 30m 窗口错配，fallback 会用错窗口
+            # 阈值（30m OI_MIN=1.0% vs 1h 波动天然更大）放行 30m 已熄火的单。
+            # 币安取不到 OI → 留 None → populate_indicators 里 oi_ok=0 保守拦截，宁可不入场。
             oi_delta_value = o.get("oi_delta_value")
-            vergex_pct = o.get("oi_delta_percent")
-            binance_pct = self._get_binance_oi_change(sym, window_min=30) if self.binance else None
-            oi_delta_percent = None
-            oi_source = None
-            if binance_pct is not None and vergex_pct is not None:
-                # 双源都有：取币安（交易所一手），但不一致时告警
-                oi_delta_percent = binance_pct
-                oi_source = "binance"
-                if abs(binance_pct - vergex_pct) > 2.0:
-                    logger.warning(
-                        f"OI mismatch {sym}: binance={binance_pct:+.2f}% vs "
-                        f"vergex={vergex_pct:+.2f}% (diff={binance_pct-vergex_pct:+.2f}pp)"
-                    )
-            elif binance_pct is not None:
-                # 只有币安有：填币安
-                oi_delta_percent = binance_pct
-                oi_source = "binance"
-            elif vergex_pct is not None:
-                # 币安失败：退回 Vergex
-                oi_delta_percent = vergex_pct
-                oi_source = "vergex_fallback"
-                logger.debug(f"OI fallback to vergex for {sym}: {vergex_pct:+.3f}%")
+            oi_delta_percent = self._get_binance_oi_change(sym, window_min=30) if self.binance else None
+            oi_source = "binance" if oi_delta_percent is not None else None
             rows.append({
                 "fetched_at_utc": fetched_at,
                 "symbol": sym,
@@ -577,6 +590,68 @@ class AI500V1DryRun(IStrategy):
         except OSError:
             pass
 
+    def _get_btc_imb(self, lookback_min: int = IMB_LOOKBACK_MIN) -> tuple[float | None, float | None]:
+        """读取币安 aggTrades 逐笔落盘，计算最近 lookback_min 窗口的价格分层 imbalance。
+
+        返回 (buy_imb_max_ratio, sell_imb_max_ratio)。数据缺失/文件不存在返回 (None, None)。
+        分层方法: 价格按 0.1% 步长分组，某层主动买量 > 下层主动卖量 ×3 = buy imbalance。
+        """
+        try:
+            cutoff_ms = int(time.time() * 1000) - lookback_min * 60_000
+            # 只读最近 1-2 天的文件（采集器每天一个文件；UTC 日期从时间戳推导）
+            import datetime as _dt
+            days = []
+            for off in (0, -1):
+                d = _dt.datetime.fromtimestamp(
+                    int(time.time()) + off * 86400, _dt.timezone.utc)
+                days.append(d)
+            files = []
+            for d in days:
+                fp = os.path.join(AGG_TRADES_DIR, f"agg_{d.strftime('%Y%m%d')}.csv")
+                if os.path.exists(fp):
+                    files.append(fp)
+            if not files:
+                return None, None
+
+            wbq: dict[int, float] = {}
+            wsq: dict[int, float] = {}
+            for fp in files:
+                with open(fp, newline="", encoding="utf-8") as f:
+                    reader = csv.reader(f)
+                    next(reader, None)  # header
+                    for row in reader:
+                        if len(row) < 5:
+                            continue
+                        ts_ms = int(row[0])
+                        if ts_ms < cutoff_ms:
+                            continue
+                        price = float(row[2])
+                        qty = float(row[3])
+                        maker = row[4].strip() == "1"
+                        lvl = round(price / IMB_PRICE_STEP)
+                        if maker:
+                            wsq[lvl] = wsq.get(lvl, 0.0) + qty
+                        else:
+                            wbq[lvl] = wbq.get(lvl, 0.0) + qty
+            if not wbq or not wsq:
+                return None, None
+
+            lvls = sorted(set(list(wbq.keys()) + list(wsq.keys())))
+            buy_max = sell_max = 0.0
+            for i, l in enumerate(lvls):
+                b = wbq.get(l, 0.0)
+                s = wsq.get(l, 0.0)
+                s_below = wsq.get(lvls[i - 1], 0.0) if i > 0 else 0.0
+                b_above = wbq.get(lvls[i + 1], 0.0) if i < len(lvls) - 1 else 0.0
+                if b > 0 and s_below > 0:
+                    buy_max = max(buy_max, b / s_below)
+                if s > 0 and b_above > 0:
+                    sell_max = max(sell_max, s / b_above)
+            return buy_max, sell_max
+        except Exception as e:
+            logger.debug(f"BTC imbalance fetch failed: {e}")
+            return None, None
+
     def _append_mtf_history(self, fetched_at_utc: str) -> None:
         """写 BTC MTF 评分快照（独立小 CSV，观察积累用）。"""
         if self.btc_mtf_15m is None:
@@ -588,6 +663,8 @@ class AI500V1DryRun(IStrategy):
             "btc_bias_pct": self.btc_bias_pct,
             "btc_large_net_30m": self.btc_large_net_30m,
             "btc_large_net_15m": self.btc_large_net_15m,
+            "btc_imb_buy_max": self.btc_imb_buy_max,
+            "btc_imb_sell_max": self.btc_imb_sell_max,
         }
         try:
             with open(MTF_HISTORY_PATH, "a", newline="", encoding="utf-8") as f:
@@ -607,7 +684,12 @@ class AI500V1DryRun(IStrategy):
         # 有意义，不可用于回测（详见文件头说明）。
         sym = self._pair_to_symbol(pair)
         median = self.median_rank.get(sym, self.RANK_ABSENT)
-        cur_rank = self.current_rank.get(sym, self.RANK_ABSENT)
+        # 修复 09-01：current_rank 缺失时保留上次值，而不是默认 RANK_ABSENT(99)
+        #   根因：bot_loop_start 接口失败直接 return，current_rank 不更新；
+        #   若持仓币 sym 恰不在 dict（接口失败期间新开仓/数据未刷新），
+        #   get() 返回 99 → rank>10 → 立即误平仓（#16 ETH rank=2 / #46 ETH rank=1 / #76 BTC rank=1 均被误杀）
+        #   现在：缺失时用 last_rank 兜底（None 才 99，即从未有过值）
+        cur_rank = self.current_rank.get(sym, self.last_rank.get(sym, self.RANK_ABSENT))
         oi_pct = self.oi_delta_pct.get(sym, None)
         dataframe['median_rank'] = median
         dataframe['current_rank'] = cur_rank
@@ -639,8 +721,17 @@ class AI500V1DryRun(IStrategy):
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        # 平滑退出（09-01 方案A）：连续 RANK_EXIT_CONFIRM 次采样 rank>10 才平仓
+        #   消除 30s 级 rank 抖动误杀（如 4→12→8 瞬间跳动）
+        #   数据验证：真掉队（[18,23,21]）持续 >10 不受影响；单次抖动被过滤
+        sym = self._pair_to_symbol(metadata['pair'])
+        hist = self.rank_history.get(sym)
+        confirmed = False
+        if hist and len(hist) >= self.RANK_EXIT_CONFIRM:
+            recent = [r for _, r in hist][-self.RANK_EXIT_CONFIRM:]
+            confirmed = all(r > self.EXIT_RANK for r in recent)
         dataframe.loc[
-            dataframe['current_rank'] > self.EXIT_RANK,
+            confirmed,
             ['exit_long', 'exit_tag']
         ] = (1, 'netflow_oi_exit')
         return dataframe

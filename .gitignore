@@ -131,3 +131,12 @@ check_*.sh
 diagnose_*.sh
 user_data/config_ai500_live.json
 user_data/config_*live*.json
+user_data/config_ai500_macd_dryrun.json
+user_data/config_ai500_dryrun.json
+# aggTrades 逐笔原始数据（99MB+ 持续增长，不进 repo）
+user_data/agg_trades/
+# 根级 strategies/ 是历史误放路径（真实在 user_data/strategies/），废弃
+/strategies/
+# AI500 kline 缓存 / 备份（二进制+历史快照，不进 repo）
+user_data/*.pkl
+user_data/ai500_btc_mtf_history.csv.bak*
