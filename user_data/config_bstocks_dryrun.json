@@ -35,16 +35,95 @@
         "name": "binance",
         "key": "",
         "secret": "",
-        "ccxt_config": {"options": {"fetchMarkets": ["spot"]}, "timeout": 60000, "proxies": {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}},
-        "ccxt_async_config": {"timeout": 60000, "aiohttp_proxy": "http://127.0.0.1:7890"},
+        "ccxt_config": {
+            "options": {
+                "fetchMarkets": [
+                    "spot"
+                ]
+            },
+            "timeout": 60000,
+            "proxies": {
+                "http": "http://127.0.0.1:7890",
+                "https": "http://127.0.0.1:7890"
+            }
+        },
+        "ccxt_async_config": {
+            "timeout": 60000,
+            "aiohttp_proxy": "http://127.0.0.1:7890"
+        },
         "enable_ws": false,
         "pair_whitelist": [
-            "NVDAB/USDT", "TSLAB/USDT", "CRCLB/USDT", "MUB/USDT", "SNDKB/USDT",
-            "AAPLB/USDT", "AMZNB/USDT", "GOOGLB/USDT", "GSB/USDT", "PYPLB/USDT",
-            "COINB/USDT", "HOODB/USDT", "IBMB/USDT", "NOKB/USDT",
-            "NFLXB/USDT", "ASMLB/USDT"
+            "AAOIB/USDT",
+            "AAPLB/USDT",
+            "ALABB/USDT",
+            "AMATB/USDT",
+            "AMDB/USDT",
+            "AMZNB/USDT",
+            "ARMB/USDT",
+            "ASMLB/USDT",
+            "ASTSB/USDT",
+            "AVGOB/USDT",
+            "AXTIB/USDT",
+            "BABAB/USDT",
+            "BEB/USDT",
+            "BMNRB/USDT",
+            "CBRSB/USDT",
+            "COHRB/USDT",
+            "CRCLB/USDT",
+            "CRDOB/USDT",
+            "CRWVB/USDT",
+            "DELLB/USDT",
+            "DJTB/USDT",
+            "DRAMB/USDT",
+            "EWYB/USDT",
+            "FLNCB/USDT",
+            "GLWB/USDT",
+            "GMEB/USDT",
+            "GOOGLB/USDT",
+            "GSB/USDT",
+            "HOODB/USDT",
+            "INTCB/USDT",
+            "INTWB/USDT",
+            "IRENB/USDT",
+            "KORUB/USDT",
+            "LITEB/USDT",
+            "METAB/USDT",
+            "MRVLB/USDT",
+            "MSFTB/USDT",
+            "MSTRB/USDT",
+            "MUB/USDT",
+            "MUUB/USDT",
+            "MVLLB/USDT",
+            "NBISB/USDT",
+            "NOKB/USDT",
+            "ORCLB/USDT",
+            "PLTRB/USDT",
+            "PYPLB/USDT",
+            "QCOMB/USDT",
+            "QNTB/USDT",
+            "QQQB/USDT",
+            "RKLBB/USDT",
+            "SKHYB/USDT",
+            "SMCIB/USDT",
+            "SMHB/USDT",
+            "SNDKB/USDT",
+            "SNXXB/USDT",
+            "SOXLB/USDT",
+            "SOXSB/USDT",
+            "SPCXB/USDT",
+            "SPYB/USDT",
+            "TQQQB/USDT",
+            "TSMB/USDT",
+            "USARB/USDT",
+            "WDCB/USDT"
         ],
-        "pair_blacklist": []
+        "pair_blacklist": [
+            "COINB/USDT",
+            "IBMB/USDT",
+            "NFLXB/USDT",
+            "TSLAB/USDT",
+            "NVDAB/USDT"
+        ]
     },
     "pairlists": [
         {
@@ -60,7 +139,9 @@
     "internals": {
         "process_throttle_secs": 5
     },
-    "minimal_roi": {"0": 100},
+    "minimal_roi": {
+        "0": 100
+    },
     "api_server": {
         "enabled": true,
         "listen_ip_address": "0.0.0.0",
@@ -71,5 +152,6 @@
         "CORS_origins": [],
         "username": "freqtrader",
         "password": "changeme_bstocks_dryrun"
-    }
+    },
+    "logfile": "/home/gyan/freqtrade/user_data/logs/freqtrade_bstocks.log"
 }
