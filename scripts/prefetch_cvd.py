@@ -7,6 +7,7 @@ CVD = rolling sum of (2 * taker_buy_vol - total_vol)
 用法：
   python scripts/prefetch_cvd.py --timerange 20260520-20260530
 """
+import os
 import requests, argparse, time, sys
 import numpy as np
 import pandas as pd
@@ -14,7 +15,7 @@ from pathlib import Path
 from datetime import datetime
 
 BINANCE = "https://fapi.binance.com"
-PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+PROXY = {"http": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809"), "https": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809")}
 OUT_DIR = Path(__file__).parent.parent / "user_data" / "data" / "cvd"
 
 WATCHLIST_PAIRS = [

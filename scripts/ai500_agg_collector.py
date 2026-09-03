@@ -27,7 +27,7 @@ import requests
 
 SYMBOL = "BTCUSDT"
 API_BASE = "https://fapi.binance.com/fapi/v1/aggTrades"
-PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+PROXY = {"http": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809"), "https": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809")}
 POLL_SEC = 5.0
 MAX_ROWS_PER_POLL = 1000
 DATA_DIR = "/home/gyan/freqtrade/user_data/agg_trades"

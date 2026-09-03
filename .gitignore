@@ -89,6 +89,12 @@ P5/db/
 # AI500 运行时 CSV 历史（每轮重写，不进 repo）
 user_data/ai500_*.csv
 
+# AI500 研究数据集：K线 feather 约 410MB、面板 npz 约 30MB、
+# 净流历史 gz 约 13MB。全是可重新生成或可重新传输的，不进 repo。
+user_data/ai500_local/
+# OI 归档器产物（bot 机器本地，按天累积，只在机器上存）
+user_data/ai500_oi_hist/
+
 # 根目录临时查询/调试脚本
 /get_cols.py
 /get_extra.py

@@ -48,7 +48,7 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent.parent / "user_data" / "market.db"
 SCAN_INTERVAL_SEC = 900   # 15 minutes
 MAX_WORKERS = 8
-PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+PROXY = {"http": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809"), "https": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809")}
 
 MIN_24H_VOL_USDT = 100_000_000   # 100M USDT — universe volume gate
 

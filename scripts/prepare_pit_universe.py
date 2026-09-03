@@ -37,8 +37,8 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7890")
-os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7890")
+os.environ.setdefault("HTTPS_PROXY", os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809"))
+os.environ.setdefault("HTTP_PROXY", os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809"))
 
 import cryptocmd.utils as _cmc_utils
 # cryptoCMD 默认 UA 过短('Mozilla/5.0')会被 CMC 反爬拦截（实测复现：SSL/Proxy层报错，

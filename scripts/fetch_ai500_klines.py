@@ -2,6 +2,7 @@
 拉取 OKX 30m K 线（覆盖 AI500 88 笔平仓涉及的币种和时段）
 用于 trailing 参数回放回测。
 """
+import os
 import ccxt
 import pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -9,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 # OKX 交易所（走代理）
 exchange = ccxt.okx({
     "enableRateLimit": True,
-    "proxies": {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
+    "proxies": {"http": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809"), "https": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809")},
 })
 
 # 从 DB 取涉及的币
