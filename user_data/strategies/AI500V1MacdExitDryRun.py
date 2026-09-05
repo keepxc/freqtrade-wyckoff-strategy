@@ -79,6 +79,17 @@ SCORE_HISTORY_FIELDS = [
     "start_price", "start_time", "change_pct_value",
 ]
 SCORE_FETCH_INTERVAL_S = 300  # score 每小时刷新（generatedAt ~30s 变但 score 低频），5 分钟采样足够
+# MACD whisper 出场决策日志。
+# 存在的理由：本策略结构上无法回测（populate_indicators 广播实时标量、
+# whisper 走 ccxt 实时拉数），且 whisper 需要几百根**日线**才算得准——
+# 本地只有 16 天 1m 数据，离线复现不出 p4，也就无法事先估算这个出场的收益。
+# 唯一出路是让 dry-run 把每次判定连同四个 power 一起记下来，事后重建。
+# 记 power 而非只记标签：karisik 的买/卖两支靠 p1/p4 区分，只有标签无法复原决策。
+MACD_LOG_PATH = "/home/gyan/freqtrade/user_data/ai500_macd_whisper_history.csv"
+MACD_LOG_FIELDS = [
+    "ts_utc", "symbol", "bar_key", "whisper", "p1_15m", "p2_1h", "p3_4h", "p4_1d",
+    "fast_slow_sig_by_tf", "bearish", "confirm_count", "exited", "current_profit",
+]
 # 币安 aggTrades 逐笔目录（ai500_agg_collector.py 常驻采集）
 AGG_TRADES_DIR = "/home/gyan/freqtrade/user_data/agg_trades"
 IMB_LOOKBACK_MIN = 30   # imbalance 观察窗口 = 30m（与策略周期对齐）
@@ -722,30 +733,227 @@ class AI500V1MacdExitDryRun(IStrategy):
     # MACD whisper 出场（核心改动）：4 周期 power + whisper 分类
     # 数据源：ccxt binance 合约 K 线（与 _get_btc_mtf_15m 同实现，扩 4 周期）
     # ============================================================
+    # f_get_tf_base_periods 的**基础**周期。自适应开启时它们会被乘数缩放，
+    # 只有 MACD_ADAPTIVE=False（Pine「仅时间周期」档）才直接当最终周期用。
     MACD_TF_PARAMS = {
         '15m': (12, 26, 9), '1h': (16, 34, 12),
         '4h': (20, 40, 15), '1d': (12, 26, 9),
     }
     MACD_CONFIRM_BARS = 2  # 连续 2 根 30m bar 转卖出才确认出场（防抖动）
-    MACD_SELL_SET = {'karisik', 'bicak'}  # 真卖出（不含中性 kararsiz）
+    # 出场判据见 _is_macd_bearish。原值 {'karisik','bicak'} 是 bug：
+    # karisik 在 Pine 原文是「谨慎买入」，且它混装了方向相反的两支。
+    MACD_SELL_SET = {'bicak'}              # 无歧义看空状态
+    MACD_SELL_BEARISH_KARISIK = True       # 额外收 karisik 的看空半边（A 支）
 
-    def _ema(self, values: list[float], period: int) -> list[float]:
-        alpha = 2.0 / (period + 1)
-        out = [values[0]]
-        for v in values[1:]:
-            out.append(alpha * v + (1 - alpha) * out[-1])
+    # --- Pine「🧠 自适应周期引擎」参数（对齐 TradingView 默认档） ---
+    # adaptive_mode = "自动 (自适应)"，adaptive_level = "完整"
+    MACD_ADAPTIVE = True
+    MACD_ATR_LEN, MACD_ATR_SMA_LEN = 14, 50
+    MACD_VOLUME_SMA_LEN, MACD_ADX_LEN = 20, 14
+    MACD_VOL_SENS, MACD_VOLUME_SENS = 1.0, 1.0
+    MACD_MIN_FAST, MACD_MAX_FAST = 5, 30
+    MACD_MIN_SLOW, MACD_MAX_SLOW = 15, 60
+    MACD_MIN_SIGNAL, MACD_MAX_SIGNAL = 5, 20
+    # regime 乘数要 ta.ema(close,200)，且是在**该周期**上算的 →
+    # 每个周期至少 200 根，否则 EMA200 恒为 na、regime 恒为 1.4（见 _regime_mult）
+    MACD_FETCH_LIMIT = 300
+
+    # ------------------------------------------------------------------
+    # 自适应周期引擎（Pine f_calc_macd_mtf 的复现）
+    #
+    # ⚠️ 为什么这里全部是**逐 bar 序列**而不是标量：
+    # Pine 的 f_ema(src, length) 里 alpha = 2/(length+1) 是**每根 bar 重新算**
+    # 的，滤波器自带 running state —— 它是一个时变 IIR，不是「某个固定周期的
+    # EMA」。而 length 本身来自自适应引擎，波动很大：实测 BTCUSDT 1h 最近 60
+    # 根里 fast 在 9~28 之间跳、变了 48 次。
+    #
+    # 先前实现取**最后一根**算出的周期，用固定 alpha 回溯套用整段历史 —— 那
+    # 是另一个滤波器。实测 8 个币里 3 个 whisper 结论不同，其中 ADAUSDT 在
+    # super_ralli（持有）与 karisik（A 支 → 出场）之间翻转，直接改变出场行为。
+    # 所以定周期版本不能用，这里的指标全部按整段序列算。
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _ffill(x: np.ndarray) -> np.ndarray:
+        """Pine fixnan：用最近一个非 na 值向前填充（起始段仍为 na）。"""
+        idx = np.where(~np.isnan(x), np.arange(len(x)), 0)
+        np.maximum.accumulate(idx, out=idx)
+        out = x[idx]
+        out[np.isnan(x[0]) & (idx == 0)] = np.nan
         return out
 
-    def _macd_series(self, closes: list[float], fast: int, slow: int, sig: int):
-        e_fast = self._ema(closes, fast)
-        e_slow = self._ema(closes, slow)
-        m = [a - b for a, b in zip(e_fast, e_slow)]
-        s = self._ema(m, sig)
-        h = [x - y for x, y in zip(m, s)]
-        return m, s, h
+    @staticmethod
+    def _rma_np(x: np.ndarray, period: int) -> np.ndarray:
+        """ta.rma：SMA 播种 + Wilder 平滑。自动跳过**前导** na（Pine 同）。"""
+        out = np.full(len(x), np.nan)
+        valid = np.flatnonzero(~np.isnan(x))
+        if len(valid) == 0:
+            return out
+        k = valid[0]
+        y = x[k:]
+        if len(y) < period:
+            return out
+        r = float(y[:period].mean())
+        out[k + period - 1] = r
+        for i in range(period, len(y)):
+            r = (r * (period - 1) + y[i]) / period
+            out[k + i] = r
+        return out
+
+    @staticmethod
+    def _sma_np(x: np.ndarray, period: int) -> np.ndarray:
+        """ta.sma；同样从第一个非 na 起算（否则 cumsum 会把 na 传播到底）。"""
+        out = np.full(len(x), np.nan)
+        valid = np.flatnonzero(~np.isnan(x))
+        if len(valid) == 0:
+            return out
+        k = valid[0]
+        y = x[k:]
+        if len(y) < period:
+            return out
+        cs = np.concatenate(([0.0], np.cumsum(y)))
+        out[k + period - 1:] = (cs[period:] - cs[:-period]) / period
+        return out
+
+    @staticmethod
+    def _ta_ema_np(x: np.ndarray, period: int) -> np.ndarray:
+        """Pine 内建 ta.ema：SMA 播种，前 period-1 根为 na。**只用于 regime**。
+
+        与 MACD 用的 f_ema（首值播种、无预热、时变 alpha）语义不同，不可互换。
+        """
+        out = np.full(len(x), np.nan)
+        if len(x) < period:
+            return out
+        a = 2.0 / (period + 1)
+        e = float(x[:period].mean())
+        out[period - 1] = e
+        for i in range(period, len(x)):
+            e = a * x[i] + (1 - a) * e
+            out[i] = e
+        return out
+
+    @staticmethod
+    def _true_range_np(h, l, c) -> np.ndarray:
+        tr = np.empty(len(h))
+        tr[0] = h[0] - l[0]
+        tr[1:] = np.maximum.reduce([h[1:] - l[1:],
+                                    np.abs(h[1:] - c[:-1]),
+                                    np.abs(l[1:] - c[:-1])])
+        return tr
+
+    @staticmethod
+    def _step(ratio: np.ndarray, cuts: list, vals: list, default: float) -> np.ndarray:
+        """Pine 的 `r > c1 ? v1 : r > c2 ? v2 : ... : default` 链（向量化）。
+
+        na 的所有 `>` 比较在 Pine 里都是 false → 落到 default。numpy 的
+        `nan > x` 同样是 False，语义天然一致，不需要额外处理。
+        """
+        out = np.full(len(ratio), float(default))
+        done = np.zeros(len(ratio), dtype=bool)
+        with np.errstate(invalid='ignore'):
+            for cut, v in zip(cuts, vals):
+                m = (~done) & (ratio > cut)
+                out[m] = v
+                done |= m
+        return out
+
+    def _vol_mult_series(self, h, l, c) -> np.ndarray:
+        """f_get_volatility_multiplier：ATR14 / SMA50(ATR14)"""
+        atr = self._rma_np(self._true_range_np(h, l, c), self.MACD_ATR_LEN)
+        avg = self._sma_np(atr, self.MACD_ATR_SMA_LEN)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            r = np.where(avg == 0, np.nan, atr / avg)
+        base = self._step(r, [1.5, 1.2, 0.8, 0.5], [1.4, 1.2, 1.0, 0.85], 0.7)
+        return 1.0 + (base - 1.0) * self.MACD_VOL_SENS
+
+    def _volume_mult_series(self, v) -> np.ndarray:
+        """f_get_volume_multiplier：volume / SMA20(volume)"""
+        avg = self._sma_np(v, self.MACD_VOLUME_SMA_LEN)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            r = np.where(avg == 0, np.nan, v / avg)
+        base = self._step(r, [2.0, 1.5, 0.7, 0.4], [0.85, 0.92, 1.0, 1.1], 1.2)
+        return 1.0 + (base - 1.0) * self.MACD_VOLUME_SENS
+
+    def _trend_mult_series(self, h, l, c) -> np.ndarray:
+        """f_get_trend_strength_multiplier：ta.dmi(14, 14) 的 ADX"""
+        n = self.MACD_ADX_LEN
+        up = np.zeros(len(h))
+        dn = np.zeros(len(h))
+        u, d = h[1:] - h[:-1], l[:-1] - l[1:]
+        up[1:] = np.where((u > d) & (u > 0), u, 0.0)
+        dn[1:] = np.where((d > u) & (d > 0), d, 0.0)
+        trur = self._rma_np(self._true_range_np(h, l, c), n)
+        rp, rm = self._rma_np(up, n), self._rma_np(dn, n)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            den = np.where(trur == 0, np.nan, trur)
+            plus = self._ffill(100.0 * rp / den)      # Pine 这里套了 fixnan
+            minus = self._ffill(100.0 * rm / den)
+            tot = plus + minus
+            dx = np.abs(plus - minus) / np.where(tot == 0, 1.0, tot)
+        adx = 100.0 * self._rma_np(dx, n)
+        return self._step(adx, [40, 25, 20, 15], [1.3, 1.15, 1.0, 0.9], 0.8)
+
+    def _regime_mult_series(self, c) -> np.ndarray:
+        """f_get_market_regime_multiplier：close / EMA50 / EMA200 三者关系"""
+        e200, e50 = self._ta_ema_np(c, 200), self._ta_ema_np(c, 50)
+        out = np.full(len(c), 1.4)          # na → 两个 if 都 false → else 分支
+        with np.errstate(invalid='ignore'):
+            out[(c > e200) & (e50 > e200)] = 0.85
+            out[(c < e200) & (e50 < e200)] = 1.2
+        return out
+
+    def _adaptive_periods_series(self, o: dict, base: tuple):
+        """逐 bar 的 (fast, slow, signal)。对应 Pine f_calc_macd_mtf 第 542-554 行。
+
+        乘数用**该周期自己**的 OHLCV 算（Pine 里这些函数在
+        request.security(tf, ...) 内部求值）。
+        """
+        bf, bs, bsig = base
+        n = len(o['close'])
+        if not self.MACD_ADAPTIVE:
+            return (np.full(n, bf, int), np.full(n, bs, int), np.full(n, bsig, int))
+        h = np.asarray(o['high'], dtype=float)
+        l = np.asarray(o['low'], dtype=float)
+        c = np.asarray(o['close'], dtype=float)
+        v = np.asarray(o['volume'], dtype=float)
+        mult = (self._vol_mult_series(h, l, c) * self._volume_mult_series(v)
+                * self._trend_mult_series(h, l, c) * self._regime_mult_series(c))
+
+        def _clamp(bp, lo, hi):
+            # math.round 是四舍五入远离零；np.round 是银行家舍入，会在 .5 处差 1
+            return np.clip(np.floor(bp * mult + 0.5), lo, hi).astype(int)
+
+        f = _clamp(bf, self.MACD_MIN_FAST, self.MACD_MAX_FAST)
+        s = _clamp(bs, self.MACD_MIN_SLOW, self.MACD_MAX_SLOW)
+        sg = _clamp(bsig, self.MACD_MIN_SIGNAL, self.MACD_MAX_SIGNAL)
+        s = np.where(s <= f, f + 5, s)
+        sg = np.where(sg > s / 2, (s / 2).astype(int), sg)   # Pine int() 截断
+        return f, s, sg
+
+    @staticmethod
+    def _tv_ema(x: np.ndarray, periods: np.ndarray) -> np.ndarray:
+        """Pine 自定义 f_ema：首值播种、无预热 na，且 alpha **逐 bar 重算**。"""
+        out = np.empty(len(x))
+        e = float(x[0])
+        out[0] = e
+        for i in range(1, len(x)):
+            a = 2.0 / (periods[i] + 1.0)
+            e = a * x[i] + (1.0 - a) * e
+            out[i] = e
+        return out
+
+    def _macd_series(self, closes, pf: np.ndarray, ps: np.ndarray, psig: np.ndarray):
+        c = np.asarray(closes, dtype=float)
+        m = self._tv_ema(c, pf) - self._tv_ema(c, ps)
+        s = self._tv_ema(m, psig)
+        return m, s, m - s
 
     def _power_from_series(self, m: list[float], s: list[float], h: list[float]) -> Optional[int]:
-        """计算 MTF power：用最后两根已收盘值"""
+        """计算 MTF power：用最后一根（形成中）与前一根已收盘 bar。
+
+        与 Pine 对齐：tf2/3/4 > 图表周期时用 barmerge.lookahead_on，
+        实时右沿返回的就是**形成中**的 HTF bar，故 m[-1] 正确；
+        m_up/s_up/h_up 在 HTF 上下文里算，其 [1] 即上一根 HTF bar → m[-2] 正确。
+        """
         if len(m) < 2:
             return None
         m_i, s_i, h_i = m[-1], s[-1], h[-1]
@@ -757,8 +965,13 @@ class AI500V1MacdExitDryRun(IStrategy):
         histZone = 2 if (h_i > 0 and hUp) else 1 if (h_i > 0 and not hUp) else -1 if (h_i < 0 and hUp) else -2
         return macdAbove + macdUp + signalUp + (1 if histZone > 0 else -1 if histZone < 0 else 0)
 
-    def _whisper_for_symbol(self, symbol: str) -> Optional[str]:
-        """对单个币拉 4 周期 K 线算 whisper（None=数据不足/失败）"""
+    def _whisper_for_symbol(self, symbol: str) -> Optional[tuple[str, list[int], dict]]:
+        """对单个币拉 4 周期 K 线算 whisper（None=数据不足/失败）。
+
+        返回 (whisper, powers, periods)：
+          powers  —— 出场判据要拆 karisik 的两支（见 _is_macd_bearish），光有标签不够
+          periods —— 各周期实际用的 (fast, slow, signal)，写进日志用于与 TradingView 对账
+        """
         if not self.binance:
             self._init_binance()
         if not self.binance:
@@ -767,44 +980,102 @@ class AI500V1MacdExitDryRun(IStrategy):
         candidates = [symbol]
         if symbol.endswith('USDT') and not symbol.startswith('1000'):
             candidates.append('1000' + symbol)
-        # 各周期需要足够 bar：EMA26 + EMA9 预热 → 至少 40 根
-        closes_by_tf = {}
+        # 自适应乘数需要 high/low/volume，不只是 close；
+        # 且 regime 用 ta.ema(close,200) → 每周期取 MACD_FETCH_LIMIT 根。
+        # 拿不满 200 根的（新上市币的 1d）不是错误，regime 会按 Pine 语义落到 1.4。
+        ohlcv_by_tf: dict[str, dict] = {}
         for bs in candidates:
             ok = True
-            for tf, (f, sl, sg) in self.MACD_TF_PARAMS.items():
+            for tf in self.MACD_TF_PARAMS:
                 try:
-                    k = self.binance.fetch_ohlcv(f"{bs.split('USDT')[0]}/USDT:USDT", tf, limit=50)
+                    k = self.binance.fetch_ohlcv(f"{bs.split('USDT')[0]}/USDT:USDT",
+                                                 tf, limit=self.MACD_FETCH_LIMIT)
                     if not k or len(k) < 40:
                         ok = False
                         break
-                    closes_by_tf[tf] = [float(x[4]) for x in k]
+                    ohlcv_by_tf[tf] = {
+                        'high': [float(x[2]) for x in k],
+                        'low': [float(x[3]) for x in k],
+                        'close': [float(x[4]) for x in k],
+                        'volume': [float(x[5]) for x in k],
+                    }
                 except Exception as e:
                     logger.debug(f"MACD whisper fetch {bs} {tf} failed: {e}")
                     ok = False
                     break
             if ok:
                 break
-        if len(closes_by_tf) < 4:
+        if len(ohlcv_by_tf) < 4:
             return None
-        powers = []
+        powers, periods = [], {}
         for tf in ['15m', '1h', '4h', '1d']:
-            if tf not in closes_by_tf:
+            if tf not in ohlcv_by_tf:
                 return None
-            f, sl, sg = self.MACD_TF_PARAMS[tf]
-            m, s, h = self._macd_series(closes_by_tf[tf], f, sl, sg)
+            o = ohlcv_by_tf[tf]
+            f, sl, sg = self._adaptive_periods_series(o, self.MACD_TF_PARAMS[tf])
+            # 记录最后一根的周期（就是决定当前 bar 那一步 alpha 的值），
+            # 供与 TradingView 面板逐周期核对
+            periods[tf] = (int(f[-1]), int(sl[-1]), int(sg[-1]))
+            m, s, h = self._macd_series(o['close'], f, sl, sg)
             p = self._power_from_series(m, s, h)
             if p is None:
                 return None
             powers.append(p)
+        return self._classify(powers), powers, periods
+
+    @staticmethod
+    def _append_macd_log(row: dict) -> None:
+        write_header = not os.path.exists(MACD_LOG_PATH)
+        try:
+            with open(MACD_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=MACD_LOG_FIELDS)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(row)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _classify(powers: list[int]) -> str:
+        """Pine fisilti 分类，原样保留（含死分支，便于与图表逐条对照）。
+
+        注：`tepki` 在 power 值域 [-2,4]^4 的 2401 种组合里**一个都进不去**——
+        它要求 p4<=-2 且 p1>=2，而 karisik 第一个分支 (p1>=2 且 p4<=-1) 完全覆盖
+        这个条件且排在前面。保留是为了与 Pine 源码行号对齐，不要以为它会触发。
+        """
         p1, p2, p3, p4 = powers
         if p1 >= 2 and p2 >= 2 and p3 >= 2 and p4 >= 2: return 'super_ralli'
         if p3 >= 2 and p4 >= 2 and (p1 >= 1 or p2 >= 1): return 'ralli'
         if p3 >= 2 and p4 >= 2 and p1 <= -1: return 'altin_vurus'
         if p4 >= 3 and p1 <= -2: return 'duzeltme'
         if (p1 >= 2 and p4 <= -1) or (p4 >= 2 and p1 <= -1): return 'karisik'
-        if p4 <= -2 and p1 >= 2: return 'tepki'
+        if p4 <= -2 and p1 >= 2: return 'tepki'          # 不可达，见 docstring
         if p1 <= -2 and p2 <= -2 and p3 <= -2 and p4 <= -2: return 'bicak'
         return 'kararsiz'
+
+    def _is_macd_bearish(self, w: str, powers: list[int]) -> bool:
+        """出场判据：MACD 是否「转空」。（用户决策 2026-09-04）
+
+        修复的 bug：原实现 MACD_SELL_SET = {'karisik', 'bicak'}，
+        而 `karisik` 在 Pine 原文里的提示是「⚠️ 混合信号: 谨慎买入」，
+        作者自己的卖出配方（scr_bicak）根本不含它。实测 karisik 占 8.3~28.6%、
+        bicak 只占 0.0~4.5% —— 出场几乎完全由一个**买入**信号驱动。
+
+        根因不是「karisik 是买入信号」这么简单，而是 **karisik 把两个方向相反的
+        情形合并成了一个标签**（2401 组合里 A 支 294 个、B 支 112 个，零重叠）：
+          A: p1>=2 且 p4<=-1  日线看空 + 15m 反弹 → 下跌中的反抽，**该走**
+          B: p4>=2 且 p1<=-1  日线看多 + 15m 回调 → 上涨中的洗盘，**不该走**
+        所以正确做法不是整体收/整体放，而是按 power 拆开只取 A 支。
+
+        `bicak`（四周期同时 <=-2）无歧义看空，但值域上只对应 1/2401 种组合，
+        单靠它出场几乎不触发 → 持仓被拖进「超额已归零」的 8h+ 区间。
+        """
+        if w in self.MACD_SELL_SET:
+            return True
+        if self.MACD_SELL_BEARISH_KARISIK and w == 'karisik':
+            p1, _, _, p4 = powers
+            return p1 >= 2 and p4 <= -1          # 只取 A 支，排除 B 支
+        return False
 
     def custom_exit(self, pair: str, trade: Trade, current_time: datetime,
                     current_rate: float, current_profit: float, **kwargs) -> Optional[str]:
@@ -815,19 +1086,39 @@ class AI500V1MacdExitDryRun(IStrategy):
         失败（None/数据不足）→ 保守不卖（趋势中宁可拿着，ATR 地板兜底）。
         """
         sym = self._pair_to_symbol(pair)
-        w = self._whisper_for_symbol(sym)
-        if w is None:
-            return None
         # 连续计数：同一 30m bar 内多次调用只算一次（用 current_time 对齐 bar）
         bar_key = int(current_time.timestamp() // 1800)
         state = self._macd_exit_state.setdefault(sym, {'bar': None, 'count': 0})
-        if state['bar'] != bar_key:
-            state['bar'] = bar_key
-            if w in self.MACD_SELL_SET:
-                state['count'] += 1
-            else:
-                state['count'] = 0
-        if state['count'] >= self.MACD_CONFIRM_BARS:
+
+        if state['bar'] == bar_key:
+            # 本 bar 已判过。whisper 每周期要拉 MACD_FETCH_LIMIT 根 K 线 ×4，
+            # freqtrade 每个 loop 都会调 custom_exit，不缓存就是每几秒重拉一次。
+            return (f"macd_whisper_exit({state.get('w')})"
+                    if state['count'] >= self.MACD_CONFIRM_BARS else None)
+
+        res = self._whisper_for_symbol(sym)
+        if res is None:
+            return None          # 拉数失败：不推进计数，下个 loop 重试本 bar
+        w, powers, periods = res
+        state['bar'] = bar_key
+        state['w'] = w
+        bearish = self._is_macd_bearish(w, powers)
+        if bearish:
+            state['count'] += 1
+        else:
+            state['count'] = 0
+        exited = state['count'] >= self.MACD_CONFIRM_BARS
+        self._append_macd_log({
+            'ts_utc': current_time.astimezone(timezone.utc).isoformat(),
+            'symbol': sym, 'bar_key': bar_key, 'whisper': w,
+            'p1_15m': powers[0], 'p2_1h': powers[1],
+            'p3_4h': powers[2], 'p4_1d': powers[3],
+            'fast_slow_sig_by_tf': ';'.join(
+                f"{tf}:{'/'.join(map(str, periods[tf]))}" for tf in ('15m', '1h', '4h', '1d')),
+            'bearish': int(bearish), 'confirm_count': state['count'],
+            'exited': int(exited), 'current_profit': round(current_profit, 6),
+        })
+        if exited:
             return f'macd_whisper_exit({w})'
         return None
 
