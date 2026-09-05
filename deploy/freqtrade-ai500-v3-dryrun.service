@@ -1,0 +1,20 @@
+[Unit]
+Description=Freqtrade AI500 V3 ScoreHold dry-run (score top3 + 4h bearish-candle exit)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/gyan/freqtrade
+# AI500_PROXY：容器内 127.0.0.1 指向容器自身，docker 部署需覆盖为宿主机代理
+# （http://host.docker.internal:7890）。venv 直跑且本机代理在 127.0.0.1:7890 时可不设。
+Environment=AI500_PROXY=http://127.0.0.1:7890
+ExecStart=/home/gyan/freqtrade/.venv/bin/freqtrade trade \
+  --logfile /home/gyan/freqtrade/user_data/logs/freqtrade_ai500_v3.log \
+  --db-url sqlite:////home/gyan/freqtrade/user_data/tradesv3.ai500_v3_dryrun.sqlite \
+  --config /home/gyan/freqtrade/user_data/config_ai500_v3_dryrun.json \
+  --strategy AI500V3ScoreHold
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
