@@ -94,6 +94,8 @@ user_data/ai500_*.csv
 user_data/ai500_local/
 # OI 归档器产物（bot 机器本地，按天累积，只在机器上存）
 user_data/ai500_oi_hist/
+# V2 dry-run 采集产物（netflow/OI/score 历史 + 轮转 .bak，17MB 起、持续增长）
+user_data/ai500_smoke/
 
 # 根目录临时查询/调试脚本
 /get_cols.py
