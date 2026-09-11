@@ -164,3 +164,8 @@ user_data/ai500_netflow_hist_compact.csv.gz
 # 采集汇聚目录：只保留 README，symlink 与数据不入库
 user_data/collect/*
 !user_data/collect/README.md
+
+# 含 telegram token 的 dryrun config：移出跟踪（2026-09-11）
+# 注意：必须在 !user_data/config*.json 白名单之后才能生效
+user_data/config_ai500_v3_dryrun.json
+user_data/config_bstocks_dryrun.json
