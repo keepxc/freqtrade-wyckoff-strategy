@@ -110,13 +110,15 @@ ZOMBIE_PATH = os.path.join(_AI500_UD, "ai500_zombie_check.csv")
 ZOMBIE_FIELDS = [
     "fetched_at_utc", "symbol", "pair", "score", "rank",
     "interface_price", "interface_change_pct", "start_time",
-    "binance_price", "start_open", "recomputed_pct", "diff_pp",
+    "binance_price", "interface_start_price", "ref_1m", "ref_diff_pp",
+    "start_open", "recomputed_pct", "diff_pp",
     "prefilter_hit", "is_zombie", "tradable", "reason",
 ]
 
-# 僵尸行过滤阈值（2026-09-05 用户拍板）
-ZOMBIE_PREFILTER_PP = 1.0    # 预筛：币安最新价 vs 接口 price 差 >1pp 直接判僵尸
-ZOMBIE_DIFF_PP = 3.0         # 主判据：复算涨幅 vs change_pct_value 差 >3pp 判僵尸
+# 僵尸行过滤阈值
+ZOMBIE_PREFILTER_PP = 1.0    # 预筛：币安最新价 vs 接口 price 差 >1pp 直接判僵尸（2026-09-05 用户拍板）
+ZOMBIE_REF_PP = 3.0          # 主判据：接口 start_price vs start_time 那根 1m K 开盘 差 >3% 判僵尸
+ZOMBIE_DIFF_PP = 3.0         # 【已降级为纯观测，不再参与判定】旧主判据的门槛，保留只为审计对比
 
 
 class AI500V3ScoreHold(IStrategy):
@@ -326,11 +328,36 @@ class AI500V3ScoreHold(IStrategy):
                 return float(c[1])
         return None
 
+    def _start_price_1m(self, pair: str, start_time: int) -> float | None:
+        """找「覆盖 start_time（秒级 epoch）那根 1m K」的 open —— 信号起点的真实市价。
+
+        为什么必须用 1m 而不是 1h（2026-09-11 实测，见下）：
+        接口的 startPrice 记的是信号触发**那一刻**的价，1h 开盘价则最多早 59 分钟。
+        能上 score 榜的标的按构造就是在快速拉升的，这段时间差被直接读成「对不上」。
+        16 个 episode 的实测偏差中位：用 1h 开盘 1.03pp / p90 10.45pp，
+        改用 1m 开盘后降到 0.64pp / p90 1.94pp；ARB 3.81→0.09、BULLA 19.38→0.58、
+        FF 10.28→2.30、SOPH 10.62→1.14 —— 四个都是被口径差误杀的。
+        """
+        since_ms = (start_time - 60) * 1000
+        candles = self.binance.fetch_ohlcv(pair, "1m", since=since_ms, limit=3)
+        target_ms = start_time * 1000
+        for c in candles:
+            open_ts = int(c[0])
+            if open_ts <= target_ms < open_ts + 60_000:
+                return float(c[1])
+        return None
+
     def _check_tradable(self, sym: str, row: dict) -> dict:
         """对 score 榜单行做「币安合约存在性 + 僵尸行」过滤，返回入场决策状态。
 
-        顺序：fetch_ticker（顺带拿币安最新价）→ 预筛 1pp → 主判据 3pp。
+        顺序：fetch_ticker（顺带拿币安最新价）→ 预筛 1pp → 主判据 3%（参考价直比）。
         任何一步失败都**不判可交易**（宁可错过，不误入僵尸行）。
+
+        两级各管一件事：
+          ① 预筛  —— 接口报的**当前价**是不是还活着（脱节 = 整行数据死了）
+          ② 主判据 —— 接口报的**起点价**是不是还活着（卡死 = HOT/ONT 那类僵尸行）
+        2026-09-11 改版：② 从「比涨幅百分点」改为「比参考价本身」，理由见 _start_price_1m
+        与下方注释。旧口径把 83.4% 的活信号误杀。
         """
         pair = f"{sym}/USDT:USDT"
         st = {
@@ -338,8 +365,9 @@ class AI500V3ScoreHold(IStrategy):
             "interface_price": row.get("price"),
             "interface_change_pct": row.get("change_pct_value"),
             "start_time": row.get("start_time"),
-            "binance_price": None, "start_open": None,
-            "recomputed_pct": None, "diff_pp": None,
+            "binance_price": None,
+            "interface_start_price": None, "ref_1m": None, "ref_diff_pp": None,
+            "start_open": None, "recomputed_pct": None, "diff_pp": None,
             "prefilter_hit": 0, "is_zombie": 0, "tradable": 0, "reason": "",
         }
         if not self._ensure_binance():
@@ -372,28 +400,55 @@ class AI500V3ScoreHold(IStrategy):
                 st["is_zombie"] = 1
                 st["reason"] = "prefilter_price_mismatch"
                 return st
-        # 3) 主判据：1h K 复算累计涨幅 vs change_pct_value 差 >3pp 判僵尸。
+        # 3) 主判据：接口 startPrice vs「start_time 那根 1m K 的开盘」直接比价。
+        #
+        # 为什么比「价」而不是比「涨幅」（2026-09-11 改版，旧版机制性误杀）：
+        # 旧版比的是 recomputed_pct 与 change_pct_value 的**百分点**差，而这个差
+        # ≈ 参考价相对误差 ×（1 + 累计涨幅）—— 标的涨得越多，同样的参考价误差被放得越大。
+        # 实测后果：5095 次评估里 83.4% 被判僵尸，其中 recompute_mismatch 占 82.9%，
+        # 而这批里「币安最新价 vs 接口价脱节 >1pp」的占比是 **0.0%**（中位脱节 0.043pp）——
+        # 数据完全是活的。corr(diff_pp, 参考价口径差) = 0.955，拒绝几乎全由口径差解释。
+        # 直接比参考价消除了放大效应，且更贴近真正要抓的失效模式（参考价卡死）。
         st_time = st["start_time"]
         chg = st["interface_change_pct"]
-        if st_time is None or chg is None:
-            st["reason"] = "no_start_time_or_change"
+        if st_time is None:
+            st["reason"] = "no_start_time"
             return st
+        # 接口 startPrice 优先；缺失时用 price / (1 + change_pct) 反推。
+        iface_start = row.get("start_price")
+        if not iface_start or iface_start <= 0:
+            if iface_price and chg is not None and (1.0 + float(chg) / 100.0) > 0:
+                iface_start = float(iface_price) / (1.0 + float(chg) / 100.0)
+            else:
+                st["reason"] = "no_start_price"
+                return st
+        st["interface_start_price"] = iface_start
         try:
-            start_open = self._start_open_1h(pair, int(st_time))
+            ref = self._start_price_1m(pair, int(st_time))
         except Exception as e:
             st["reason"] = f"ohlcv_error:{type(e).__name__}"
             return st
-        if start_open is None or start_open <= 0:
-            st["reason"] = "start_open_unavailable"
+        if ref is None or ref <= 0:
+            st["reason"] = "ref_1m_unavailable"
             return st
-        st["start_open"] = start_open
-        recomputed = (last - start_open) / start_open * 100.0
-        st["recomputed_pct"] = recomputed
-        diff = abs(recomputed - float(chg))
-        st["diff_pp"] = diff
-        if diff > ZOMBIE_DIFF_PP:
+        st["ref_1m"] = ref
+        ref_diff = abs(float(iface_start) / ref - 1.0) * 100.0
+        st["ref_diff_pp"] = ref_diff
+
+        # 旧判据继续算、继续落盘，但**不再参与判定**——留作 A/B 审计。
+        try:
+            start_open = self._start_open_1h(pair, int(st_time))
+            if start_open and start_open > 0:
+                st["start_open"] = start_open
+                st["recomputed_pct"] = (last - start_open) / start_open * 100.0
+                if chg is not None:
+                    st["diff_pp"] = abs(st["recomputed_pct"] - float(chg))
+        except Exception:
+            pass
+
+        if ref_diff > ZOMBIE_REF_PP:
             st["is_zombie"] = 1
-            st["reason"] = "recompute_mismatch"
+            st["reason"] = "ref_price_mismatch"
             return st
         st["tradable"] = 1
         st["reason"] = "ok"
@@ -417,7 +472,10 @@ class AI500V3ScoreHold(IStrategy):
                 "interface_price": st["interface_price"],
                 "interface_change_pct": st["interface_change_pct"],
                 "start_time": st["start_time"],
-                "binance_price": st["binance_price"], "start_open": st["start_open"],
+                "binance_price": st["binance_price"],
+                "interface_start_price": st["interface_start_price"],
+                "ref_1m": st["ref_1m"], "ref_diff_pp": st["ref_diff_pp"],
+                "start_open": st["start_open"],
                 "recomputed_pct": st["recomputed_pct"], "diff_pp": st["diff_pp"],
                 "prefilter_hit": st["prefilter_hit"], "is_zombie": st["is_zombie"],
                 "tradable": st["tradable"], "reason": st["reason"],
