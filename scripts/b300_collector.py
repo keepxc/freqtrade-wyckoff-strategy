@@ -9,6 +9,7 @@ B3.0 主流币结构策略 —— 快照采集 + 信号检测
 输出（脚本同目录）:
     b300_snapshots.jsonl  每 4h 一行全量快照（回测/时延验证用）
     b300_signals.jsonl    触发 B3.0 入场门槛的事件
+    b300_breakout.jsonl   爆发观察线：币安涨幅榜 ∩ VergeX 有合约 的结构分类结果
 
 接口（公开、无需登录）:
     GET https://vergex.trade/api/v1/direction-change/leaderboard
@@ -16,6 +17,7 @@ B3.0 主流币结构策略 —— 快照采集 + 信号检测
 """
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -152,13 +154,143 @@ def scan_once():
     print(f"[done] {ts} leaderboard={len(lb)} scanned={len(snapshot['signals'])} signals={len(signals)}")
 
 
+# ==================== 爆发观察线 ====================
+
+BREAKOUT_FILE = HERE / "b300_breakout.jsonl"
+STABLES = {"USDC", "FDUSD", "TUSD", "BUSD", "DAI", "EUR", "USDP", "AEUR"}
+# 币安 API 需走本地代理（系统默认代理对 binance 隧道 502）
+BINANCE_PROXY = os.environ.get("B300_PROXY", "http://127.0.0.1:10809")
+
+
+def _proxied_get_json(url: str, retries: int = 3):
+    last_err = None
+    for i in range(retries):
+        try:
+            op = urllib.request.build_opener(urllib.request.ProxyHandler(
+                {"http": BINANCE_PROXY, "https": BINANCE_PROXY}))
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+            with op.open(req, timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            last_err = e
+            time.sleep(2 * (i + 1))
+    raise RuntimeError(f"GET(proxied) failed after {retries} retries: {url} ({last_err})")
+
+
+def fetch_binance_gainers(top_n=20):
+    """币安 24h 涨幅榜 top N（USDT 现货对，剔除杠杆代币和稳定币）。"""
+    items = _proxied_get_json("https://api.binance.com/api/v3/ticker/24hr")
+    rows = []
+    for it in items:
+        sym = it.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        base = sym[:-4]
+        if base.endswith(("UP", "DOWN", "BULL", "BEAR")) or base in STABLES:
+            continue
+        pct = float(it.get("priceChangePercent") or 0)
+        qv = float(it.get("quoteVolume") or 0)
+        if qv < 5_000_000:      # 流动性门槛：24h 成交额 ≥ 500 万 USDT
+            continue
+        rows.append({"symbol": base, "pct": pct, "quoteVolume": qv,
+                     "lastPrice": float(it.get("lastPrice") or 0)})
+    rows.sort(key=lambda r: r["pct"], reverse=True)
+    return rows[:top_n]
+
+
+CORE_DIMS = ("cgo", "wp", "vap", "lfa")   # 主要投票维度（skw 不投票，convexity/cascade 多为中性）
+
+
+def classify_breakout(sig: dict) -> dict:
+    """爆发线结构分类（四级）。
+
+    - no_market       : 503/无数据 → VergeX 无此合约，放弃
+    - candidate       : state=ok + bias=bullish + gShort>gLong（完整数据，正常仓）
+    - candidate_minor : state=degraded 但 Z 可算 + CORE_DIMS ≥3 个有 percentile
+                        + bias=bullish + gShort>gLong（ZEC 类：次要维度 skw/convexity/
+                        cascade 缺失连累 state，核心结构完好）→ 记录为准候选，
+                        观察期内不交易，两周后用数据裁决是否放宽
+    - watch           : ARB 类，Z=0/核心 percentile 缺失，真·数据未积累
+    - reject          : bias 非 bullish 或多头套牢占优
+    """
+    metrics = sig.get("metrics") or {}
+    state = metrics.get("state")
+    g_long = metrics.get("gLong") or 0
+    g_short = abs(metrics.get("gShort") or 0)
+    pctl = {d.get("key"): d.get("percentile") for d in sig.get("dimensions", [])}
+    core_ok = sum(1 for k in CORE_DIMS if pctl.get(k) is not None)
+    z = sig.get("compositeZ")
+    bias = sig.get("bias")
+
+    structure_bull = bias == "bullish" and g_short > g_long
+    if structure_bull and state == "ok":
+        return {"tier": "candidate", "reason": f"state=ok gShort={g_short:.2f}>gLong={g_long:.2f} Z={z}",
+                "z": z, "bias": bias, "gLong": round(g_long, 3), "gShort": round(g_short, 3),
+                "core_ok": core_ok, "size_hint": "normal" if (z or 0) >= MIN_COMPOSITE_Z else "half"}
+    if structure_bull and core_ok >= 3 and z is not None and (z or 0) >= MIN_COMPOSITE_Z:
+        return {"tier": "candidate_minor",
+                "reason": f"state={state} 但核心维度{core_ok}/4 有值 Z={z} 结构完好（准候选，观察期不交易）",
+                "z": z, "bias": bias, "gLong": round(g_long, 3), "gShort": round(g_short, 3),
+                "core_ok": core_ok, "size_hint": "half(待政策)"}
+    if core_ok >= 1 or z is not None:
+        return {"tier": "watch", "reason": f"state={state} Z={z} 核心维度{core_ok}/4 数据不全",
+                "z": z, "bias": bias, "gLong": round(g_long, 3), "gShort": round(g_short, 3),
+                "core_ok": core_ok}
+    return {"tier": "watch", "reason": f"state={state} Z=0 无 percentile，数据未积累",
+            "z": z, "bias": bias, "gLong": round(g_long, 3), "gShort": round(g_short, 3),
+            "core_ok": core_ok}
+
+
+def breakout_scan(top_n=20):
+    now = datetime.now(timezone(timedelta(hours=8)))
+    ts = now.isoformat(timespec="seconds")
+    gainers = fetch_binance_gainers(top_n)
+    print(f"[breakout] 币安 24h 涨幅榜 top{len(gainers)}: "
+          + ", ".join(f"{r['symbol']}+{r['pct']:.1f}%" for r in gainers[:8]) + " ...")
+
+    results = []
+    for g in gainers:
+        sym = g["symbol"]
+        time.sleep(REQUEST_GAP)
+        try:
+            sig = fetch_signals(sym)
+        except RuntimeError as e:
+            results.append({**g, "ts": ts, "tier": "no_market", "reason": str(e)[:80]})
+            print(f"  {sym:<10} +{g['pct']:.1f}%  no_market（VergeX 无合约）")
+            continue
+        v = classify_breakout(sig)
+        lv = sig.get("levels") or {}
+        results.append({**g, "ts": ts, **v,
+                        "bias": sig.get("bias"),
+                        "markPrice": lv.get("markPrice"),
+                        "magnet": lv.get("magnet"),
+                        "support": lv.get("support")})
+        print(f"  {sym:<10} +{g['pct']:.1f}%  {v['tier']:<9} {v['reason']}")
+
+    with open(BREAKOUT_FILE, "a", encoding="utf-8") as f:
+        for r in results:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    cands = [r for r in results if r["tier"] == "candidate"]
+    minors = [r for r in results if r["tier"] == "candidate_minor"]
+    print(f"[done] {ts} 共{len(results)} | candidate={len(cands)} "
+          f"candidate_minor={len(minors)} watch={sum(1 for r in results if r['tier']=='watch')} "
+          f"no_market={sum(1 for r in results if r['tier']=='no_market')}")
+    for m in cands + minors:
+        print(f"  [准候选] {m['symbol']} +{m['pct']:.1f}% Z={m.get('z')} core={m.get('core_ok')}/4 -> {m.get('size_hint')}")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--once", action="store_true", help="执行一次后退出")
-    ap.add_argument("--loop", action="store_true", help="每 4h 循环执行")
+    ap.add_argument("--once", action="store_true", help="执行一次 B3.0 快照后退出")
+    ap.add_argument("--loop", action="store_true", help="每 4h 循环执行 B3.0 快照")
+    ap.add_argument("--breakout", action="store_true",
+                    help="爆发观察线：币安 24h 涨幅榜 ∩ VergeX 有合约，结构分类落盘")
+    ap.add_argument("--top", type=int, default=20, help="爆发线取币安涨幅榜前 N（默认 20）")
     args = ap.parse_args()
 
-    if args.loop:
+    if args.breakout:
+        breakout_scan(args.top)
+    elif args.loop:
         while True:
             try:
                 scan_once()

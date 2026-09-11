@@ -148,3 +148,19 @@ user_data/agg_trades/
 # AI500 kline 缓存 / 备份（二进制+历史快照，不进 repo）
 user_data/*.pkl
 user_data/ai500_btc_mtf_history.csv.bak*
+
+# ── 采集数据产物（2026-09-11 加：数据 jsonl/csv 不入库，只提交采集脚本）──
+scripts/*.jsonl
+scripts/b300_snapshots.jsonl
+scripts/b300_signals.jsonl
+scripts/b300_breakout.jsonl
+scripts/macd_m8.jsonl
+trades.csv
+trades.csv.gz
+ai500_live_trades.csv
+ai500_live_trades.csv.gz
+user_data/ai500_netflow_hist_compact.csv.gz
+
+# 采集汇聚目录：只保留 README，symlink 与数据不入库
+user_data/collect/*
+!user_data/collect/README.md

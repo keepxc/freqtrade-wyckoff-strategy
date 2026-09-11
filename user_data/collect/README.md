@@ -1,0 +1,40 @@
+# 数据采集产物索引（汇聚目录）
+
+> 本目录 symlink 指向各采集器真实产物（物理文件不动，避免破坏运行中策略/脚本路径）。
+> 排查数据先看这里。时间口径：jsonl 均带 +08:00（北京时间）；日志类注明 UTC 的需 -8h。
+
+## 采集任务全景（2026-09-09 确认）
+
+### 系统 crontab（crontab -l）
+| 任务 | 调度(CST) | 产物 | 状态 |
+|------|----------|------|------|
+| b300_collector --once | 5 0,4,8,12,16,20 | `b300_snapshots.jsonl` + `b300_signals.jsonl` | ✅ |
+| b300_collector --breakout | 5 0（每日） | `b300_breakout.jsonl` | ✅ |
+| macd_m8 --once | 5 0,4,8,12,16,20 | `macd_m8.jsonl` | ✅（16:05 曾瞬时批量失败，已自愈） |
+| ai500_oi_archiver | 0 */6 | `oi_hist/oi_YYYYMMDD.csv.gz`（UTC 日切） | ✅ |
+| oi_data_trigger | 30 8（每日） | `oi_feather/` + market_data.db | ✅（9/9 修代理静默失败） |
+| fake_breakdown | 0 */6 | 日志（market.db 检测） | ✅（9/7 修权限） |
+| download_recent_data | 2 *（每小时） | freqtrade data 目录 | ✅ |
+| P5 ingest | 0 23 | market.db | ✅ |
+
+### Bot 内置（V3 策略 30s 循环写，路径写死在策略代码——勿动）
+| 产物 | 内容 |
+|------|------|
+| `ai500_score_history_v3.csv` | V3 score 榜历史 |
+| `ai500_zombie_check.csv` | V3 僵尸过滤检查 |
+| `ai500_netflow_multiwin.csv` | V3 netflow 五档（vergex 源，间歇失败属正常抖动） |
+
+### Hermes cron（cronjob list）
+| 任务 | 调度 | 备注 |
+|------|------|------|
+| 十老板数据监控 trader_daily_scraper | 0 9 | X/Twitter 交易者抓取 |
+| AI500 大单周回测 | 0 21 周日 | 周回测非采集 |
+| telegram-proxy-guard | 5m | 代理守护非采集 |
+
+### 已停（产物保留不删）
+yss-signal（8/24 停）、aggTrades（9/6 停）、V1/V2 采集三件套、AI500 live
+
+## 排查速查
+- 看数据是否新鲜：`ls -lt user_data/collect/`（symlink 显示真实 mtime）
+- 看日志尾部：`tail -5 logs/{b300_collector,macd_m8}.log` 等
+- 时区坑：`download_recent_data.log`/`fake_breakdown_detector.log` 打 UTC（-8h）；`oi_hist/` 文件名 UTC 日切；jsonl 全部 +08:00
