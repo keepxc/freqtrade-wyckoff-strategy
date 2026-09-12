@@ -153,12 +153,22 @@ def classify(p1, p2, p3, p4):
 
 # ---------------- 数据获取 ----------------
 
-def fetch_klines(symbol: str, interval: str, source: str = None):
-    """返回已收盘 K 线的 close 列表（剔除最后一根未收盘 K，防重绘）。"""
+def fetch_klines(symbol: str, interval: str, source: str = None, now_ms: int = None):
+    """返回已收盘 K 线的 close 列表（剔除最后一根未收盘 K，防重绘）。
+
+    now_ms：帧锚（epoch ms）。scan() 每帧锚定一次、逐周期复用同一个锚，
+            并作为 endTime 随请求下发 —— 使 ts 与数据窗口同源自洽。
+            不传时退回 `time.time()`（保持既有调用方行为，如 --selfcheck）。
+    为什么需要：旧实现每次 fetch 各取一次本地时钟，脚本逐币逐周期耗时若跨过
+            K 线边界，同帧内窗口不一致、且 ts 与实际数据窗口错位
+            （2026-09-06 18:29:45 首帧实证：XRP/LINK 的 15m power 差 1）。
+    """
     url = (f"{KLINE_BASE[source or KLINE_SOURCE]}"
            f"?symbol={symbol}&interval={interval}&limit={KLINE_LIMIT}")
+    if now_ms:
+        url += f"&endTime={int(now_ms)}"
     rows = proxied_get_json(url)
-    now_ms = time.time() * 1000
+    now_ms = now_ms or int(time.time() * 1000)
     closes = [float(r[4]) for r in rows if r[6] < now_ms]   # r[6]=closeTime
     if len(closes) < 120:
         raise RuntimeError(f"{symbol} {interval} 收盘K不足: {len(closes)}")
@@ -178,6 +188,7 @@ def fetch_ai500_top(n=3):
 def scan(symbols):
     now = datetime.now(timezone(timedelta(hours=8)))
     ts = now.isoformat(timespec="seconds")
+    anchor_ms = int(now.timestamp() * 1000)   # 帧锚：ts 与数据窗口同源，逐周期复用
     records = []
     print(f"[macd_m8] {ts} 监控池 {len(symbols)} 币: {', '.join(symbols)}")
 
@@ -189,7 +200,7 @@ def scan(symbols):
         ok = True
         for tf, (f, s, g) in TF_PARAMS.items():
             try:
-                closes = fetch_klines(pair, TF_INTERVAL[tf])
+                closes = fetch_klines(pair, TF_INTERVAL[tf], now_ms=anchor_ms)
             except Exception as e:
                 rec["error"] = str(e)[:90]
                 ok = False

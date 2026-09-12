@@ -14,6 +14,8 @@
 | 3 | `oi_data_trigger.sh` 修权限后**仍静默失败** | download_oi.py 用 requests 直连 fapi，**cron 环境无代理 env** → 超时被容错成"无新数据"→ exit 0 不告警 | sh 内显式注入 `HTTPS_PROXY/http_proxy` 四件套 |
 | 4 | `bstock-whitelist-sync` cron error | Hermes no_agent 的 script 字段塞了整条 `cd && python` 命令（被当路径查找失败） | 建 wrapper `~/.hermes/scripts/bstock_whitelist_sync.sh` |
 | 5 | `macd_m8 collector`（Hermes 侧）持续失败 | 同 #4 script 字段问题 + LLM 超时；真正执行者是**系统 crontab** | 删除 Hermes 僵尸 job（d75f15b36b26），保留系统 crontab |
+| 6 | `b300_collector --breakout` 连续两天无产物（9/11、9/12） | **00:05 三任务撞车**（b300 --once + b300 --breakout + macd_m8 同时挤 7890 代理）→ breakout 拉币安 24hr 全市场大响应被挤掉（SSL handshake timeout） | 调度错峰：breakout `5 0` → **`20 0`**（只改 crontab，脚本未动）。验证点：9/13 00:20 首跑 |
+| 7 | M8 采集器**时钟/窗口错位**（首帧实证）：ts 写 18:29:45，但 15m 数据窗口已是 18:30 后 | `fetch_klines` 每次调用各取 `time.time()`，脚本逐币逐周期耗时跨过 K 线边界 → ts 与实际数据窗口差 1 根（EMA seeding 起点不同 → 15m power ±1；XRP 4→3、LINK 3→4） | ① **硬化**（3 处）：`scan()` 每帧锚定 `anchor_ms` 并作为 `endTime` 下发、逐周期复用同一锚 → ts 与窗口同源自洽（调用方不传锚时行为不变）；② **停采**（9/11 起，crontab 注释可逆；转离线重建，见 §八-5） |
 
 **教训**：cron 健康不能只看 last_status/exit 0——必须核对产物时间戳与内容增长（#3 就是典型静默失败）。
 
@@ -62,7 +64,7 @@
 
 | 类型 | 数量 | 清单 |
 |------|:---:|------|
-| 系统 crontab | 7 | b300 signals / b300 breakout / ~~macd_m8~~（9/11 起停采，见 §八-5） / OI 归档(6h) / oi_data_trigger(08:30) / fake_breakdown(6h) / download_recent_data(每小时) |
+| 系统 crontab | 7 | b300 signals(`5 0,4,8,12,16,20`) / b300 breakout(**`20 0`**，9/12 由 00:05 错峰) / ~~macd_m8~~（9/11 起停采，见 §八-5） / OI 归档(6h) / oi_data_trigger(08:30) / fake_breakdown(6h) / download_recent_data(每小时) |
 | Bot 内置 | 3 | V3: score_history_v3 / zombie_check / netflow_multiwin（30s 写） |
 | Hermes cron | 1 | 十老板交易者监控(09:00) |
 | 已停（产物保留） | 4 | yss-signal / aggTrades / V1-V2 三件套 / AI500 live |

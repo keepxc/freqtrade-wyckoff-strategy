@@ -9,8 +9,8 @@
 | 任务 | 调度(CST) | 产物 | 状态 |
 |------|----------|------|------|
 | b300_collector --once | 5 0,4,8,12,16,20 | `b300_snapshots.jsonl` + `b300_signals.jsonl` | ✅ |
-| b300_collector --breakout | 5 0（每日） | `b300_breakout.jsonl` | ✅ |
-| macd_m8 --once | 5 0,4,8,12,16,20 | `macd_m8.jsonl` | ✅（16:05 曾瞬时批量失败，已自愈） |
+| b300_collector --breakout | 20 0（每日；9/12 由 00:05 错峰，避与 --once/macd_m8 撞车） | `b300_breakout.jsonl` | ✅ |
+| ~~macd_m8 --once~~ | ~~5 0,4,8,12,16,20~~ | `macd_m8.jsonl` | 🛑 **已停采**（标记 9/11、9/12 落地；crontab 注释可逆）——转离线重建；jsonl 保留为**重建器历史对照物**，不删。采集器已硬化（帧锚 endTime），将来手动 `--once` 不会再错位 |
 | ai500_oi_archiver | 0 */6 | `oi_hist/oi_YYYYMMDD.csv.gz`（UTC 日切） | ✅ |
 | oi_data_trigger | 30 8（每日） | `oi_feather/` + market_data.db | ✅（9/9 修代理静默失败） |
 | fake_breakdown | 0 */6 | 日志（market.db 检测） | ✅（9/7 修权限） |

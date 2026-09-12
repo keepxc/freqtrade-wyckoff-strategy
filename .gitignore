@@ -169,3 +169,6 @@ user_data/collect/*
 # 注意：必须在 !user_data/config*.json 白名单之后才能生效
 user_data/config_ai500_v3_dryrun.json
 user_data/config_bstocks_dryrun.json
+
+# 重建底表（数据产物，脚本入库、数据不入库）
+user_data/macd_m8_rebuilt.jsonl
