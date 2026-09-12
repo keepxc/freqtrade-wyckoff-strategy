@@ -26,8 +26,16 @@
   **这也正是 score 榜采集绝不能停的原因。**
 - ❌ 已下架 / 现货无此交易对的标的，历史 K 线取不到，与采集器当时报 error 同理。
 
-数据源口径：采集器用的是 `api.binance.com/api/v3/klines`（**现货**，不是 fapi 合约），
-本脚本保持一致。混用会得到不同的数字。
+数据源口径（2026-09-11 用户拍板：现货 → 合约）
+----------------------------------------------
+默认 `--source futures`（fapi 永续），与采集器同步切换。理由见 `macd_m8.KLINE_BASE`
+注释：M8 是给 V3/B3 的合约交易做择时，现货口径本身就是错配，且现货缺 HYPE 与
+8/34 个 score 榜标的；合约侧覆盖 34/34 + MAJORS 9/9。
+
+⚠️ **两种口径数字不同，不得混池**。2026-09-11 之前的 `macd_m8.jsonl` 是现货口径
+（行内无 `src` 字段），重放那批数据必须显式 `--source spot`。
+换口径不削弱对齐校验的价值：校验验的是「重放机制对不对」，在旧口径下用旧数据验完，
+机制正确性即已确立，再把同一机制套到新口径上。
 
 用法
 ----
@@ -63,19 +71,19 @@ except Exception:
 # 唯一真相源：计算逻辑一律来自采集器本体，不复制
 from macd_m8 import (  # noqa: E402
     MAJORS, TF_PARAMS, TF_INTERVAL, ZONE_ICON, KLINE_LIMIT, REQUEST_GAP,
-    macd_state, classify, proxied_get_json,
+    KLINE_BASE, KLINE_SOURCE, macd_state, classify, proxied_get_json,
 )
 
 CST = timezone(timedelta(hours=8))
 
 
-def fetch_klines_at(symbol: str, interval: str, end_ms: int):
+def fetch_klines_at(symbol: str, interval: str, end_ms: int, source: str = None):
     """取截至 end_ms 的已收盘 K 线 close 列表。
 
     与 `macd_m8.fetch_klines` 的唯一差别是把隐含的 endTime=now 显式化为 end_ms，
     剔除未收盘 K 的判据（closeTime < 截止时刻）一字不改。
     """
-    url = (f"https://api.binance.com/api/v3/klines"
+    url = (f"{KLINE_BASE[source or KLINE_SOURCE]}"
            f"?symbol={symbol}&interval={interval}&limit={KLINE_LIMIT}"
            f"&endTime={end_ms}")
     rows = proxied_get_json(url)
@@ -85,16 +93,16 @@ def fetch_klines_at(symbol: str, interval: str, end_ms: int):
     return closes
 
 
-def state_at(sym: str, when: datetime) -> dict:
+def state_at(sym: str, when: datetime, source: str = None) -> dict:
     """重建单个标的在 when 时刻的 M8 记录，字段与采集器落盘格式一致。"""
     end_ms = int(when.timestamp() * 1000)
     rec = {"ts": when.astimezone(CST).isoformat(timespec="seconds"),
-           "symbol": sym, "tfs": {}}
+           "symbol": sym, "src": source or KLINE_SOURCE, "tfs": {}}
     pair = f"{sym}USDT"
     for tf, (f, s, g) in TF_PARAMS.items():
         time.sleep(REQUEST_GAP)
         try:
-            closes = fetch_klines_at(pair, TF_INTERVAL[tf], end_ms)
+            closes = fetch_klines_at(pair, TF_INTERVAL[tf], end_ms, source)
         except Exception as e:
             rec["error"] = str(e)[:90]
             return rec
@@ -127,11 +135,12 @@ def pool_at(score_csv: str, when: datetime, top_n: int = 3):
 
 # ---------------- 模式 ①：机制等价性自检 ----------------
 
-def selfcheck(symbols):
+def selfcheck(symbols, source=None):
     """采集器路径（limit=500 到 now）vs 本脚本路径（endTime=now）逐根比对。
 
     这一项验证的是**唯一的机制差异**——把隐含的 now 换成显式 endTime。
     K 线列表逐根相同 ⇒ EMA seeding 相同 ⇒ power/zone/state 必然相同。
+    与 K 线口径（现货/合约）无关：两条路径用同一个 source，验的是取数机制。
     """
     from macd_m8 import fetch_klines as collector_fetch
     now_ms = int(time.time() * 1000)
@@ -141,9 +150,9 @@ def selfcheck(symbols):
         for tf in TF_PARAMS:
             time.sleep(REQUEST_GAP)
             try:
-                a = collector_fetch(pair, TF_INTERVAL[tf])
+                a = collector_fetch(pair, TF_INTERVAL[tf], source)
                 time.sleep(REQUEST_GAP)
-                b = fetch_klines_at(pair, TF_INTERVAL[tf], now_ms)
+                b = fetch_klines_at(pair, TF_INTERVAL[tf], now_ms, source)
             except Exception as e:
                 print(f"  {sym:<8} {tf:<4} SKIP {str(e)[:50]}")
                 continue
@@ -160,11 +169,16 @@ def selfcheck(symbols):
 
 # ---------------- 模式 ②：对齐校验 ----------------
 
-def validate(path: str, limit: int | None):
+def validate(path: str, limit: int | None, source: str = None):
     """逐条重算留存的 macd_m8.jsonl，比对 powers 与 state。
 
     CLAUDE.md 教训 6：重建脚本本身也会错。启用离线重建**之前**必须先过这一关，
     否则就是拿一个未经校验的量具去替换一个在跑的量具。
+
+    ⚠️ 口径必须对齐才有意义：2026-09-11 之前落盘的行是**现货**口径（无 src 字段），
+    校验这批数据必须 `--source spot`，否则比的是两个不同的量，不一致毫无信息量。
+    换合约口径并不影响本校验的价值——它验的是「重放机制对不对」，用旧数据在旧口径
+    下验完，机制正确性即已确立，再把机制套到新口径上。
     """
     recs = []
     with open(path, encoding="utf-8") as fp:
@@ -179,12 +193,20 @@ def validate(path: str, limit: int | None):
         recs = recs[-limit:]
     print(f"[validate] 待校验 {len(recs)} 条（已跳过采集时报错的行）")
 
+    src_seen = {r.get("src", "spot") for r in recs}
+    print(f"[validate] 数据口径: {', '.join(sorted(src_seen))}（无 src 字段的行按现货计）"
+          f" | 本次重放用: {source or KLINE_SOURCE}")
+    if len(src_seen) > 1:
+        print("  ⚠️ 文件内混有两种口径，必须按 src 分别校验，不得整体比对")
+    elif (source or KLINE_SOURCE) not in src_seen:
+        print("  ⚠️ 重放口径与数据口径不符——请加 --source " + sorted(src_seen)[0])
+
     agree_state = agree_power = fail = 0
     mismatches = []
     for i, r in enumerate(recs, 1):
         when = datetime.fromisoformat(r["ts"])
         try:
-            new = state_at(r["symbol"], when)
+            new = state_at(r["symbol"], when, source)
         except Exception as e:
             fail += 1
             print(f"  [{i}/{len(recs)}] {r['symbol']:<8} {r['ts']} 重建失败 {str(e)[:50]}")
@@ -225,15 +247,18 @@ def main():
     ap.add_argument("--at", type=str, help="重建时刻，ISO 带时区，如 2026-09-10T04:00:00+08:00")
     ap.add_argument("--symbols", type=str, default="", help="逗号分隔；不给则用 MAJORS")
     ap.add_argument("--pool-from", type=str, help="从 score 榜历史 CSV 还原当时的监控池")
+    ap.add_argument("--source", choices=("futures", "spot"), default=None,
+                    help="K 线口径；默认合约。校验 2026-09-11 之前的旧数据须用 spot")
     args = ap.parse_args()
 
     if args.selfcheck:
         syms = [s.strip().upper() for s in args.symbols.split(",") if s.strip()] or MAJORS[:4]
-        print(f"[selfcheck] 采集器路径 vs endTime 路径，标的: {', '.join(syms)}")
-        sys.exit(0 if selfcheck(syms) else 1)
+        print(f"[selfcheck] 采集器路径 vs endTime 路径 | 口径 "
+              f"{args.source or KLINE_SOURCE} | 标的: {', '.join(syms)}")
+        sys.exit(0 if selfcheck(syms, args.source) else 1)
 
     if args.validate:
-        validate(args.validate, args.limit)
+        validate(args.validate, args.limit, args.source)
         return
 
     if not args.at:
@@ -247,9 +272,10 @@ def main():
     else:
         pool = [s.strip().upper() for s in args.symbols.split(",") if s.strip()] or list(MAJORS)
 
-    print(f"[重建] {when.astimezone(CST).isoformat(timespec='seconds')} 共 {len(pool)} 币")
+    print(f"[重建] {when.astimezone(CST).isoformat(timespec='seconds')} "
+          f"| 口径 {args.source or KLINE_SOURCE} | 共 {len(pool)} 币")
     for sym in pool:
-        rec = state_at(sym, when)
+        rec = state_at(sym, when, args.source)
         if "state" not in rec:
             print(f"  {sym:<10} ✗ {rec.get('error')}")
             continue

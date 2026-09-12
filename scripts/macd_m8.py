@@ -15,7 +15,8 @@ MACD M8 动量状态机采集器（移植自 Pine 脚本 MACD v2.4 的 MTF 表�
     macd_m8.jsonl  每行 = {ts, symbol, 4 个周期的 power/zone/状态}
 
 监控池 = B3.0 主流池(MAJORS) + AI500 score 榜 top3 + --extra 指定币
-数据源: 币安 K 线（走本地代理 10809），只用已收盘 K 线（防重绘）
+数据源: 币安**合约(fapi)** K 线（走本地代理），只用已收盘 K 线（防重绘）
+       ——2026-09-11 由现货改为合约，理由见 KLINE_BASE 处注释；旧数据是现货口径
 
 忠实移植的规则（与 Pine 一一对应）:
     power = (macd>signal ? +1 : -1) + (macd上升?+1:0) + (signal上升?+1:0) + histZone(±1)
@@ -41,6 +42,20 @@ BINANCE_PROXY = os.environ.get("B300_PROXY", "http://127.0.0.1:7890")
 UA = "Mozilla/5.0"
 REQUEST_GAP = 0.35          # 币安权重友好间隔
 KLINE_LIMIT = 500           # EMA 预热足够（最慢 4h: 40+15）
+
+# K 线口径（2026-09-11 用户拍板：现货 → 合约）
+#   理由：M8 是给 V3/B3 的**合约**交易做择时，用现货价算动量属口径错配；且现货侧
+#   缺 HYPE（-1121 Invalid symbol）与 8/34 个 score 榜标的（1000BONK/BR/BTW/BULLA/
+#   MAGMA/UAI/USELESS/XMR，约 24%），自 9/6 部署起一直静默记 error。
+#   合约侧实测覆盖 score 榜 34/34 + MAJORS 9/9，零缺口；符号命名也与 score 榜
+#   一致（如 1000BONK，现货侧叫 BONK）。
+# ⚠️ 两种口径算出的数字不同。2026-09-11 之前落盘的 macd_m8.jsonl 是**现货**口径，
+#    与之后的数据**不得混池统计**；重放旧数据必须显式指定 spot。
+KLINE_BASE = {
+    "futures": "https://fapi.binance.com/fapi/v1/klines",
+    "spot": "https://api.binance.com/api/v3/klines",
+}
+KLINE_SOURCE = os.environ.get("M8_KLINE_SOURCE", "futures")
 
 # B3.0 主流池（与 b300_collector.py 保持一致）
 MAJORS = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "LINK", "AAVE", "HYPE"]
@@ -138,9 +153,9 @@ def classify(p1, p2, p3, p4):
 
 # ---------------- 数据获取 ----------------
 
-def fetch_klines(symbol: str, interval: str):
+def fetch_klines(symbol: str, interval: str, source: str = None):
     """返回已收盘 K 线的 close 列表（剔除最后一根未收盘 K，防重绘）。"""
-    url = (f"https://api.binance.com/api/v3/klines"
+    url = (f"{KLINE_BASE[source or KLINE_SOURCE]}"
            f"?symbol={symbol}&interval={interval}&limit={KLINE_LIMIT}")
     rows = proxied_get_json(url)
     now_ms = time.time() * 1000
@@ -169,7 +184,8 @@ def scan(symbols):
     for sym in symbols:
         pair = f"{sym}USDT"
         time.sleep(REQUEST_GAP)
-        rec = {"ts": ts, "symbol": sym, "tfs": {}}
+        # src 自 2026-09-11 起落盘，用于区分现货/合约口径——旧行无此字段即现货
+        rec = {"ts": ts, "symbol": sym, "src": KLINE_SOURCE, "tfs": {}}
         ok = True
         for tf, (f, s, g) in TF_PARAMS.items():
             try:
