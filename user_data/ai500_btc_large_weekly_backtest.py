@@ -242,17 +242,22 @@ def main():
     cutoff = int(time.time()) - args.days * 86400
     trades = backtest(rows, klines, cutoff=cutoff)
 
-    # imbalance 观察数据统计（本地 aggTrades 落盘）
-    imb = stat_imbalance(args.days)
-    print(f"=== 分层 imbalance 观察（{imb['note']}） ===")
-    if imb.get("note", "").startswith("无"):
-        print(f"  {imb['note']}")
-    else:
-        print(f"  30m桶中 buy_imb≥3x 占比: {imb['buy_imb_ratio']:.0f}% | "
-              f"sell_imb≥3x 占比: {imb['sell_imb_ratio']:.0f}%")
-        print(f"  平均 buy_imb 强度: {imb['avg_buy_imb']:.2f}x | "
-              f"平均 sell_imb 强度: {imb['avg_sell_imb']:.2f}x")
-    print()
+    # ⚠️ 2026-09-13 用户拍板【停用】imbalance 观察段（不恢复 aggTrades 采集）。
+    #    原因：freqtrade-agg-collector 服务已 inactive，本地 user_data/agg_trades/
+    #    仅剩 agg_20260831.csv（8/31 单日）。本函数读本地目录，**无数据时不报错、
+    #    只是桶数变少**，于是产出「看起来正常」的僵尸统计（9/13 报告 279 桶 → 42 桶，
+    #    实为 8/31 单日残量），易被误读为有效观察。
+    #    stat_imbalance() 定义与 fetch_agg 相关代码保留——将来若恢复采集可直接启用。
+    # imb = stat_imbalance(args.days)
+    # print(f"=== 分层 imbalance 观察（{imb['note']}） ===")
+    # if imb.get("note", "").startswith("无"):
+    #     print(f"  {imb['note']}")
+    # else:
+    #     print(f"  30m桶中 buy_imb≥3x 占比: {imb['buy_imb_ratio']:.0f}% | "
+    #           f"sell_imb≥3x 占比: {imb['sell_imb_ratio']:.0f}%")
+    #     print(f"  平均 buy_imb 强度: {imb['avg_buy_imb']:.2f}x | "
+    #           f"平均 sell_imb 强度: {imb['avg_sell_imb']:.2f}x")
+    # print()
 
     if not trades:
         print("本窗口无交易信号（未触发 80M 净流或未匹配价格）")
