@@ -171,4 +171,6 @@ user_data/config_ai500_v3_dryrun.json
 user_data/config_bstocks_dryrun.json
 
 # 重建底表（数据产物，脚本入库、数据不入库）
-user_data/macd_m8_rebuilt.jsonl
+user_data/macd_m8_rebuilt.jsonl*
+# ↑ 通配：覆盖 .legacy 等改名后的旧底表（9/13 重建时 mv 出的 macd_m8_rebuilt.jsonl.legacy）。
+#   数据产物一律不入库——历史对照物留在 bot 机本地即可。
