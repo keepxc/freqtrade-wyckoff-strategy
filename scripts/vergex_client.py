@@ -6,17 +6,24 @@ VergeX 统一请求客户端（2026-09-13 修复版）
 背景
 ----
 2026-09 起 vergex.trade 启用了 Cloudflare 托管挑战（Cf-Mitigated: challenge）。
-触发条件已实测定位：**User-Agent 不完整**（如 "Mozilla/5.0"、"python-requests/x"、
-curl 默认 UA、或空 UA）→ 一律返回 403 + "Just a moment..." HTML。
+CF 判的是**整体客户端指纹**，两个条件**缺一不可**（2026-09-13 实测）：
 
-修复前的旧脚本（macd_m8.py / b300_collector.py）都写了 UA = "Mozilla/5.0"，
-因此在 CF 规则升级后集体失效。换成完整浏览器 UA 后，实测 20/20 全部 200。
+  1. **完整浏览器头**——短 UA（"Mozilla/5.0"、"python-requests/x"、curl 默认 UA、
+     空 UA）一律 403 + "Just a moment..." HTML。
+  2. **HTTP 客户端必须是 urllib**——⚠️ 这一条最容易被漏掉：`requests` **即使带上
+     完全相同的完整头**（默认 / Session / identity-encoding 三种变体都试过）仍然
+     403（6007B 挑战页），urllib 同头稳定 200（1470B JSON）。差异来自 TLS/HTTP2
+     指纹，不在 header 内容里。
+
+**所以"把 UA 补全就行"是错的结论**——修复前的旧脚本（macd_m8.py / b300_collector.py）
+确实都写了 UA = "Mozilla/5.0"，但只补 UA 而继续用 requests 会重新撞 403。
+本模块两条都满足，实测 20/20 全部 200。**勿把底层换回 requests。**
 
 本模块提供
 ----------
-1. UA 池轮换 + 403 自动重试
-2. Cloudflare 挑战识别（区分「被墙」和「接口真的挂了」）
-3. 连接复用（urllib opener）
+1. UA 池轮换 + CF 挑战自动重试（只对**确认是 CF** 的 403 重试，业务错误直接抛）
+2. Cloudflare 挑战识别（区分「被墙」和「接口真的挂了」——判据见 _is_cf_challenge）
+3. 统一的完整浏览器头 + urllib 传输层（两条件同时满足才能过 CF）
 4. 可选 Playwright 兜底（若 CF 进一步升级为交互式 JS 挑战）
 
 用法
@@ -55,8 +62,11 @@ UA_POOL: list[str] = [
 BASE = "https://vergex.trade"
 API = "https://vergex.trade/api/v1"
 
-# Cloudflare 挑战特征
-CF_MARKERS = ("Just a moment", "cf-mitigated", "challenges.cloudflare.com")
+# Cloudflare 托管挑战的**正特征**（必须命中其一才判 CF）
+#   - 响应头 Cf-Mitigated: challenge —— CF 自己打的标，最可靠
+#   - 挑战页 body 特征串
+CF_MITIGATED_HEADER = "Cf-Mitigated"
+CF_BODY_MARKERS = ("just a moment", "challenges.cloudflare.com", "cf-browser-verification")
 
 
 class CloudflareBlocked(RuntimeError):
@@ -107,10 +117,24 @@ class VergeX:
         return h
 
     @staticmethod
-    def _is_cf_challenge(status: int, body: str) -> bool:
+    def _is_cf_challenge(status: int, body: str, headers=None) -> bool:
+        """只在命中 CF 正特征时判「被墙」。
+
+        ⚠️ 曾经的实现是 `命中特征串 or len(body) < 8000`，等价于**所有 403 都算 CF**——
+        而实测 CF 挑战页 6007B、正常 JSON 1470B，这个尺寸阈值根本分不开两者。
+        后果是限频/权限/标的下架类的真 403 会被烧掉 4 次重试，再报成 CloudflareBlocked，
+        调用方（ai500_fetch.py）还会打印"这是 Cloudflare 挑战，不是接口下线"——
+        给出一个方向相反的诊断。本模块声明的职责就是**区分被墙与接口真的挂了**，
+        宽容的兜底规则恰好取消了这个能力，故删除，宁可漏判也不误判。
+        """
         if status != 403:
             return False
-        return any(m.lower() in body.lower() for m in CF_MARKERS) or len(body) < 8000
+        if headers is not None:
+            mitigated = headers.get(CF_MITIGATED_HEADER) or ""
+            if "challenge" in mitigated.lower():
+                return True
+        low = body.lower()
+        return any(m in low for m in CF_BODY_MARKERS)
 
     # ------------------------------------------------------------------ 公开
     def get_text(self, url: str, extra_headers: dict[str, str] | None = None) -> str:
@@ -129,13 +153,13 @@ class VergeX:
                     body = e.read().decode("utf-8", errors="replace")
                 except Exception:
                     pass
-                if self._is_cf_challenge(e.code, body):
+                if self._is_cf_challenge(e.code, body, e.headers):
                     last_err = CloudflareBlocked(
                         f"Cloudflare 挑战拦截 (HTTP {e.code})，UA={ua[:40]}…"
                     )
                     time.sleep(self.gap * (attempt + 1) + random.uniform(0, 0.4))
                     continue
-                # 404 / 400 等是真实业务错误，不重试
+                # 非 CF 的 403、以及 404/400 等，都是真实业务错误 —— 不重试、不伪装成被墙
                 raise RuntimeError(f"HTTP {e.code} {url}") from e
             except Exception as e:  # 网络抖动
                 last_err = e

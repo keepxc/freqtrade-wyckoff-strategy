@@ -15,7 +15,7 @@
 | 4 | `bstock-whitelist-sync` cron error | Hermes no_agent 的 script 字段塞了整条 `cd && python` 命令（被当路径查找失败） | 建 wrapper `~/.hermes/scripts/bstock_whitelist_sync.sh` |
 | 5 | `macd_m8 collector`（Hermes 侧）持续失败 | 同 #4 script 字段问题 + LLM 超时；真正执行者是**系统 crontab** | 删除 Hermes 僵尸 job（d75f15b36b26），保留系统 crontab |
 | 6 | `b300_collector --breakout` 连续两天无产物（9/11、9/12） | **00:05 三任务撞车**（b300 --once + b300 --breakout + macd_m8 同时挤 7890 代理）→ breakout 拉币安 24hr 全市场大响应被挤掉（SSL handshake timeout） | 调度错峰：breakout `5 0` → **`20 0`**（只改 crontab，脚本未动）。验证点：9/13 00:20 首跑 |
-| 7 | M8 采集器**时钟/窗口错位**（首帧实证）：ts 写 18:29:45，但 15m 数据窗口已是 18:30 后 | `fetch_klines` 每次调用各取 `time.time()`，脚本逐币逐周期耗时跨过 K 线边界 → ts 与实际数据窗口差 1 根（EMA seeding 起点不同 → 15m power ±1；XRP 4→3、LINK 3→4） | ① **硬化**（3 处）：`scan()` 每帧锚定 `anchor_ms` 并作为 `endTime` 下发、逐周期复用同一锚 → ts 与窗口同源自洽（调用方不传锚时行为不变）；② **停采**（9/11 起，crontab 注释可逆；转离线重建，见 §八-5） |
+| 7 | M8 采集器**时钟/窗口错位**（首帧实证）：ts 写 18:29:45，但 15m 数据窗口已是 18:30 后 | `fetch_klines` 每次调用各取 `time.time()`，脚本逐币逐周期耗时跨过 K 线边界 → ts 与实际数据窗口差 1 根（EMA seeding 起点不同 → 15m power ±1；XRP 4→3、LINK 3→4） | ① **硬化**（3 处）：`scan()` 每帧锚定 `anchor_ms` 并作为 `endTime` 下发、逐周期复用同一锚 → ts 与窗口同源自洽（调用方不传锚时行为不变）；② **停采**（crontab 注释可逆；转离线重建，见 §八-5）<br>⚠️ **订正（9/13）：本行原写「9/11 起停采」，与留存不符。** `macd_m8.jsonl` 实际末帧是 **2026-09-12T08:05:02**，9/12 的 00:05 / 04:05 / 08:05 三帧都采到了 → 停采发生在 9/12 08:05 之后。采集期总计 **38 帧**（2026-09-06T18:24:56 ~ 2026-09-12T08:05:02）。凡按「9/11 截止」切样本的统计都会漏掉 9/12 那 3 帧 |
 | 8 | **vergex.trade 全部端点被 Cloudflare 拦**（9/12 起）→ B3 采集停 2 天、V3 的 score/net_flow 采集全断 | vergex 上线 WAF，触发条件是**请求指纹**：旧脚本 `UA = "Mozilla/5.0"`（短 UA）→ 403；且 **requests 即使带完整头仍 403**（客户端指纹差异），必须走 urllib | **根因修复（9/13 12:14 验收）**：新增统一客户端 `scripts/vergex_client.py`（完整浏览器头 + urllib）+ V3 策略加 `VERGEX_HEADERS`/`_vergex_get_json` → **B3 全恢复**（含 signals/门槛判定/信号触发）+ **V3 全恢复**。期间曾临时迁 Open API（`vergex_api.py`）作跳板，现保留为备用通道。详见 `vergex-trading-data` skill §32 |
 | 9 | **V3 dry-run 停用 → 当日恢复**（停 11:56 / 恢复 12:11 CST） | score 榜 HTTP 端点 9/12 14:45 起被 CF 拦 → `_entry_state` 抓取失败走 `keeping previous` 沿用旧值 → 产出污染样本 | 停 15 分钟后根因修复（见 #8）→ 12:11 重启，12:12:53 首轮 score 抓取正常（LSK 78.346 / ZEC 77.278 / USELESS 61.505），三个 CSV 恢复写入、无新 403 |
 | 10 | **爆发线 `--breakout` 整轮崩溃（exit 1，零产物）**（9/13 12:28 发现，修复后 12:30 验收） | 币安涨幅榜含中文名 meme **「牛来」** → symbol 未 URL 编码 → `urlopen` 抛 `UnicodeEncodeError`（position 60-61）；且 `breakout_scan` 只捕 `RuntimeError` → **单币异常崩掉整轮** | ① `vergex_client.signals()` 对 symbol 加 `urllib.parse.quote`；② `breakout_scan` 非 ASCII 符号直接记 `no_market(non_ascii_symbol)` + `except Exception`（per-coin 容错）；③ `scan_once` 同样放宽为 `except Exception`。**验收**：20 币完整跑完（watch=10 / no_market=10），`牛来` 正确归类 |
@@ -67,7 +67,7 @@
 
 | 类型 | 数量 | 清单 |
 |------|:---:|------|
-| 系统 crontab | 7 | b300 signals(`5 0,4,8,12,16,20`) / b300 breakout(**`20 0`**，9/12 由 00:05 错峰) / ~~macd_m8~~（9/11 起停采，见 §八-5） / OI 归档(6h) / oi_data_trigger(08:30) / fake_breakdown(6h) / download_recent_data(每小时) |
+| 系统 crontab | 7 | b300 signals(`5 0,4,8,12,16,20`) / b300 breakout(**`20 0`**，9/12 由 00:05 错峰) / ~~macd_m8~~（停采，末帧 **9/12 08:05**，见 §八-5 与 §一 #7 订正） / OI 归档(6h) / oi_data_trigger(08:30) / fake_breakdown(6h) / download_recent_data(每小时) |
 | Bot 内置 | 3 | V3: score_history_v3 / zombie_check / netflow_multiwin（30s 写） |
 | Hermes cron | 1 | 十老板交易者监控(09:00) |
 | 已停（产物保留） | 4 | yss-signal / aggTrades / V1-V2 三件套 / AI500 live |
@@ -174,5 +174,17 @@ M8 的输入**只有**币安 K 线（15m/1h/4h/1d），K 线永久可查 → 完
 **实现**：`macd_m8.py` 新增 `KLINE_BASE` / `KLINE_SOURCE`（env `M8_KLINE_SOURCE`，默认 futures），落盘记录新增 `src` 字段；`macd_m8_offline.py` 加 `--source futures|spot`。切换后 HYPE selfcheck 通过（1d 仅 470 根，仍过 120 根下限）。
 
 **口径变更副作用**（CLAUDE.md 副作用条款）：9/11 之前落盘的行是现货口径（无 `src` 字段），与之后**不得混池统计**；重放旧数据必须 `--source spot`。
-> 探索性旁证——非结论：10 币 × 3 时刻共 30 条两口径对比，`powers` 与 `state` **30/30 完全一致**。M8 的 power 是符号比较得到的小整数，对现货/永续的价差不敏感。但 30 条证明不了"两口径永远等价"（基差剧烈波动时仍可能分叉），故混池禁令与 `src` 标注照旧保留。
+> 探索性旁证——非结论，禁止引用为证据（**9/13 以更大样本更新，原 30 条版本作废**）：
+> 拿全量采集留存（现货）对全量重建底表（合约）做交叉对比，**317 条可比记录**，
+> `state` **100%** 一致，`powers` **98.42%**（5 条不一致）。5 条的归因：
+>   - 2 条是**采集器时钟错位**（§一 #7），非口径差：首帧 XRP 15m 4→3、LINK 15m 3→4；
+>   - 3 条是**真实的现货/合约分叉**：AAVE 1h −2→−1、ETH 15m −1→−2、**ETH 4h −2→−1**。
+>
+> **这条把原「30/30 完全一致」推翻了**：30 条样本恰好没抽中分叉，一致率被高估。
+> 尤其 ETH 4h 那条——4h zone 正是**裁决 A 的输入**，两口径在这里就会给出不同答案，
+> 所以混池禁令与 `src` 标注不是保守冗余，是必需的。
+> ⚠️ 本次对比的 join key 是 (日期, 小时, 币种) 而非精确 ts（旧重建底表的 ts 是硬编码
+> `*:05:00`，38 帧里只有 1 帧与采集秒级相同），故 5 条差异里**混入了时刻差**，
+> 不能全部归给口径。重建器改成从留存取真实 ts 后（见 `macd_m8_rebuild_history.py`），
+> join 变为精确 ts，届时须重算此数——在那之前不得把 98.42% 当作口径差的度量。
 > **换口径不削弱对齐校验的价值**：校验验的是"重放机制对不对"，在旧口径下用旧数据验完，机制正确性即已确立，再把同一机制套到新口径上。

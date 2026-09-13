@@ -5,7 +5,13 @@ AI500 选币榜采集器（VergeX）
 
 数据源: GET https://vergex.trade/trending-category?lang=zh&key=ai500
         —— 公开接口，无需登录、无需 token；2026-09 起受 Cloudflare 托管挑战保护，
-           必须带完整浏览器 UA（详见 vergex_client.py）。
+           需**完整浏览器头 + urllib 传输层**两者同时满足（只补 UA 而用 requests
+           仍 403），故一律经 vergex_client.VergeX 走，详见该模块 docstring。
+
+⚠️ 定位：**人工查看用的 CLI，不是判据来源。** 本脚本 --fresh 输出的
+   stale / suspect 字段仅供肉眼扫一眼，**禁止引用为证据**、禁止喂给统计脚本。
+   策略侧的僵尸判定以 AI500V3ScoreHold._check_tradable 为唯一真相源（口径不同，
+   见下方 freshness_check() 的口径差异说明）。
 
 用法:
     python ai500_fetch.py                    # 抓取并打印当前榜
@@ -16,9 +22,8 @@ AI500 选币榜采集器（VergeX）
     python ai500_fetch.py --diff             # 与上次落盘对比，输出变动
 
 数据新鲜度校验:
-    榜内行可能不刷新。原设计的「币安 1h K 复算累计涨幅」口径不可靠
-    （VergeX startPrice 与币安现货有 2%~11% 系统偏差），改用「接口价 vs 币安
-    现价」一致性作为主判据，详见 freshness_check()。
+    榜内行可能不刷新。原设计的「币安 1h K 复算累计涨幅」口径不可靠，改用
+    「接口价 vs 币安现价」一致性作为主判据，详见 freshness_check()。
 """
 from __future__ import annotations
 
@@ -39,9 +44,11 @@ HIST_FILE = HERE / "ai500_history.jsonl"
 
 UA_FULL = UA_POOL[0]     # 币安请求同样需要完整 UA（Cloudflare 无关，但保持一致）
 
-BINANCE_PROXY = os.environ.get("B300_PROXY", "http://127.0.0.1:10809")
+# 仓库约定：采集脚本的代理默认值一律 7890（bot 机器上活着的端口；
+# macd_m8.py / AI500V3ScoreHold 同）。10809 是开发机的端口，不能作为默认值。
+BINANCE_PROXY = os.environ.get("B300_PROXY", "http://127.0.0.1:7890")
 PRICE_TOL_PCT = 1.0      # 接口价 vs 币安现价，差 > 1% → stale（真·僵尸行）
-PCT_SUSPECT_PP = 15.0    # 累计涨幅复算差 > 15pp → suspect（仅参考，因口径有系统偏差）
+PCT_SUSPECT_PP = 15.0    # 累计涨幅复算差 > 15pp → suspect（**纯展示**，见 freshness_check）
 
 
 # ------------------------------------------------------------ 币安辅助（可选）
@@ -71,20 +78,31 @@ def _last_price(pair: str) -> float | None:
 
 
 def freshness_check(assets: list[dict]) -> list[dict]:
-    """数据新鲜度校验（比"僵尸行"更可靠的口径）。
-
-    设计文档原方案是「用币安 1h K 从 startTime 复算累计涨幅」，但实测
-    VergeX 的 startPrice 口径与币安现货在 startTime 的价格**系统不一致**：
-
-        ZEC   vx 612.52  vs 币安 1h open 555.89  / 1m open 553.61   (差 10.6%)
-        LSK   vx 0.18293 vs 币安 1h open 0.16950 / 1m open 0.18990  (差 2.2~7.9%)
-        FF    vx 0.14447 vs 币安 1h open 0.13114 / 1m open 0.14142  (差 2.2~10.2%)
-
-    因此累计涨幅复算只能作参考，不能作判据。这里改用两个可靠维度：
+    """数据新鲜度校验 —— **仅供人工查看，不构成判据**。
 
       1. price_diff_pct —— 接口 price vs 币安现货最新价（都是"当前价"，口径一致）
                           差 > 1%  → stale=True，说明该行未刷新（真·僵尸行）
-      2. pct_diff_pp    —— 累计涨幅复算差值（仅参考，阈值放宽到 15pp）
+      2. pct_diff_pp    —— 1h 开盘复算的累计涨幅差（**纯展示**，阈值 15pp）
+
+    ⚠️ 维度 2 的口径已被项目内部证据否定，保留只为肉眼对照，任何结论不得引用它
+    ---------------------------------------------------------------------------
+    这里比的是**派生百分比**，而 RESEARCH_FRAMEWORK 教训 8 / DRYRUN_STATUS §七 已量化：
+        diff_pp ≈ 参考价相对误差 × (1 + 累计涨幅)
+    同样的参考价口径差，标的涨得越多被放得越大 → 系统性掐掉涨幅最大的那批
+    （实测 corr(diff_pp, 参考价差)=0.955，被拒组里真正"实时价过期"的占 0.0%）。
+    本函数另有两处与策略侧不一致，**不要**把两边的数字放在一起比：
+        - 参考价取 **1h 开盘**（策略侧已改为 1m 开盘；1h 最多早 59 分钟，
+          在快拉标的上就是纯噪声）
+        - 数据源是**现货** api.binance.com（策略侧交易的是 core_perp 合约）。
+          现货侧缺 8/34 个 score 榜标的（USELESS/BULLA/1000BONK 等无交易对），
+          这些行的 --fresh 恒为「无数据」——与 M8 现货→合约切换同源，
+          见 DRYRUN_STATUS §八-6。改合约口径是**未决项**，未经拍板不擅自改。
+    下面这组实测差值正是上述口径差的表现，不是 VergeX 数据有错：
+        ZEC   vx 612.52  vs 币安 1h open 555.89  / 1m open 553.61
+        LSK   vx 0.18293 vs 币安 1h open 0.16950 / 1m open 0.18990
+        FF    vx 0.14447 vs 币安 1h open 0.13114 / 1m open 0.14142
+    唯一真相源：`AI500V3ScoreHold._check_tradable`（1m 开盘直接比价格，
+    ZOMBIE_REF_PP=3.0）。要改判据去改那里，不要在本文件里另立一套。
     """
     for a in assets:
         pair = a.get("pair")
@@ -210,8 +228,9 @@ def main() -> int:
         d = vx.ai500(lang=args.lang)
     except CloudflareBlocked as e:
         print(f"[CF-BLOCKED] {e}", file=sys.stderr)
-        print("提示：这是 Cloudflare 挑战，不是接口下线。"
-              "确认 UA 是完整浏览器 UA，或降低请求频率后重试。", file=sys.stderr)
+        print("提示：已确认命中 Cloudflare 挑战特征（Cf-Mitigated 头或挑战页），"
+              "不是接口下线。检查完整浏览器头 + urllib 两个条件，或降低请求频率后重试。",
+              file=sys.stderr)
         return 2
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr)
