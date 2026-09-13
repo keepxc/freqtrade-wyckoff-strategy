@@ -8234,6 +8234,10 @@ def confirm_trade_entry(self, pair, order_type, amount, rate, time_in_force,
 - 每次统计：重算 2h 滚动净流信号（80M 阈值）在最新一周的盈亏、胜率、回撤、利润集中度；对比累计曲线是否偏离 07-03~08-31 基线
 - 目标：积累震荡/下跌市样本，验证"下跌时能少亏/不亏"的假设（牛市里任何做多过滤都跑输持有，但 AI500 定位是信号交易非持有，需验证的是信号自身稳定性）
 - 观察期至少到积累 2-3 个月大单数据（约 2026-10 底），若震荡市样本仍正期望则提交预注册回测设计；若转负或利润集中度恶化则归档否决
+  > ⚠️ **9/13 更新：这个时间表已落空。** 本地 aggTrades 采集 9/6 起断流且七天无人发现（见文末 09-13 条），
+  > W1（08-31）之后没有新的周统计。**不是数据不可得**——币安官方归档可逐日补回——而是没人在采、也没人在算。
+  > 要续这条线：先补档 → 重跑 `ai500_btc_large_weekly_backtest.py` → 才谈得上"积累到 2-3 个月"。
+  > 在补完之前，不得拿 W1 那一周的样本当"观察期进展"引用。
 
 ---
 
@@ -8253,7 +8257,10 @@ def confirm_trade_entry(self, pair, order_type, amount, rate, time_in_force,
 结论：**分层 imbalance 有意义但仅作增强**——有 imb 的流入桶强一倍（+41 vs +21），流出桶强 5 倍（-35 vs -7）；单独 imbalance 相关系数 r=0.009≈0，**不能独立触发**。与 VFP 指标设计哲学一致（imbalance 是结构内确认工具，非独立信号）。
 
 **实施（全部完成）**：
-1. **常驻采集器** `scripts/ai500_agg_collector.py`：币安合约 `/fapi/v1/aggTrades` fromId 增量轮询（5s 间隔），落盘 `user_data/agg_trades/agg_YYYYMMDD.csv`（ts_ms, agg_id, price, qty, is_buyer_maker），保留 30 天自动清理。systemd 服务 `freqtrade-agg-collector.service` 已启用（实测：22 秒落盘 57KB，30m 窗口 4644 笔）。**独立于 freqtrade 进程，bot 重启不中断采集。**
+1. **常驻采集器** `scripts/ai500_agg_collector.py`：币安合约 `/fapi/v1/aggTrades` fromId 增量轮询（5s 间隔），落盘 `user_data/agg_trades/agg_YYYYMMDD.csv`（ts_ms, agg_id, price, qty, is_buyer_maker），保留 30 天自动清理。systemd 服务 `freqtrade-agg-collector.service` 已启用（实测：22 秒落盘 57KB，30m 窗口 4644 笔）。~~**独立于 freqtrade 进程，bot 重启不中断采集。**~~
+   > ⛔ **9/6 起停采，9/13 拍板不恢复**（见文末 09-13 条）。上面划掉那句是**当时未经验证的断言**：
+   > 它确实独立于 freqtrade，但无看门狗，进程一死就静默断流——实际断了 7 天（9/6→9/13）无人发现。
+   > 教训：写"重启不中断"之前得先真的重启一次看它回不回来。
 2. **策略增强** `AI500V1DryRun.py`：`_get_btc_imb()` 每轮读本地落盘，算最近 30m 窗口价格分层（0.1% 步长）buy/sell imbalance 最大比；MTF CSV 新增 `btc_imb_buy_max` / `btc_imb_sell_max` 两列。**纯观察，不进入场条件**（失败保留上次值）。
 3. **周回测脚本** `ai500_btc_large_weekly_backtest.py`：新增 `stat_imbalance()`，每周输出窗口内 30m 桶 buy/sell imbalance≥3x 占比 + 平均强度。实测通过。
 
@@ -8268,7 +8275,7 @@ def confirm_trade_entry(self, pair, order_type, amount, rate, time_in_force,
 | 5 | BTC 前 30min 涨幅 bias | 同上 | 每 30m | 方向过滤（已用） |
 | 6 | BTC 大单净流 30m/15m（糖哥接口） | 同上 | 每 30m | 线路B 信号主数据（观察中） |
 | 7 | **BTC 价格分层 imbalance buy/sell max（币安 aggTrades）** | 同上（新增 2 列） | 每 30m | **观察增强层（新增）** |
-| 8 | 币安 aggTrades 逐笔全量（价格/方向） | `user_data/agg_trades/agg_*.csv` | 5s 轮询 | 分层计算原料 + 回测数据（新增） |
+| 8 | 币安 aggTrades 逐笔全量（价格/方向） | `user_data/agg_trades/agg_*.csv` | ~~5s 轮询~~ **9/6 起停采** | 分层计算原料 + 回测数据（**9/13 拍板不恢复，改官方归档补档**，见文末 09-13 条） |
 
 **每周统计口径（cron 每周日 21:00，job 15ada2df22d7）**：信号盈亏/胜率/回撤/利润集中度（基线 07-03~08-31）+ 分层 imbalance 占比/强度（新增）。
 
@@ -8336,7 +8343,68 @@ def confirm_trade_entry(self, pair, order_type, amount, rate, time_in_force,
 - OI_MIN=3.0（9/1 反推验证上线，命中率 10%→17-20%）在当前平静行情可能零单数日——零单也是观察（验证是否过度过滤），不因"想要信号"降门槛
 - 修复记录：populate_exit_trend 曾用 dataframe.loc[标量 bool] 导致全 pair 分析失败零信号（13:40-18:26 数据无效），已修（if confirmed: loc[dataframe.index[-1]]）；原版 AI500V1DryRun.py 733 行同 bug 未修（live 已停，复用前必修）
 - 8 项观察数据（TASK 8300 盘点表）：1-7 由 bot 持续写入（netflow/OI/MTF/大单/imbalance），第 8 项 agg collector 已重启（09-02 17:54），现货大单可自算 $250k 口径与糖哥 perp 交叉验证（r=0.94, 同号率 97%）
+  > **9/13 更新**：第 8 项 agg collector 09-06 再次停采并**不再恢复**（见文末 09-13 条）；第 7 项分层 imbalance 随之断料。
 
 **后续候选（未立项，数据积累后验证）**：
 - 线路B BTC 大单周回测（cron 周日 21:00 job 15ada2df22d7 已建）
 - BTC 大单轮动择时叠加入场（跷跷板 15-30M 中等流出 + 延迟 1h 入场模拟）
+
+---
+
+### 2026-09-13 结案：aggTrades 常驻采集器停用，不恢复（用户拍板）
+
+**触发**：复查采集全景时发现"aggTrades（9/6 停）"只有状态、没有原因，用户问"原因是啥，还能找到吗"。
+
+**查证结论：原因确实没被记录下来，且已不可考。** "9/6 停"这行是 9/11 写
+`user_data/collect/README.md` 与 `DRYRUN_STATUS_20260911.md` 时**事后补记的状态**
+（两文件同属提交 `88131f2`）；9/6 前后无相关提交，本 TASK 只有建设记录无停用记录，
+现存会话记录里也翻不到（更早的 transcript 已不在本机）。
+
+**两条复盘推断（是推断，不是记录，无法判定哪条为真）**：
+1. **消费方先死**：读 `agg_trades/` 的只有 `AI500V1DryRun` / `AI500V1MacdExitDryRun` /
+   `AI500V2FlowHold` 的 `_get_btc_imb()`，即已停的"V1-V2 三件套"。V3ScoreHold 9/5 上线后
+   三者退役，而 **V3 完全不读该目录**（grep 0 命中）→ 数据没有读者。时间与依赖均吻合。
+2. **无守护进程静默死亡**：5s 轮询常驻进程且无看门狗，重启即死；代理默认值写死 `10809`，
+   端口一变即连不上。跨会话待办里长期挂着"collectors auto-restart after reboot"这条，
+   其存在本身就是佐证。
+
+> 🔎 **9/13 晚追加的实况 —— 天平压向推断 2，且"9/6 停"这个日期被推翻**：
+> bot 上 `user_data/agg_trades/` **只剩 `agg_20260831.csv` 一个文件**（提交 `782fe02` 实见），
+> 服务 inactive。`KEEP_DAYS=30` 的自动清理**只在进程活着时才跑**，故 9/2~9/6 的文件
+> 不是被清掉的，**是根本没产生过**。
+> → 上文"第 8 项 agg collector 已重启（09-02 17:54）"那次重启**大概率当场就失败**
+> （代理默认 10809 首要嫌疑），只是没人核对产物。**真实断点是 8/31**；"9/6 停"是
+> 9/11 事后补记时的估计，不可靠。
+> 连带影响：**W1（08-31）之后本来就没有任何新 imbalance 观测**——"观察期在推进"从头到尾
+> 就不成立，不是 9/6 才断的。
+> 再次印证：服务健康不能只看 active/exit 0，**必须核对产物时间戳与增长**。
+
+**决策：不恢复**（用户 9/13 拍板："如果能补档，就不用恢复了，记录一下即可，停掉"）。
+依据是 RESEARCH_FRAMEWORK 教训 7 的可重建性判据——BTCUSDT 合约 aggTrades 属**采集冗余**，
+断多久都能补，与 score 榜"断一小时永久缺一小时"不同类。
+
+**归档可得性——9/13 实测（实拉验证，非引述文档）**：
+
+| 验证项 | 结果 |
+|---|---|
+| 地址 | `https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-YYYY-MM-DD.zip` |
+| 断档期覆盖 | 9/2、9/5、9/6、9/7、9/10、9/12 逐日 **HTTP 200**（4.9~14.3 MB/天） |
+| 内容抽验 | 9/12 解压 **296,172 行**，含表头 |
+| 列映射 | `ts_ms←transact_time`、`agg_id←agg_trade_id`、`price←price`、`qty←quantity`、`is_buyer_maker←is_buyer_maker`(true/false→1/0) |
+| 日切 | 归档与采集器**都按 UTC 日**分文件，文件名 1:1 对应，**无需重新分桶** |
+| 消费端 | 消费方 `next(reader, None)` 跳表头，补档文件保留表头即可直接读 |
+
+> ⚠️ **归档只能补历史、喂不了实时**：当日文件次日才发布（9/13 查当天 → 404）。
+> 若将来要把分层 imbalance 做成**实时**入场依据，必须重启常驻采集
+> （届时先修：代理默认值 + 自启守护），不能拿归档顶替。
+
+**留下的红线**：
+- 本 TASK 的"观察期至 2026-10 底"时间表已落空（见上文该条的 9/13 更新），补档并重跑周统计前
+  不得声称观察期在推进。
+- 停采时点是**样本分界**，用前先核一次：`_get_btc_imb()` 读不到文件时返回 `(None, None)`，
+  而调用方是 `if new_imb[0] is not None: 才赋值` → **失败时沿用上次值并照常写进 CSV**。
+  所以 `btc_imb_buy_max` / `btc_imb_sell_max` 两列中，**晚于 `agg_*.csv` 最后一个文件日期的行
+  一律是"保留上次值"的降级产物，不是新观测**，统计前必须剔除。
+  **9/13 实况已把这条坐实**：`agg_trades/` 最后一个文件是 `agg_20260831.csv` →
+  **9/1 起所有 `btc_imb_*` 行都是沿用上次值的降级产物**，一条新观测都没有，全部剔除。
+- `scripts/ai500_agg_collector.py` 保留只为读懂历史落盘格式，头部已标 ⛔；**不要顺手重启它**。

@@ -41,12 +41,19 @@ export LOCAL_PROXY=http://127.0.0.1:7890          # 写进 ~/.bashrc 或 cron �
 #   （新的 ai500_oi_archiver.py 已经是这个写法）
 ```
 
-**先确认一下 bot 机器上 aggTrades 采集器现在的代理是什么**，再决定：
+~~**先确认一下 bot 机器上 aggTrades 采集器现在的代理是什么**~~
+> ✅ **已结案（2026-09-13）：这个待办作废——aggTrades 采集器 9/6 起停采，已拍板不恢复。**
+> 它的代理默认值是什么不再重要。原因复盘、不恢复的依据（币安官方归档可逐日补档）
+> 与补档口径见 `TASK_NEW/quant_system_tasks.md` 文末 09-13 条，以及
+> `scripts/ai500_agg_collector.py` 头部的 ⛔ 说明。**不要顺手把它重启起来。**
+>
+> 顺带订正上面第 27-28 行的推断：`DATA_DIR` 是个 Windows 绝对路径，当时据此断定
+> "它也在 bot 机器上跑"。这条**没被独立验证过**，别再当事实引用。
 
 ```bash
-crontab -l | grep -i agg          # 看它是怎么启动的
-grep -n 'PROXY' scripts/ai500_agg_collector.py
-ps aux | grep ai500_agg           # 确认它现在在跑
+# 若仍要确认它的历史运行痕迹（只为读懂旧数据，不为重启）：
+ls -lt user_data/agg_trades/ | head   # 末个 agg_*.csv 的日期 = 真实断点
+ps aux | grep ai500_agg               # 若居然还活着 → 按拍板停掉
 ```
 
 新增的 `ai500_oi_archiver.py` 用的是「`LOCAL_PROXY` 没设就直连」的写法，
