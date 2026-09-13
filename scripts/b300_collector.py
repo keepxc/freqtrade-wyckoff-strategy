@@ -26,10 +26,20 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from vergex_client import VergeX  # noqa: E402  同目录统一客户端（完整浏览器头 + UA 池 + 403 重试）
+
 SNAP_FILE = HERE / "b300_snapshots.jsonl"
 SIG_FILE = HERE / "b300_signals.jsonl"
 
-BASE = "https://vergex.trade/api/v1"
+# 2026-09-13: vergex 启用 Cloudflare 托管挑战，触发条件是**请求指纹**而非权限——
+#   短 UA（"Mozilla/5.0"）→ 403；完整浏览器头 + **urllib** → 200（实测 20/20）。
+#   ⚠️ requests 即使带同一套完整头仍 403（客户端指纹不同），必须走 urllib——
+#   vergex_client 已封装，勿改回 requests。
+BASE = "https://vergex.trade/api/v1"   # 保留常量（文档/兼容）
+
+_VX = VergeX(proxy=os.environ.get("B300_PROXY") or os.environ.get("LOCAL_PROXY")
+             or "http://127.0.0.1:7890")
 # 主流池：仅 core_perp 加密主流。ZEC/XMR/PONS 等属山寨，勿加入。
 MAJORS = {"BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "LINK", "AAVE", "HYPE"}
 LIQ_BAND = 15          # 强平带 ±%，平台默认
@@ -45,31 +55,26 @@ REQUIRED_VOTES = 2         # 三条满足两条
 
 
 def http_get_json(url: str, retries: int = 3):
-    last_err = None
-    for i in range(retries):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
-            last_err = e
-            time.sleep(2 * (i + 1))
-    raise RuntimeError(f"GET failed after {retries} retries: {url} ({last_err})")
+    """兼容层：完整 URL → VergeX 客户端（urllib + 完整浏览器头）。"""
+    if url.startswith(BASE):
+        return _VX.get_json(url[len(BASE):], use_api_prefix=True)
+    if url.startswith("https://vergex.trade"):
+        return _VX.get_json(url[len("https://vergex.trade"):])
+    raise RuntimeError(f"unsupported url: {url}")
 
 
 def fetch_leaderboard():
     """全市场方向排行榜（30 市场）。"""
-    items = http_get_json(f"{BASE}/direction-change/leaderboard")
-    if isinstance(items, dict):
-        items = items.get("items") or items.get("data") or []
-    return items
+    return _VX.leaderboard() or []
 
 
 def fetch_signals(symbol: str):
-    """单币完整结构信号。"""
-    url = (f"{BASE}/data-intelligence/markets/core_perp/"
-           f"core_perp%3A{symbol}/signals?chain=mainnet&liqBand={LIQ_BAND}")
-    return http_get_json(url).get("data", {})
+    """单币完整结构信号（compositeZ / dimensions / bias / levels）。
+
+    2026-09-13: 已恢复——signals 端点走 vergex.trade（完整头 + urllib），
+    B3.0 的三条门槛（directionScore / compositeZ / cgo·wp 百分位）重新全部可判。
+    """
+    return _VX.signals(symbol, LIQ_BAND)
 
 
 def dim_pct(data: dict, key: str):
@@ -113,8 +118,8 @@ def scan_once():
         time.sleep(REQUEST_GAP)
         try:
             sig = fetch_signals(sym)
-        except RuntimeError as e:
-            print(f"[warn] {sym} signals failed: {e}", file=sys.stderr)
+        except Exception as e:   # 不只 RuntimeError：任何单币异常都不该中断整轮快照
+            print(f"[warn] {sym} signals failed: {type(e).__name__}: {e}", file=sys.stderr)
             continue
         snapshot["signals"][sym] = {
             "compositeZ": sig.get("compositeZ"),
@@ -251,12 +256,20 @@ def breakout_scan(top_n=20):
     results = []
     for g in gainers:
         sym = g["symbol"]
+        # 非 ASCII symbol（币安中文名 meme，如「牛来」）：VergeX 不可能有 core_perp 合约，
+        # 且未编码拼 URL 会撞 ascii 编码错误。2026-09-13 实测：曾因它整轮 breakout 崩掉（exit 1）。
+        if not sym.isascii():
+            results.append({**g, "ts": ts, "tier": "no_market",
+                            "reason": f"non_ascii_symbol({sym})"})
+            print(f"  {sym:<10} +{g['pct']:.1f}%  no_market（非 ASCII 符号，VergeX 无合约）")
+            continue
         time.sleep(REQUEST_GAP)
         try:
             sig = fetch_signals(sym)
-        except RuntimeError as e:
-            results.append({**g, "ts": ts, "tier": "no_market", "reason": str(e)[:80]})
-            print(f"  {sym:<10} +{g['pct']:.1f}%  no_market（VergeX 无合约）")
+        except Exception as e:   # 原只捕 RuntimeError：UnicodeEncodeError 等会让整轮扫描崩掉
+            results.append({**g, "ts": ts, "tier": "no_market",
+                            "reason": f"{type(e).__name__}: {str(e)[:60]}"})
+            print(f"  {sym:<10} +{g['pct']:.1f}%  no_market（{type(e).__name__}）")
             continue
         v = classify_breakout(sig)
         lv = sig.get("levels") or {}

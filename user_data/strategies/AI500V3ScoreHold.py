@@ -52,9 +52,12 @@ dry-run 实跑 + 事后离线重放（僵尸行过滤结果逐次落盘，事后
   ai500_zombie_check.csv       —— 每次 top3 过滤结果（判据、复算涨幅、是否剔除）
 """
 import csv
+import json
 import logging
 import os
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone, timedelta
 
 import ccxt
@@ -78,12 +81,45 @@ _AI500_UD = os.environ.get(
 )
 
 CATEGORY_URL = "https://vergex.trade/trending-category"   # AI500 score 榜（本尊）
+
+# ⚠️ 2026-09-13: vergex 启用 Cloudflare 托管挑战——**短 UA（"Mozilla/5.0" / python-requests 等）一律 403**
+# （响应体 "Just a moment..."，实测旧头 0/12 通过）。必须带完整浏览器头指纹
+# （UA + Accept + Accept-Language + Origin + Referer + Sec-Fetch-*），实测 20/20 通过。
+# 本常量替换原 headers={"User-Agent": "Mozilla/5.0"}——两处调用（score 榜 + net_flow）共用。
+VERGEX_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Origin": "https://vergex.trade",
+    "Referer": "https://vergex.trade/explore",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+}
 TRENDING_URL = "https://vergex.trade/trending-crypto"      # net_flow 榜（五档落盘用）
 # 容器内 127.0.0.1 指向容器自身，拿不到宿主机代理；用 AI500_PROXY 覆盖
 # （docker 下设 http://host.docker.internal:7890）。不设时与原行为一致。
 _AI500_PROXY = os.environ.get("AI500_PROXY", "http://127.0.0.1:7890")
 TRENDING_PROXY = {"http": _AI500_PROXY, "https": _AI500_PROXY}
 FETCH_TIMEOUT = 10
+
+
+def _vergex_get_json(url: str, params: dict | None = None) -> dict:
+    """GET vergex JSON —— **必须用 urllib**。
+
+    2026-09-13 实测：相同完整浏览器头下，requests（含默认 / Session / identity-encoding
+    三种变体）一律 403 挑战页（6007B "Just a moment..."），urllib 稳定 200（1470B JSON）。
+    CF 判的是**客户端指纹**（非 header 内容）——所以外层换 requests→urllib 是修复的关键，
+    只补 header 不够。改回 requests 会重新撞 403。
+    """
+    if params:
+        url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers=VERGEX_HEADERS)
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({"http": _AI500_PROXY, "https": _AI500_PROXY}))
+    with opener.open(req, timeout=FETCH_TIMEOUT) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 LIST_LIMIT = 100    # net_flow 榜深度（API 实测上限 100；score 榜不受此参数影响）
 
 # score 榜历史。注意：V2 已写 ai500_score_history.csv，V3 与 V2 可能并行运行，
@@ -246,14 +282,7 @@ class AI500V3ScoreHold(IStrategy):
         数值字段已解析为 float/int。失败返回 None（调用方保留上次状态）。
         """
         try:
-            resp = requests.get(
-                CATEGORY_URL,
-                params={"lang": "zh", "key": "ai500"},
-                proxies=TRENDING_PROXY,
-                headers={"User-Agent": "Mozilla/5.0"}, timeout=FETCH_TIMEOUT,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            data = _vergex_get_json(CATEGORY_URL, {"lang": "zh", "key": "ai500"})
             assets = (data.get("category") or {}).get("assets") or []
             out = []
             for a in assets:
@@ -286,13 +315,7 @@ class AI500V3ScoreHold(IStrategy):
             if dur is not None:
                 params["duration"] = dur
             try:
-                resp = requests.get(
-                    TRENDING_URL, params=params,
-                    proxies=TRENDING_PROXY,
-                    headers={"User-Agent": "Mozilla/5.0"}, timeout=FETCH_TIMEOUT,
-                )
-                resp.raise_for_status()
-                data = resp.json()
+                data = _vergex_get_json(TRENDING_URL, params)
             except Exception as e:
                 logger.warning(f"[AI500V3] net_flow fetch duration={dur or 'default'} failed: {e}")
                 continue

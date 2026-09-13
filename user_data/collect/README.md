@@ -8,8 +8,8 @@
 ### 系统 crontab（crontab -l）
 | 任务 | 调度(CST) | 产物 | 状态 |
 |------|----------|------|------|
-| b300_collector --once | 5 0,4,8,12,16,20 | `b300_snapshots.jsonl` + `b300_signals.jsonl` | ✅ |
-| b300_collector --breakout | 20 0（每日；9/12 由 00:05 错峰，避与 --once/macd_m8 撞车） | `b300_breakout.jsonl` | ✅ |
+| b300_collector --once | 5 0,4,8,12,16,20 | `b300_snapshots.jsonl` + `b300_signals.jsonl` | ✅ **9/13 12:14 全恢复**——CF 指纹修复（`scripts/vergex_client.py`：完整浏览器头 + urllib）；signals/门槛判定/信号触发全部恢复 |
+| b300_collector --breakout | 20 0（每日；9/12 由 00:05 错峰） | `b300_breakout.jsonl` | ✅ signals 恢复 → 分类链恢复（待 00:20 下轮验证） |
 | ~~macd_m8 --once~~ | ~~5 0,4,8,12,16,20~~ | `macd_m8.jsonl` | 🛑 **已停采**（标记 9/11、9/12 落地；crontab 注释可逆）——转离线重建；jsonl 保留为**重建器历史对照物**，不删。采集器已硬化（帧锚 endTime），将来手动 `--once` 不会再错位 |
 | ai500_oi_archiver | 0 */6 | `oi_hist/oi_YYYYMMDD.csv.gz`（UTC 日切） | ✅ |
 | oi_data_trigger | 30 8（每日） | `oi_feather/` + market_data.db | ✅（9/9 修代理静默失败） |
@@ -17,7 +17,10 @@
 | download_recent_data | 2 *（每小时） | freqtrade data 目录 | ✅ |
 | P5 ingest | 0 23 | market.db | ✅ |
 
-### Bot 内置（V3 策略 30s 循环写，路径写死在策略代码——勿动）
+### Bot 内置（V3 策略循环写，路径写死在策略代码——勿动）
+
+✅ **V3 运行中**（9/13 11:56 因 vergex 断链暂停止 → 根因修复后 12:11 恢复；见 `TASK_NEW/DRYRUN_STATUS_20260911.md` §一 #8/#9）
+
 | 产物 | 内容 |
 |------|------|
 | `ai500_score_history_v3.csv` | V3 score 榜历史 |

@@ -16,6 +16,9 @@
 | 5 | `macd_m8 collector`（Hermes 侧）持续失败 | 同 #4 script 字段问题 + LLM 超时；真正执行者是**系统 crontab** | 删除 Hermes 僵尸 job（d75f15b36b26），保留系统 crontab |
 | 6 | `b300_collector --breakout` 连续两天无产物（9/11、9/12） | **00:05 三任务撞车**（b300 --once + b300 --breakout + macd_m8 同时挤 7890 代理）→ breakout 拉币安 24hr 全市场大响应被挤掉（SSL handshake timeout） | 调度错峰：breakout `5 0` → **`20 0`**（只改 crontab，脚本未动）。验证点：9/13 00:20 首跑 |
 | 7 | M8 采集器**时钟/窗口错位**（首帧实证）：ts 写 18:29:45，但 15m 数据窗口已是 18:30 后 | `fetch_klines` 每次调用各取 `time.time()`，脚本逐币逐周期耗时跨过 K 线边界 → ts 与实际数据窗口差 1 根（EMA seeding 起点不同 → 15m power ±1；XRP 4→3、LINK 3→4） | ① **硬化**（3 处）：`scan()` 每帧锚定 `anchor_ms` 并作为 `endTime` 下发、逐周期复用同一锚 → ts 与窗口同源自洽（调用方不传锚时行为不变）；② **停采**（9/11 起，crontab 注释可逆；转离线重建，见 §八-5） |
+| 8 | **vergex.trade 全部端点被 Cloudflare 拦**（9/12 起）→ B3 采集停 2 天、V3 的 score/net_flow 采集全断 | vergex 上线 WAF，触发条件是**请求指纹**：旧脚本 `UA = "Mozilla/5.0"`（短 UA）→ 403；且 **requests 即使带完整头仍 403**（客户端指纹差异），必须走 urllib | **根因修复（9/13 12:14 验收）**：新增统一客户端 `scripts/vergex_client.py`（完整浏览器头 + urllib）+ V3 策略加 `VERGEX_HEADERS`/`_vergex_get_json` → **B3 全恢复**（含 signals/门槛判定/信号触发）+ **V3 全恢复**。期间曾临时迁 Open API（`vergex_api.py`）作跳板，现保留为备用通道。详见 `vergex-trading-data` skill §32 |
+| 9 | **V3 dry-run 停用 → 当日恢复**（停 11:56 / 恢复 12:11 CST） | score 榜 HTTP 端点 9/12 14:45 起被 CF 拦 → `_entry_state` 抓取失败走 `keeping previous` 沿用旧值 → 产出污染样本 | 停 15 分钟后根因修复（见 #8）→ 12:11 重启，12:12:53 首轮 score 抓取正常（LSK 78.346 / ZEC 77.278 / USELESS 61.505），三个 CSV 恢复写入、无新 403 |
+| 10 | **爆发线 `--breakout` 整轮崩溃（exit 1，零产物）**（9/13 12:28 发现，修复后 12:30 验收） | 币安涨幅榜含中文名 meme **「牛来」** → symbol 未 URL 编码 → `urlopen` 抛 `UnicodeEncodeError`（position 60-61）；且 `breakout_scan` 只捕 `RuntimeError` → **单币异常崩掉整轮** | ① `vergex_client.signals()` 对 symbol 加 `urllib.parse.quote`；② `breakout_scan` 非 ASCII 符号直接记 `no_market(non_ascii_symbol)` + `except Exception`（per-coin 容错）；③ `scan_once` 同样放宽为 `except Exception`。**验收**：20 币完整跑完（watch=10 / no_market=10），`牛来` 正确归类 |
 
 **教训**：cron 健康不能只看 last_status/exit 0——必须核对产物时间戳与内容增长（#3 就是典型静默失败）。
 

@@ -39,7 +39,11 @@ HERE = Path(__file__).resolve().parent
 OUT_FILE = HERE / "macd_m8.jsonl"
 
 BINANCE_PROXY = os.environ.get("B300_PROXY", "http://127.0.0.1:7890")
-UA = "Mozilla/5.0"
+# 统一完整浏览器 UA（2026-09-13 与 scripts/vergex_client.py 对齐）。
+# 币安无 Cloudflare 挑战，短 UA 也能通；但统一请求指纹可避免将来任何 WAF/风控规则
+# 变化时再踩一次坑。旧值 UA = "Mozilla/5.0" 正是 2026-09 CF 事故的罪魁。
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 REQUEST_GAP = 0.35          # 币安权重友好间隔
 KLINE_LIMIT = 500           # EMA 预热足够（最慢 4h: 40+15）
 
