@@ -35,7 +35,8 @@
 | telegram-proxy-guard | 5m | 代理守护非采集 |
 
 ### 已停（产物保留不删）
-yss-signal（8/24 停）、aggTrades（**断点 09-06 17:52**，**9/13 拍板不恢复**，见下）、V1/V2 采集三件套、AI500 live
+yss-signal（8/24 停）、aggTrades（**断点 09-06 17:52**，**9/13 拍板不恢复**，见下）、
+**netflow_oi / btc_mtf / netflow_compact（三路同断于 09-04 23:1x，见下）**、V1/V2 采集三件套、AI500 live
 
 > **aggTrades 结案（9/13 拍板，9/14 订正断点）**：停用原因当时无人记录，9/11 才补记状态。
 > 9/14 在 bot 上实测：`agg_trades/` 里 `agg_20260831`~`agg_20260906` 七个文件齐全，
@@ -46,7 +47,26 @@ yss-signal（8/24 停）、aggTrades（**断点 09-06 17:52**，**9/13 拍板不
 > 属采集冗余（教训 7）。补档地址与列映射见 `scripts/ai500_agg_collector.py` 头部；
 > 注意归档当日文件次日才发布，只能补历史、喂不了实时。
 
+> 🆕 **另有三路观察数据同断于 2026-09-04 23:1x**（9/14 跑 `scripts/data_coverage_matrix.py` 才发现，
+> 此前各文档均无记录；与 aggTrades 同属"V1/V2 三件套 9/5 退役"这一事件，但那次的结案只记了 imbalance 一路）：
+>
+> | 产物 | 末行时间 | 谁写 | 可重建性 |
+> |------|---------|------|---------|
+> | `ai500_netflow_oi_history.csv` | **2026-09-04 23:16** | V1/V2 三件套 `bot_loop_start` | ❌ **不可重建**（vergex 专有排名无历史接口） |
+> | `ai500_btc_mtf_history.csv` | **2026-09-04 23:20** | 同上 | 部分（#4/#5 K 线可重算、#6 糖哥可回溯、#7 需 aggTrades 归档） |
+> | `ai500_netflow_hist_compact.csv.gz` | 2026-09-04 13:15（mtime 9/4 21:26，手工抽取物） | `scripts/ai500_history_extract.py`（手工） | 派生自 netflow_oi → 随上游一起断 |
+>
+> **根因**：三者都只由 `AI500V1DryRun` / `AI500V1MacdExitDryRun` / `AI500V2FlowHold` 写，
+> 它们 9/5 随 V3 上线退役；**V3 不写这三个文件**（grep 确认）。
+> **代价不对称**：aggTrades 能从币安官方归档补回，而 `netflow_oi` **不可重建** →
+> **9/4 23:16 之后是永久缺失**，组合研究算联合样本时必须按这个硬边界。
+
 ## 排查速查
 - 看数据是否新鲜：`ls -lt user_data/collect/`（symlink 显示真实 mtime）
+- ⚠️ **先查断链**：`find user_data/collect/ -xtype l`。本目录 symlink **不在 git 里**
+  （`user_data/collect/*` 被 gitignore），换机/挪目录后静默失效——`ls -lt` 里看着是正常条目，
+  实际读不到内容（9/9 建的 4 条曾指向 `../scripts/`，**少一层**，9/14 修正为 `../../scripts/`）。
+  断链还会让 `glob` + `os.path.getmtime()` 抛 FileNotFoundError，把整次盘点打成零产物。
+- 一次性盘点全部数据路的覆盖区间/滞后/可重建性：`python3 scripts/data_coverage_matrix.py`（只读）
 - 看日志尾部：`tail -5 logs/{b300_collector,macd_m8}.log` 等
 - 时区坑：`download_recent_data.log`/`fake_breakdown_detector.log` 打 UTC（-8h）；`oi_hist/` 文件名 UTC 日切；jsonl 全部 +08:00

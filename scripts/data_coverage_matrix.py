@@ -147,6 +147,18 @@ TARGETS = [
 
 TS_NAME_RE = re.compile(r"(^|_)(ts|time|timestamp|date|datetime|dt)($|_)", re.I)
 
+# 观测时间列名（优先于业务时间列）—— 2026-09-14 教训：
+# 只按 TS_NAME_RE 挑，会把 `start_time`（币种趋势起点，语义完全不同）当成采样时间。
+# 实测 ai500_score_history_v3.csv / ai500_zombie_check.csv 因此把末点报成
+# "最近一个币的 start_time"、滞后虚报 16.7h（真实是分钟级新鲜），起点/跨度/洞全跟着错。
+# 根因：`fetched_at_utc` 这种名字 TS_NAME_RE 认不出（token 拆成 fetched/at/utc），
+# 而 `start_time` 里的 `_time` 命中 → 被优先挑走。故单独给一条更靠前的规则。
+FETCH_TS_RE = re.compile(
+    r"(^|_)(fetched|observed|recorded|snapshot|collected|logged|ingested|written|updated|created)($|_)"
+    r"|(^|_)(ts|timestamp|datetime)($|_)",
+    re.I,
+)
+
 
 def _parse_ts(v):
     """尽量把一个值解析成 aware datetime。失败返回 None。"""
@@ -185,20 +197,25 @@ def _parse_ts(v):
 
 
 def _pick_ts_col(header, sample_rows):
-    """在表头里挑一个能解析成时间的列。优先名字像时间的。
+    """在表头里挑一个能解析成时间的列。**观测时间列优先于业务时间列。**
 
     sample_rows 传多行：真实落盘文件常有空行/半截行，只看第一行会整份误判。
+
+    候选顺序（2026-09-14 修）：① `FETCH_TS_RE` 命中的观测列名（fetched_at_utc 等）
+    → ② `TS_NAME_RE` 命中的其他时间列名 → ③ 其余列按位置。
+    旧版只有 ②③，于是在"既有观测列又有业务时间列"的文件上挑走了 `start_time`。
     """
     if sample_rows and isinstance(sample_rows[0], str):   # 容错：传了单行
         sample_rows = [sample_rows]
     rows = [r for r in sample_rows if r and any(str(c).strip() for c in r)]
     if not rows:
         return None
-    cands = [i for i, h in enumerate(header) if TS_NAME_RE.search(h or "")]
-    for i in cands:
-        if any(i < len(r) and _parse_ts(r[i]) for r in rows):
-            return i
-    for i in range(max(len(r) for r in rows)):
+    observed = [i for i, h in enumerate(header) if FETCH_TS_RE.search(h or "")]
+    named = [i for i, h in enumerate(header)
+             if i not in observed and TS_NAME_RE.search(h or "")]
+    ncol = max([len(header)] + [len(r) for r in rows])
+    rest = [i for i in range(ncol) if i not in observed and i not in named]
+    for i in observed + named + rest:
         if any(i < len(r) and _parse_ts(r[i]) for r in rows):
             return i
     return None
@@ -267,12 +284,20 @@ def scan_jsonl(path):
                 continue
             if not isinstance(obj, dict):
                 continue
-            for k, v in obj.items():
-                if TS_NAME_RE.search(k):
+            # 观测时间键优先（同 CSV 的教训：别被 start_time 这类业务时间键截胡）
+            for k, v in list(obj.items()):
+                if FETCH_TS_RE.search(k):
                     t = _parse_ts(v)
                     if t:
                         ts.append(t)
                         break
+            else:
+                for k, v in obj.items():
+                    if TS_NAME_RE.search(k):
+                        t = _parse_ts(v)
+                        if t:
+                            ts.append(t)
+                            break
     return rows, ts
 
 
@@ -311,7 +336,14 @@ def scan_target(t):
     ts_all = []
     newest_mtime = 0.0
     for fp in files:
-        newest_mtime = max(newest_mtime, os.path.getmtime(fp))
+        # glob 会把【断链的 symlink】也返回来（user_data/collect/ 这类汇聚目录常见，
+        # 且这些 symlink 不在 git 里、换机即失效）。对它调 getmtime 抛 FileNotFoundError
+        # 会让整次盘点零产物 —— 2026-09-14 首跑就是这么崩的。逐文件容错。
+        try:
+            newest_mtime = max(newest_mtime, os.path.getmtime(fp))
+        except OSError as e:
+            print(f"  [warn] 路径不可达，跳过: {fp} ({e.__class__.__name__})", file=sys.stderr)
+            continue
         try:
             if t["kind"] in ("jsonl",):
                 r, ts = scan_jsonl(fp)
@@ -323,7 +355,8 @@ def scan_target(t):
         rows_total += r
         ts_all.extend(ts)
     out["rows"] = rows_total
-    out["mtime"] = datetime.fromtimestamp(newest_mtime, timezone.utc)
+    out["mtime"] = (datetime.fromtimestamp(newest_mtime, timezone.utc)
+                    if newest_mtime else None)
     if not ts_all:
         out["status"] = "NO_TS"
         return out

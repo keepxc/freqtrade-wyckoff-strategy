@@ -261,3 +261,56 @@ aggTrades 属**采集冗余**，断多久都能补回来，与 score 榜"断一�
 **对 TASK 127 的影响（须同步该 TASK）**：观察项 #7/#8 的原料从 9/6 起断流，
 原计划"观察期至少积累 2-3 个月大单数据（约 2026-10 底）"的时间表**现已落空**——
 不是数据不可得，是没人在采也没人在算。要续这条线，先补档再重跑周统计脚本。
+
+---
+
+### 8. 数据可用性矩阵首跑 —— 顺手查出**另外三路观察数据早在 9/4 就断了**（9/14）
+
+**背景**：`scripts/data_coverage_matrix.py`（9/14 新增）回答"多路组合研究实际能用的联合样本有多长"。
+9/14 在本机（bot 机 `gyan-Inspiron-3442`）首跑。
+
+**首跑先崩了一次**：`FileNotFoundError: user_data/collect/b300_snapshots.jsonl`。
+根因：`user_data/collect/` 里 4 条 symlink（`b300_snapshots` / `b300_signals` / `b300_breakout` / `macd_m8`）
+指向 `../scripts/` —— **少一层**，真实产物在仓库根 `scripts/`。这些 symlink **不在 git 里**
+（`user_data/collect/*` 被 gitignore），9/9 本地建的，换机/挪目录即静默失效。已改为 `../../scripts/`（0 断链）。
+**副作用一条**：`user_data/collect/README.md` 里"看数据是否新鲜：`ls -lt user_data/collect/`"
+这条排查指引，**一直是在看断链**（列表看着是正常条目、内容读不到）。已在该 README 补
+`find user_data/collect/ -xtype l` 作前置检查。
+
+**跑出来的硬结论**（探索性——非结论，禁止引用为证据）：
+
+- **12 路全取交集 = ❌ 空集**（起点最晚 `zombie` 9/12 00:53；末点最早 `netflow_compact` 9/4 13:15）
+  → 这几路**从来没同时在采过**，一天也测不了。
+- **只算仍在采的 7 路 = 2.0 天**（9/12 00:53 ~ 9/14 00:20）——**瓶颈是 `zombie`（起点）**，
+  不是原先（用错误时间列算出来的）`b300_breakout`。
+- **不可重建的 8 路**（`zombie` / `b300_*` / `score_v3` / `netflow_multiwin` / `netflow_oi`）起点都在
+  8/18~9/12 且**补不回来** → 组合样本的历史上限就在这里；能补长的只有 K 线派生 / aggTrades / 糖哥那几路。
+  任何组合搜索前先算 MDE（CLAUDE.md 🔒前置纪律）。
+- ⚠️ **`zombie_check` 的观测只从 2026-09-12 00:53 起**（12 路里起点最晚）。V3 从 9/5 就在跑，
+  疑似 9/11 僵尸过滤器口径修复（§七）时该文件重建/重启——**待确认**。它现在是组合研究的**最紧瓶颈**：
+  要么认它，样本从 9/12 起算；要么把僵尸过滤这一路排除后重算交集。
+
+**顺手查出的新事实（此前各文档均无记录）**：三路观察数据**同断于 2026-09-04 23:1x**——
+
+| 产物 | 末行时间 | 可重建性 |
+|------|---------|---------|
+| `ai500_netflow_oi_history.csv` | 2026-09-04 **23:16** | ❌ **不可重建** |
+| `ai500_btc_mtf_history.csv` | 2026-09-04 **23:20** | 部分（#4/#5 K 线、#6 糖哥可回溯、#7 需 aggTrades） |
+| `ai500_netflow_hist_compact.csv.gz` | 2026-09-04 13:15（手工抽取物，mtime 9/4 21:26） | 派生自 netflow_oi |
+
+共因是 **V1/V2 三件套 9/5 退役**（写它们的是那三个策略的 `bot_loop_start`；**V3 不写**，grep 确认）。
+9/13 的 aggTrades 结案（§八-7）只记了"第 7 项 imbalance 随之断料"，**这三路没人记**。
+**代价不对称**：aggTrades 能从币安官方归档补回，`netflow_oi` **不可重建** →
+**9/4 23:16 之后永久缺失**。已补记进 `user_data/collect/README.md` 的"已停"清单。
+
+**工具本身修了一处（同批推送）**：`data_coverage_matrix.py` 的时间列启发式只认
+`TS_NAME_RE = (^|_)(ts|time|timestamp|date|datetime|dt)($|_)`，**认不出 `fetched_at_utc`**
+（token 拆成 fetched/at/utc），于是退而挑中 `start_time`（**币种趋势起点**，语义完全不同）→
+把 `score_v3` / `zombie` 报成"滞后 16.7h"（当时这两个文件是**分钟级新鲜**），起点/跨度/洞全错。
+修法：新增 `FETCH_TS_RE`（fetched/observed/recorded/snapshot/collected/logged/ingested/written/updated/created
+\+ ts/timestamp/datetime）作**第一优先**候选，`TS_NAME_RE` 退为第二优先；`scan_jsonl` 的键选择同步。
+**对照验证**：修前报告里 score_v3 末点 = 9/13 22:15 / 滞后 16.7h；修后 = 文件真实末行（分钟级）。
+⚠️ 这次误报**不影响矩阵头条结论**——空集的瓶颈是 `netflow_compact`(9/4) 与 `macd_m8`(9/6)，与这两路无关。
+
+**另一处顺手加固**：`glob` 会把**断链 symlink** 也返回来，对它调 `os.path.getmtime()` 抛
+`FileNotFoundError` 会让**整次盘点零产物**（就是首跑崩的原因）。已改为逐文件 try/except 跳过 + 打 warn。
