@@ -110,6 +110,13 @@ user_data/discovery_snapshots/
 user_data/yss_signal_snapshots/
 user_data/yss_signal_token.txt
 
+# 币安归档 K 线缓存(v3_entry_replay 下载, 完全可重建, 按需重下即可)
+user_data/vision_cache/
+
+# 采集守护的运行态(每台机器各自的, 不同步)
+user_data/.watchdog_state.json
+user_data/WATCHDOG_ALERT.txt
+
 # Claude IDE local config
 .claude/
 
