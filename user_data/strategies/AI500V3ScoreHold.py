@@ -27,11 +27,45 @@ V3 回归 ai500.txt 的本尊信号：score 榜无参调用、按 score 降序 t
 僵尸行过滤（用户拍板口径）
 --------------------------
 score 榜只返回「当前还活着」的信号，但其中混着「还挂着的死信号」
-（startTime 陈旧、change_pct_value 卡住不再随价格更新）。两级过滤：
-  1. 预筛：币安最新价 vs 接口 price 差 > 1pp → 直接判僵尸。
-  2. 主判据：用币安 1h K「覆盖 startTime 那根」的 open 复算累计涨幅
-     (现价 − start_open)/start_open，与 change_pct_value 差 > 3pp → 判僵尸。
-  实测真行差 ~0.5–1pp、僵尸行差 13–19pp，3pp 距两边各有一个数量级。
+（startTime 陈旧、change_pct_value 卡住不再随价格更新）。
+
+**当前只有一道判据在岗**：币安最新价 vs 接口 price 差 > 1pp → 判僵尸。
+即只校验「接口报的**当前价**是不是还活着」。
+
+曾经的两道主判据已先后降级为纯观测（继续算、继续落盘，不参与判定）：
+  · diff_pp     —— 比涨幅百分点，2026-09-11 降级（误差被累计涨幅放大，误杀 83.4%）
+  · ref_diff_pp —— 比起始价本身，2026-09-18 降级（见 §门③方案C）
+
+门③方案C（2026-09-18 用户拍板，**B 类改动，🔒 未封板**）
+-----------------------------------------------------------
+把「起始价偏离」这道门取消，只留实时价校验。
+
+依据（离线重放 ai500_score_history_v3 + ai500_zombie_check，3721 行 / 1481 轮）：
+  · 入场漏斗 门①100% → 门②(score>=80) 53.1% → **门③ 8.0%**，门③是唯一瓶颈。
+  · ref_diff_pp 在同一 (symbol, start_time) episode 内**恒为常数**
+    （ZEC 10.70 / BR 9.22 / LSK 1.87 / AIN 2.47）——它不是持续复核的实时判据，
+    而是 episode 诞生时的一次性判决，判完把该币整段封禁。
+  · 占全部评估 57.9% 的 ZEC(1411 次)+BR(737 次) 通过率 **0.0%**，而这两个恰是
+    分数最高的（峰值 92.61 / 89.36）。ZEC 的预筛是过的（币安 1182.05 vs
+    接口 1180.28 = 0.15pp），实时数据完全新鲜——拒它的唯一理由是一个
+    **122 天前的历史起始价**。
+  · 放行率 39.3% → 96.2%。原速率 13 天成交 2 笔，30 笔判据需 ~195 天，
+    实验结构上跑不完；改后约 5 周可达 30 笔。
+
+**冻结判据（先于数据，禁止事后调整）**：
+  主判据 = 本改动生效后**前 30 笔已平仓交易的累计净收益（含手续费）**
+    > 0      → 门③方案C 通过，可转入封板讨论
+    <= 0     → 否决，回滚门③
+  提前中止闸 = 累计净收益 <= -20% 时不等满 30 笔直接停（≈4 笔满额止损）
+  只记录不作判据：胜率、持仓时长、出场原因分布、MAE 分布
+  功效边界：单笔净收益 sd ≈ 2.6~5%，n=30 的 MDE ≈ +1.2~2.3%/笔。
+    **30 笔够否决，不够确认小 edge。** 若结果落在零附近，只能写
+    「无 ≥1.2%/笔 量级的效应」，不得写成「策略有效/无效」。
+
+本轮**只改门③**。止损档与出场周期一律不动——离线网格显示放宽止损单调变差
+（4h/-5% 总净 -17.36% → 无止损 -36.45%），缩短周期唯一 CI 下界>0 的 1h
+是 9 次比较里的预期假阳性；更重要的是同时改两处会让 30 笔前向样本无法归因。
+（该网格 n=8 episode、4 个是 ZEC，**探索性，非结论**。）
 
 top3 里有币安没有的（ACX/HFT/SCRT）跳过、不回补第 4 名，miss 记日志。
 top3 中的僵尸行同样**不回补**（顺位递补是 ai500_v3_复刻设计.md 的备选，
@@ -152,9 +186,14 @@ ZOMBIE_FIELDS = [
 ]
 
 # 僵尸行过滤阈值
-ZOMBIE_PREFILTER_PP = 1.0    # 预筛：币安最新价 vs 接口 price 差 >1pp 直接判僵尸（2026-09-05 用户拍板）
-ZOMBIE_REF_PP = 3.0          # 主判据：接口 start_price vs start_time 那根 1m K 开盘 差 >3% 判僵尸
-ZOMBIE_DIFF_PP = 3.0         # 【已降级为纯观测，不再参与判定】旧主判据的门槛，保留只为审计对比
+ZOMBIE_PREFILTER_PP = 1.0    # 【唯一在岗的判据】币安最新价 vs 接口 price 差 >1pp 判僵尸（2026-09-05 用户拍板）
+ZOMBIE_REF_PP = 3.0          # 【2026-09-18 降级为纯观测】接口 start_price vs start_time 那根 1m K 开盘
+ZOMBIE_DIFF_PP = 3.0         # 【2026-09-11 降级为纯观测】更旧的「比涨幅百分点」口径
+# ↑ 两个降级阈值都**保留常量与计算**：列继续落盘，供日后回答「当初那道门该不该关」。
+#   删掉计算就永久失去审计能力——30 笔前向样本跑完也说不清放行的里面有多少真僵尸。
+
+# 门③ 口径变更时点。**副作用条款：此刻前后的样本不得混池统计。**
+GATE3_C_EFFECTIVE_UTC = "2026-09-18"
 
 
 class AI500V3ScoreHold(IStrategy):
@@ -373,14 +412,23 @@ class AI500V3ScoreHold(IStrategy):
     def _check_tradable(self, sym: str, row: dict) -> dict:
         """对 score 榜单行做「币安合约存在性 + 僵尸行」过滤，返回入场决策状态。
 
-        顺序：fetch_ticker（顺带拿币安最新价）→ 预筛 1pp → 主判据 3%（参考价直比）。
-        任何一步失败都**不判可交易**（宁可错过，不误入僵尸行）。
+        顺序：fetch_ticker（顺带拿币安最新价）→ 预筛 1pp → **定判**；
+        其后的起始价核算全部只落盘、不参与判定。
 
-        两级各管一件事：
-          ① 预筛  —— 接口报的**当前价**是不是还活着（脱节 = 整行数据死了）
-          ② 主判据 —— 接口报的**起点价**是不是还活着（卡死 = HOT/ONT 那类僵尸行）
-        2026-09-11 改版：② 从「比涨幅百分点」改为「比参考价本身」，理由见 _start_price_1m
-        与下方注释。旧口径把 83.4% 的活信号误杀。
+        **判定只看一件事**（2026-09-18 方案C，见模块 docstring §门③方案C）：
+          接口报的**当前价**是不是还活着（与币安脱节 >1pp = 整行数据死了）。
+
+        为什么起始价那道门被取消：`ref_diff_pp` 在同一 episode 内恒为常数，
+        是「诞生即判决、判完整段封禁」的静态量，而不是实时健康度；它把占
+        全部评估 57.9% 且分数最高的 ZEC/BR 以 0.0% 通过率全数拒掉，而这两个
+        的**实时价校验是过的**。拒绝理由实为一个 122 天前的历史数字。
+
+        拿不到实时价仍然拒（ticker_error / no_contract / no_binance_client）——
+        **没法校验不等于可以放行**，这是方案C 与「完全取消门③」的唯一区别。
+
+        反过来，起始价相关的取数失败（no_start_time / no_start_price /
+        ref_1m_unavailable / ohlcv_error）现在**放行**：那些只是取不到一个
+        已经不参与判定的观测量，不构成风险信号（2026-09-18 用户拍板）。
         """
         pair = f"{sym}/USDT:USDT"
         st = {
@@ -423,59 +471,64 @@ class AI500V3ScoreHold(IStrategy):
                 st["is_zombie"] = 1
                 st["reason"] = "prefilter_price_mismatch"
                 return st
-        # 3) 主判据：接口 startPrice vs「start_time 那根 1m K 的开盘」直接比价。
-        #
-        # 为什么比「价」而不是比「涨幅」（2026-09-11 改版，旧版机制性误杀）：
-        # 旧版比的是 recomputed_pct 与 change_pct_value 的**百分点**差，而这个差
-        # ≈ 参考价相对误差 ×（1 + 累计涨幅）—— 标的涨得越多，同样的参考价误差被放得越大。
-        # 实测后果：5095 次评估里 83.4% 被判僵尸，其中 recompute_mismatch 占 82.9%，
-        # 而这批里「币安最新价 vs 接口价脱节 >1pp」的占比是 **0.0%**（中位脱节 0.043pp）——
-        # 数据完全是活的。corr(diff_pp, 参考价口径差) = 0.955，拒绝几乎全由口径差解释。
-        # 直接比参考价消除了放大效应，且更贴近真正要抓的失效模式（参考价卡死）。
+        # 3) 定判。预筛过 = 接口当前价还活着 → 可交易。
+        #    判定到此为止，下面一律只落盘不改判。
+        st["tradable"] = 1
+        st["reason"] = "ok"
+        self._record_ref_diag(st, pair, row)
+        return st
+
+    def _record_ref_diag(self, st: dict, pair: str, row: dict) -> None:
+        """纯观测：算起始价相关的两代旧判据并落盘，**绝不改 tradable / is_zombie**。
+
+        为什么取消判定资格后还要继续算：没有 ref_diff_pp / diff_pp 这两列，
+        30 笔前向样本跑完后就无法回答「被方案C 放行的那些里，究竟有多少是真僵尸」——
+        那正是评估门③该不该关的唯一证据来源。删计算 = 永久失去审计能力。
+
+        失败一律吞掉，只在 reason 上加 `ok:<原因>` 后缀（tradable 保持 1）。
+        观测量取不到不是风险信号。
+        """
         st_time = st["start_time"]
         chg = st["interface_change_pct"]
+        iface_price = st["interface_price"]
         if st_time is None:
-            st["reason"] = "no_start_time"
-            return st
+            st["reason"] = "ok:no_start_time"
+            return
         # 接口 startPrice 优先；缺失时用 price / (1 + change_pct) 反推。
         iface_start = row.get("start_price")
         if not iface_start or iface_start <= 0:
             if iface_price and chg is not None and (1.0 + float(chg) / 100.0) > 0:
                 iface_start = float(iface_price) / (1.0 + float(chg) / 100.0)
             else:
-                st["reason"] = "no_start_price"
-                return st
+                st["reason"] = "ok:no_start_price"
+                return
         st["interface_start_price"] = iface_start
+
+        # 第二代判据 ref_diff_pp：接口 startPrice vs「start_time 那根 1m K 的开盘」直比价。
+        # 2026-09-18 降级为纯观测（原门槛 ZOMBIE_REF_PP=3.0）。
         try:
             ref = self._start_price_1m(pair, int(st_time))
         except Exception as e:
-            st["reason"] = f"ohlcv_error:{type(e).__name__}"
-            return st
-        if ref is None or ref <= 0:
-            st["reason"] = "ref_1m_unavailable"
-            return st
-        st["ref_1m"] = ref
-        ref_diff = abs(float(iface_start) / ref - 1.0) * 100.0
-        st["ref_diff_pp"] = ref_diff
+            st["reason"] = f"ok:ohlcv_error:{type(e).__name__}"
+            ref = None
+        if ref and ref > 0:
+            st["ref_1m"] = ref
+            st["ref_diff_pp"] = abs(float(iface_start) / ref - 1.0) * 100.0
+        elif st["reason"] == "ok":
+            st["reason"] = "ok:ref_1m_unavailable"
 
-        # 旧判据继续算、继续落盘，但**不再参与判定**——留作 A/B 审计。
+        # 第一代判据 diff_pp：比涨幅百分点。2026-09-11 已降级（误差被累计涨幅放大，
+        # corr(diff_pp, 参考价口径差)=0.955，误杀 83.4% 的活信号）。
         try:
             start_open = self._start_open_1h(pair, int(st_time))
             if start_open and start_open > 0:
                 st["start_open"] = start_open
-                st["recomputed_pct"] = (last - start_open) / start_open * 100.0
+                st["recomputed_pct"] = ((st["binance_price"] - start_open)
+                                        / start_open * 100.0)
                 if chg is not None:
                     st["diff_pp"] = abs(st["recomputed_pct"] - float(chg))
         except Exception:
             pass
-
-        if ref_diff > ZOMBIE_REF_PP:
-            st["is_zombie"] = 1
-            st["reason"] = "ref_price_mismatch"
-            return st
-        st["tradable"] = 1
-        st["reason"] = "ok"
-        return st
 
     def _refresh_entry_state(self, rows: list[dict], fetched_at: str) -> None:
         """score 榜按 score 降序取 top3，逐个做僵尸行过滤，写 self._entry_state + 落盘。"""
