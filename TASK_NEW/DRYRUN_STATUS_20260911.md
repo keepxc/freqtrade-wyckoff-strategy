@@ -335,3 +335,62 @@ aggTrades 属**采集冗余**，断多久都能补回来，与 score 榜"断一�
 
 **另一处顺手加固**：`glob` 会把**断链 symlink** 也返回来，对它调 `os.path.getmtime()` 抛
 `FileNotFoundError` 会让**整次盘点零产物**（就是首跑崩的原因）。已改为逐文件 try/except 跳过 + 打 warn。
+
+---
+
+## 九、V3 信号裁决缺陷修复（9/19，A 类）＋ 外部评审对账
+
+全证据链见 `AI500_V3_GATE3_PREREG.md` §6。此处只记要点与未闭环项。
+
+### 1. 缺陷：4h 阴线出场与 top3 入场互相吞掉
+
+freqtrade 在 `enter_long` 与 `exit_long` 同为 1 时**把两个信号都作废**
+（`strategy/interface.py:1372` 与 `:1462`）。旧 V3 两个信号都整段广播到同一
+dataframe，于是最后一根已收 4h K 上：
+
+- **阴线 + 新信号** → 入场被吞，退化成隐藏规则「只在阳线后买」；
+- **阴线 + 持仓中且仍在榜**（**常态**，ZEC 连续合格 1,411 轮）→ 出场被吞，
+  **「4h 收阴线平仓」这条核心规则在实盘里几乎从未执行过**。
+
+与实盘观测完全吻合：13 天 2 笔，**2/2 死于 `stoploss=-5%`，0/2 死于 `exit_signal`**，
+第二笔持仓 4h27m 跨过了 4h 边界却没被平掉。
+
+**修法**：出场移入 `custom_exit`（只对已持仓 trade 求值，不参与入场裁决），
+`populate_exit_trend` 恒置 `exit_long=0`。未新增自由参数；止损档 / 出场周期 /
+门③ / MIN_SCORE / TOP_N 一律未动。
+
+**校验**：`scripts/_exit_signal_unit.py` 9/9 通过（含「旧实现两头都吞」的缺陷复现）；
+`scripts/_gate3_unit.py` 回归仍 12/12。两者退出码 0。
+
+**副作用（分池）**：`GATE3_C_RESTART_UTC = "2026-09-19"`，30 笔前向样本**重新起算**
+（重置时前向样本仅 0~1 笔，成本最低时点）。另：§1.2「30 笔约 5 周」的推算由放行率
+外推，`v3_entry_replay.py` 的 `entry_events()` **未建模阴线吞入场**，故原速率偏乐观。
+
+### 2. 新增对照腿脚本（观测，不改已冻结主判据）
+
+`scripts/v3_baseline_legs.py`（**探索性**）配对算四腿：S 策略腿 / H 裸持 48h /
+B BTC 同窗口 / R rank 4~10 同规则。回答「赚了钱是不是因为 AI500」——
+`mean > 0` 不等于 score 有 alpha。采纳自外部评审。
+
+### 3. 外部评审对账（`gpt_review_AI500V3_20260918.md`）
+
+| 评审论点 | 处置 |
+|---|---|
+| 需要 baseline，"赚钱 ≠ AI500 有 alpha" | ✅ **采纳** → `v3_baseline_legs.py` |
+| 4h 阴线截断右尾，要看 MFE | ✅ **采纳**（腿 S − 腿 H 即右尾截断量级）。此前唯一证据是 n=8 出场网格 |
+| 30 笔不是 30 个独立样本（ZEC×4） | ✅ **采纳** → 结果章节强制报标的集中度（PREREG §6.6）；主判据已冻结不改 |
+| score≥80 / top3 从未验证预测力 | ✅ 论点成立，但它要的历史 bucket 表**结构上做不出来**（score 榜不可重建，`AI500_PRICEBOARD_PREREG` §0），只能向前攒 —— 即 dry-run 正在做的事 |
+| 风险 #1：score 是"拥挤后的结果变量"，追在 alpha 末端 | ✅ 成立，且**评审低估了自己**：姊妹榜（涨幅榜）已用 528 标的×一年×n=6552 做出 ❌ 证伪（9/9 点估计为负，6 格 CI 上界<0，中位=止损位）。该结论明确不外推到 score 榜，但同构警示已在 §8.1 |
+| 事后调参已发生，9-18 必须是切断点 | ✅ 已在执行（`GATE3_C_EFFECTIVE_UTC`、副作用条款、A/B 分流）——评审此段是复述本项目已有纪律 |
+| 1pp 只证明"接口价没 stale"，不证明"信号还活着" | ⭕ 论点对，但**不加门**：评审自己第 7 节也说别再折腾门③，两处自相矛盾，按前者办 |
+| **"先改 `process_only_new_candles` 时序错配"= 头号优先级** | ❌ **处方错**。4h 决策网格是 `ai500.txt`「240min 扫描」的忠实实现，`AI500_PRICEBOARD_PREREG:56` 已把它写成冻结口径，离线重放器照此建模；改 False 会让网格退化成每 30s 重判、同根 K 反复发信号。真正的缺陷是上面第 1 节的信号互吞 —— **评审整份未提** |
+
+### 4. ⚠️ 未闭环：白名单覆盖面（独立于门③的漏损管道）
+
+`user_data/config_ai500_v3_dryrun.json` **不在仓库内**（deploy 的 service 引用它），
+本次无法核对。若它沿用 V2 的 `VolumePairList(number_assets=200)`，则**成交量排不进
+前 200 的 AI500 标的会被静默跳过**：不进 `_entry_state`、不记 `no_contract`、
+漏斗重放也看不见（重放读 score CSV，不读 freqtrade 白名单）。
+
+**待办**：核对该 config 的 `pairlists`。若确为 VolumePairList，需评估改
+StaticPairList 或提高 `number_assets`，并把 miss 计入漏斗。
