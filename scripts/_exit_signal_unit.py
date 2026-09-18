@@ -52,10 +52,10 @@ class FakeTrade:
         self.pair = "ZEC/USDT:USDT"
 
 
-def run_custom_exit(candle, entry_at):
+def run_custom_exit(candle, entry_at, now=None):
     s = make_strategy(candle)
-    return s.custom_exit("ZEC/USDT:USDT", FakeTrade(entry_at), T0 + timedelta(hours=4),
-                         100.0, 0.0)
+    return s.custom_exit("ZEC/USDT:USDT", FakeTrade(entry_at),
+                         now or T0 + timedelta(hours=4), 100.0, 0.0)
 
 
 # --------------------------------------------------------------- A. 真值表
@@ -88,6 +88,18 @@ got = run_custom_exit(BEAR, T0 + timedelta(hours=4))
 ok = got is None
 fails += not ok
 print(f"{'✅' if ok else '❌'} {'阴线 + 入场恰在收盘同一时刻（严格性边界）':<38} → {got!r:<22} 期望 None")
+
+# D6 守卫：末根尚未收盘（current_time 早于 candle_close）→ 一律不出场
+got = run_custom_exit(BEAR, BEFORE, now=T0 + timedelta(hours=2))
+ok = got is None
+fails += not ok
+print(f"{'✅' if ok else '❌'} {'阴线 + 末根尚未收盘（D6 守卫）':<38} → {got!r:<22} 期望 None")
+
+# D6 守卫不得误伤：恰好收盘那一刻应正常出场
+got = run_custom_exit(BEAR, BEFORE, now=T0 + timedelta(hours=4))
+ok = got == "4h_bearish_candle"
+fails += not ok
+print(f"{'✅' if ok else '❌'} {'阴线 + 恰好收盘那一刻（守卫不误伤）':<38} → {got!r:<22} 期望 '4h_bearish_candle'")
 
 # --------------------------------------------------------------- B. 回归证明
 print("\n=== B. 回归：freqtrade 信号冲突裁决（复刻 strategy/interface.py） ===")
@@ -142,6 +154,6 @@ inv3 = run_custom_exit(BEAR, BEFORE) == "4h_bearish_candle"
 fails += not inv3
 print(f"{'✅' if inv3 else '❌'} 不变式3：同一场景下新实现按阴线平仓生效")
 
-n_cases = len(CASES) + 1 + 3
+n_cases = len(CASES) + 3 + 3
 print(f"\n=== {n_cases} 项检查，失败 {fails} ===")
 sys.exit(1 if fails else 0)

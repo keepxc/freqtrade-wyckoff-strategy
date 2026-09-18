@@ -711,17 +711,29 @@ class AI500V3ScoreHold(IStrategy):
         populate 路径的出场会被系统性吞掉。custom_exit 只对已持仓 trade 求值，
         不参与入场裁决，结构上不会互撞。
 
-        dataframe 末行 = 最近一根**已收盘** 4h K（freqtrade 实时默认丢弃未完成 K），
-        其 `date` 是**开盘**时刻，故收盘时刻 = date + timeframe。用收盘时刻与
-        `trade.open_date_utc` 比较，实现「严格晚于入场」——入场那根 K 不算数。
+        dataframe 末行 = 最近一根**已收盘** 4h K，其 `date` 是**开盘**时刻，故收盘
+        时刻 = date + timeframe。用收盘时刻与 `trade.open_date_utc` 比较，实现
+        「严格晚于入场」——入场那根 K 不算数。
 
-        48h 强制离场兜底走 minimal_roi；5% 止损走 stoploss。三条路径互不冲突。
+        **出场优先级（2026-09-19 核对 freqtrade 2026.2，纠正一个常见误解）**：
+        `should_exit` 的 append 顺序是 exit-signal → stoploss → ROI → trailing，
+        而 `freqtradebot.py:1383` 命中**第一个**就返回。所以同一轮内两者都触发时，
+        **custom_exit 赢过 stoploss**（按阴线收盘价平，通常优于止损价），
+        不是反过来。止损之所以在实盘里先发言，是**时间先后**：它在 4h 之间的
+        任意一轮就打掉了，那时没有新 K、没有出场信号。48h 兜底走 minimal_roi。
         """
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if df is None or len(df) == 0:
             return None
         last = df.iloc[-1]
         candle_close = last['date'] + pd.Timedelta(minutes=timeframe_to_minutes(self.timeframe))
+        # 防御性：把「末行已收盘」从依赖交易所配置的外部假设变成本函数的局部保证。
+        # 币安路径下 `_ft_has["ohlcv_partial_candle"]=True`（exchange.py:139，binance
+        # 未覆盖）会丢掉未完成 K，本条正常不触发；但 `exchange.py:2786` 的
+        # `idx = -2 if drop_incomplete and len(ticks) > 1 else -1` 在只回 1 根 K 时
+        # 不丢弃 —— 而白名单里确实存在 dataframe 只有 2 行的 pair，这不是纯理论区域。
+        if candle_close > current_time:
+            return None
         if candle_close <= trade.open_date_utc:
             return None   # 入场那根 K（或更早），不构成「入场后」的阴线
         if last['close'] < last['open']:
