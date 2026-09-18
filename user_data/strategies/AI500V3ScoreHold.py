@@ -67,6 +67,42 @@ score 榜只返回「当前还活着」的信号，但其中混着「还挂着�
 是 9 次比较里的预期假阳性；更重要的是同时改两处会让 30 笔前向样本无法归因。
 （该网格 n=8 episode、4 个是 ZEC，**探索性，非结论**。）
 
+信号裁决缺陷修复（2026-09-19，**A 类**，见 AI500_V3_GATE3_PREREG.md §6）
+--------------------------------------------------------------------------
+**旧实现执行的既不是文档写的入场规则，也不是文档写的出场规则。**
+
+根因在 freqtrade 的信号裁决（`strategy/interface.py`）——它把「同一根 K 上
+入场信号与出场信号同时为 1」当作冲突，**两边都作废**：
+
+  · `get_entry_signal` L1372：`if enter_long == 1 and not any([exit_long, ...])`
+  · `should_exit`       L1462：`if exit_ and not enter:  → EXIT_SIGNAL`
+
+而旧代码把两个信号都**整段广播**到同一个 dataframe：入场条件（score/rank/
+tradable 是标量）对所有行恒真，出场条件 `close<open` 按行计算。于是在最后
+一根已收 4h K 上：
+
+| 该 4h K | 是否在 top3&score≥80 | enter | exit | freqtrade 实际行为 |
+|---|---|---|---|---|
+| 阴线 | 是（新信号） | 1 | 1 | **入场被吞** ← 隐藏成了「只在阳线后买」 |
+| 阴线 | 是（持仓中，仍在榜） | 1 | 1 | **出场被吞** ← 4h 阴线出场成了死代码 |
+| 阳线 | 是 | 1 | 0 | 正常入场 |
+
+第二行是常态而非例外：持仓期间标的按构造仍在 top3（ZEC 连续合格 1411 轮），
+所以**「4h 收阴线平仓」这条规则在实盘里几乎从未执行过**。这与实盘 13 天
+2 笔、**2/2 都死在 `stoploss=-5%`**、持仓 2h19m / 4h27m（第二笔跨过了 4h
+边界却没被阴线平掉）的观测完全吻合。
+
+**修法**：出场从 `populate_exit_trend` 移入 `custom_exit`。`custom_exit` 只
+对**已持仓** trade 求值（`should_exit` 的 else 分支），结构上不可能与入场
+信号互撞；顺带把「首根收盘时刻严格晚于入场的 4h K」从「靠 freqtrade 时序
+隐式保证」改成显式判断。出场语义与 `ai500.txt` 逐字一致，**未新增任何自由
+参数**，止损档 / 出场周期 / 门③一律不动。
+
+**副作用条款（CLAUDE.md）**：入场与出场触发面都变了（入场机会约翻倍，
+4h 阴线出场首次真正生效）。`GATE3_C_RESTART_UTC` 之前的样本**不得与之后
+混池**，GATE3 的 30 笔**从该时点重新起算**（重置时前向样本仅 0~1 笔，
+此刻是重置成本最低的时点）。
+
 top3 里有币安没有的（ACX/HFT/SCRT）跳过、不回补第 4 名，miss 记日志。
 top3 中的僵尸行同样**不回补**（顺位递补是 ai500_v3_复刻设计.md 的备选，
 用户 2026-09-05 拍板不递补——递补会悄悄改规则，miss 记日志事后量化）。
@@ -99,6 +135,8 @@ import pandas as pd
 import requests
 from pandas import DataFrame
 
+from freqtrade.exchange import timeframe_to_minutes
+from freqtrade.persistence import Trade
 from freqtrade.strategy import IStrategy
 
 logger = logging.getLogger(__name__)
@@ -194,6 +232,9 @@ ZOMBIE_DIFF_PP = 3.0         # 【2026-09-11 降级为纯观测】更旧的「�
 
 # 门③ 口径变更时点。**副作用条款：此刻前后的样本不得混池统计。**
 GATE3_C_EFFECTIVE_UTC = "2026-09-18"
+# 信号裁决缺陷修复（出场移入 custom_exit）时点。入场与出场触发面同时改变，
+# **GATE3 的 30 笔前向样本从此刻重新起算**，此刻之前的成交不得混入。
+GATE3_C_RESTART_UTC = "2026-09-19"
 
 
 class AI500V3ScoreHold(IStrategy):
@@ -650,14 +691,39 @@ class AI500V3ScoreHold(IStrategy):
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        """出场：4h 收阴线（close < open）即平。
+        """**恒为 0。** 4h 阴线出场已移入 `custom_exit`（2026-09-19，见文件头）。
 
-        timeframe=4h 下 dataframe 本身就是 4h K；「入场后首根晚于入场的 4h K」
-        由 freqtrade 时序自然保证（出场评估先于入场评估，新开仓不会在同一根 K 被平）。
+        绝不要把出场信号写回这里：入场条件对本 dataframe 的所有行恒真（score /
+        rank / tradable 是标量广播），而 freqtrade 在 `enter_long` 与 `exit_long`
+        同为 1 时会把**两个信号都作废** —— 入场被吞成「只在阳线后买」，出场被吞
+        成「持仓期间只要还在榜就永不按阴线平仓」。这正是旧实现的缺陷。
+        """
+        dataframe['exit_long'] = 0
+        return dataframe
+
+    def custom_exit(self, pair: str, trade: Trade, current_time: datetime,
+                    current_rate: float, current_profit: float, **kwargs) -> str | None:
+        """出场：入场后**首根「收盘时刻严格晚于入场」的收阴 4h K**（close < open）即平。
+
+        为什么走 custom_exit 而不是 populate_exit_trend：`should_exit` 只在
+        `exit_ and not enter` 时才认 populate 的出场信号，否则才落到 custom_exit。
+        由于本策略持仓期间 `enter_long` 基本恒为 1（标的仍在 top3 且 score≥80），
+        populate 路径的出场会被系统性吞掉。custom_exit 只对已持仓 trade 求值，
+        不参与入场裁决，结构上不会互撞。
+
+        dataframe 末行 = 最近一根**已收盘** 4h K（freqtrade 实时默认丢弃未完成 K），
+        其 `date` 是**开盘**时刻，故收盘时刻 = date + timeframe。用收盘时刻与
+        `trade.open_date_utc` 比较，实现「严格晚于入场」——入场那根 K 不算数。
+
         48h 强制离场兜底走 minimal_roi；5% 止损走 stoploss。三条路径互不冲突。
         """
-        dataframe.loc[
-            (dataframe['close'] < dataframe['open']),
-            ['exit_long', 'exit_tag'],
-        ] = (1, '4h_bearish_candle')
-        return dataframe
+        df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        if df is None or len(df) == 0:
+            return None
+        last = df.iloc[-1]
+        candle_close = last['date'] + pd.Timedelta(minutes=timeframe_to_minutes(self.timeframe))
+        if candle_close <= trade.open_date_utc:
+            return None   # 入场那根 K（或更早），不构成「入场后」的阴线
+        if last['close'] < last['open']:
+            return '4h_bearish_candle'
+        return None
