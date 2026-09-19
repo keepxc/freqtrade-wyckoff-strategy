@@ -17,25 +17,35 @@ V3 对照腿 + 协变量测量 —— 「赚了钱是不是因为 AI500」
   腿 H  裸持 48h    不止损、不看阴线，持满 48h。**S − H = 出场规则赚了还是亏了**
   腿 B  BTC 同窗口  与腿 S 完全相同的持有窗口内 BTC 的收益。**S − B = 剥掉 beta**
   腿 L  score 60~80 同一 4h 边界上榜单里 60 ≤ score < 80 的行，套腿 S 同一规则
-                    等权。**S − L = `MIN_SCORE=80` 这条线是故事还是统计结论**
+                    等权。**S − L = `MIN_SCORE=80` 这条线是故事还是统计结论**（主对照）
+  腿 R  rank 4~10   同一 4h 边界上榜单第 4~10 名，套腿 S 同一规则等权。
+                    **S − R = top3 这个截断有没有意义**（次要腿，样本薄，必看 n）
 
-### 为什么腿 L 取代了原设计的「rank 4~10」（2026-09-19 推翻）
+### ⚠️ 一处已更正的推断（2026-09-19，PREREG §6.10 同步更正）
 
-原设计要比 top3 与 rank 4~10。**该前提是错的**，用仓库自己的数据即可证伪：
+本脚本初版**删掉了腿 R**，理由是下面这段推断：
 
     ai500_zombie_check.csv  3,721 行 / 1,481 个决策轮次   (PREREG §1.2)
     _refresh_entry_state 每轮写 min(3, 有分资产数) 行
-    3,721 / 1,481 = 2.51 行/轮       ← 若每轮都有 ≥3 个有分资产，应为 4,443 行
-    解得：约 759 轮有 3 个、722 轮只有 2 个
+    3,721 / 1,481 = 2.51 行/轮  ⇒「榜上同时只挂 2~3 个活信号」
 
-**AI500 榜同时只挂 2~3 个活信号，`TOP_N=3` 等于「榜上有啥买啥」。**
-大多数轮次根本不存在 rank 4~10 → 那条腿会几乎全空。三个连带结论：
-  1. `门①(rank≤3) 通过率 100%` 不能当证据用 —— 双重空洞：重放只看 top3 行，
-     而榜上本来也就 2~3 个；
-  2. `max_open_trades=3` 同样不是约束；
-  3. **本策略实际上没有横截面选择**。唯一的真实决策只剩 `score≥80`、僵尸门、
-     出场规则 —— 所谓「AI500 alpha」整个归约为「这个榜上 80 这条线有没有预测力」，
-     排名成分为零。这正是腿 L 要量的东西。
+**该推断是错的。** 实跑直接测量榜深度得到 `median=3 / mean=3.89 / >3 占 48.9%`
+—— rank 4~10 **约一半快照是存在的**，腿 R 只是样本薄，不是不可能。
+
+错在把 `2.51` 当成榜深度的代理：`ai500_zombie_check.csv` 自 **2026-09-11 16:53**
+才开始覆盖，而分母那 1,481 轮跨了更长的窗口，**没有僵尸记录的轮次进了分母却没
+贡献行数**，把每轮行数压低了。这正是 `v3_entry_replay.entry_events` 文档里警告过
+的窗口不对齐陷阱的变体。
+
+**教训：直接测量优先于间接推断。** 榜深度诊断（见 `main()` 开头输出）就是为此保留
+并前置的——每次跑都复核这条前提，不再靠算术外推。
+
+连带更正（原文过头，现收窄）：
+  1. `门①(rank≤3) 通过率 100%` 仍**不能**当证据用，但理由只剩一条：重放只看
+     top3 行，门① 按构造必然 100%。不能再说「榜上本来也就 2~3 个」。
+  2. `max_open_trades=3` 的约束力取决于榜深度，**不是**「肯定不构成约束」。
+  3. 「本策略实际上没有横截面选择」→ 应为「**横截面选择很弱**」（top3 of ~3.9）。
+     `score≥80` 仍是策略最实质的那道门，故腿 L 保留为**主对照**、腿 R 为次要腿。
 
 三个协变量（逐笔落盘 + 分层描述）
 --------------------------------
@@ -75,6 +85,15 @@ V3 对照腿 + 协变量测量 —— 「赚了钱是不是因为 AI500」
    **不是**一个可部署的替代方案。
 6. 协变量分层是**描述性**的。n 十几个 episode 分 4 档后每档个位数，
    **不得**对分层差异做任何显著性声明。
+7. ⚠️ **episode 压缩会隐藏实盘的「止损后原价位重入」模式。** `to_episodes` 把
+   同标的 4h 内连续合格的事件压成一个，只留首个；但实盘没有冷却期，止损平仓后
+   只要标的仍在榜就**立刻重新开仓**（实证：BR #3 於 0.88993 入场、0.83548 止损
+   出场，随后 #4 於 0.80897 再次买入同一标的，比上一笔出场价再低 3.17%）。
+   因此腿 S 的**笔数与累计亏损都低于实盘**，它测的是「每个信号段的首次入场」，
+   不是「该策略在这段行情里真实会做多少笔」。读腿 S 时必须记住这条偏差方向：
+   **对策略有利**。真实重入频次只能从 bot 的成交记录统计，不在本脚本范围内。
+8. 腿 R 样本薄（约一半快照才有 rank 4~10），**任何腿 R 的读数必须连同 n 一起看**；
+   n 个位数时不得做方向性陈述。
 
 用法：
     python3 scripts/v3_baseline_legs.py --score-history user_data/ai500_score_history_v3.csv
@@ -110,6 +129,7 @@ MIN_SCORE = _er.MIN_SCORE           # 80.0
 MAX_HOLD_H = 48                     # minimal_roi {"2880": -1}
 FEE_ROUNDTRIP = 0.001               # 往返 0.1%
 LOW_SCORE_BAND = (60.0, MIN_SCORE)  # 腿 L：60 ≤ score < 80（策略只观察、不进场那一档）
+RANK_BUCKET = (4, 10)               # 腿 R：榜单第 4~10 名（次要腿，约一半快照才有）
 BOOT_N = 2000
 Z_SUM = 1.96 + 0.8416               # MDE = Z_SUM × sd_自举
 
@@ -213,6 +233,17 @@ def covariates(row, T):
         prior_gain_pct=_f(row.get("change_pct_value")),
         score_over_peak=(score / peak if score is not None and peak else None),
     )
+
+
+def rank_bucket_symbols(rows):
+    """腿 R 名单：按 score 降序的第 4~10 名（1-indexed，含两端）。
+
+    约一半快照榜深度 ≤3 ⇒ 该名单常为空，这是腿 R「样本薄」的来源（局限 8）。
+    """
+    board = sorted((r for r in rows if _f(r.get("score")) is not None),
+                   key=lambda r: -_f(r["score"]))
+    lo, hi = RANK_BUCKET
+    return [r["symbol"] for r in board[lo - 1:hi]]
 
 
 def low_band_symbols(rows, zgate=None, snap_t=None):
@@ -327,7 +358,9 @@ def main():
         print(f"榜深度（每快照有分资产数）：中位 {statistics.median(depths):.0f}  "
               f"均值 {statistics.fmean(depths):.2f}  最大 {max(depths)}  "
               f"→ >3 的快照占 {sum(1 for d in depths if d > 3)/len(depths)*100:.1f}%")
-        print("  ↑ 若中位 ≤3，则 TOP_N=3 不构成横截面选择，rank 对照腿无数据（见文件头）")
+        print("  ↑ 这是腿 R 可用性与「TOP_N=3 的横截面选择强度」的唯一直接读数。")
+        print("    >3 占比 = 腿 R 有数据的快照比例；占比越低，TOP_N=3 越接近「榜上有啥买啥」。")
+        print("    **禁止再用 zombie_check 的行/轮比外推榜深度**（窗口不对齐，已错过一次，见文件头）")
 
     conc = collections.Counter(sym for _, sym, _ in episodes)
     tot = sum(conc.values()) or 1
@@ -354,13 +387,14 @@ def main():
         # 协变量 + 腿 L 名单，都取自该边界实际使用的那个快照
         snap_t, board = snapshot_at(snaps, sorted_ts, T)
         cov = dict(signal_age_h=None, prior_gain_pct=None, score_over_peak=None)
-        l_gated_syms, l_ungated_syms = [], []
+        l_gated_syms, l_ungated_syms, r_syms = [], [], []
         if board is not None:
             me = next((r for r in board if r["symbol"] == sym), None)
             if me:
                 cov = covariates(me, T)
             l_gated_syms, l_ungated_syms, na = low_band_symbols(board, zgate, snap_t)
             lband_unavail += na
+            r_syms = rank_bucket_symbols(board)
 
         def band_mean(syms):
             vals = []
@@ -372,10 +406,11 @@ def main():
 
         l_un, l_un_n = band_mean(l_ungated_syms)
         l_ga, l_ga_n = band_mean(l_gated_syms) if zgate else (None, 0)
+        r_ret, r_n = band_mean(r_syms)
 
         rows_out.append(dict(T=T, sym=sym, score=score, s=s_ret, hold=s_hold, tag=s_tag,
                              h=h_ret, b=b_ret, l_un=l_un, l_un_n=l_un_n,
-                             l_ga=l_ga, l_ga_n=l_ga_n, **cov))
+                             l_ga=l_ga, l_ga_n=l_ga_n, r=r_ret, r_n=r_n, **cov))
 
     if not rows_out:
         print("\n无可测量的 episode（1m 归档缺失或窗口未走完）。")
@@ -390,6 +425,10 @@ def main():
     if zgate:
         report_leg("腿 L score60-80 过门", [r["l_ga"] for r in rows_out if r["l_ga"] is not None])
         print(f"    (腿 L 僵尸门不可得 {lband_unavail} 行，见局限 3)")
+    r_rows = [r for r in rows_out if r["r"] is not None]
+    report_leg("腿 R rank4-10", [r["r"] for r in r_rows])
+    print(f"    (腿 R 有数据的 episode {len(r_rows)}/{len(rows_out)}，"
+          f"覆盖标的 {sum(r['r_n'] for r in r_rows)} 个次；**样本薄，n 个位数时不得做方向性陈述**)")
 
     print("\n=== 出场标记分布（腿 S）===")
     for tag, c in collections.Counter(r["tag"] for r in rows_out).most_common():
@@ -407,6 +446,8 @@ def main():
     if zgate:
         report_diff("S − L 过门", [(r["T"].date(), r["s"] - r["l_ga"])
                                    for r in rows_out if r["l_ga"] is not None])
+    report_diff("S − R（top3 截断）", [(r["T"].date(), r["s"] - r["r"])
+                                      for r in rows_out if r["r"] is not None])
 
     print("\n=== 协变量分层 ===")
     report_buckets("signal_age", rows_out, "signal_age_h", AGE_BUCKETS, "h")
@@ -418,7 +459,7 @@ def main():
         g = lambda v, w=6, p=1: (f"{v:{w}.{p}f}" if v is not None else " " * w)
         print(f"  {r['T']:%m-%d %H:%M} {r['sym']:<7} score={r['score']:6.2f}  "
               f"S={f(r['s'])} H={f(r['h'])} B={f(r['b'])} "
-              f"L={f(r['l_un'])}(n={r['l_un_n']})  "
+              f"L={f(r['l_un'])}(n={r['l_un_n']}) R={f(r['r'])}(n={r['r_n']})  "
               f"age={g(r['signal_age_h'])}h gain={g(r['prior_gain_pct'],7)}% "
               f"s/pk={g(r['score_over_peak'],5,3)}  "
               f"持有={r['hold']:5.1f}h {r['tag']}")
