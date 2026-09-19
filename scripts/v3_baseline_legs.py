@@ -10,16 +10,36 @@ V3 对照腿 + 协变量测量 —— 「赚了钱是不是因为 AI500」
 但 `mean > 0` 不等于 AI500 score 有 alpha —— 大盘同期涨了、裸持不平仓更赚、
 低分档一样赚，三种情形下「正收益」都不构成 score 的证据。
 
-四条腿（同一批入场时刻，配对）
+六条腿（同一批入场时刻，配对）
 ------------------------------
   腿 S  策略腿      修复后的真实规则：首根「收盘晚于入场」的收阴 4h K 平仓，
                     −5% 止损，48h 上限
-  腿 H  裸持 48h    不止损、不看阴线，持满 48h。**S − H = 出场规则赚了还是亏了**
+  腿 X  止损+48h    保留 −5% 止损与 48h 上限，**只关掉阴线出场**。
+                    **S − X = 4h 阴线出场的纯贡献**（止损 held constant）
+  腿 H  裸持 48h    不止损、不看阴线，持满 48h。**X − H = 止损的贡献**
   腿 B  BTC 同窗口  与腿 S 完全相同的持有窗口内 BTC 的收益。**S − B = 剥掉 beta**
   腿 L  score 60~80 同一 4h 边界上榜单里 60 ≤ score < 80 的行，套腿 S 同一规则
                     等权。**S − L = `MIN_SCORE=80` 这条线是故事还是统计结论**（主对照）
   腿 R  rank 4~10   同一 4h 边界上榜单第 4~10 名，套腿 S 同一规则等权。
                     **S − R = top3 这个截断有没有意义**（次要腿，样本薄，必看 n）
+
+### 为什么必须有腿 X（2026-09-19 加，AIN 实证）
+
+腿 H 原本挂的解释是「S − H = 出场规则赚了还是亏了」——**这个解释是错的**，因为
+H 同时去掉了阴线出场**和**止损，S − H 混了两者。首次真实跑出来的
+`S − H = +85.85pp` 把这个缺陷暴露得很彻底：
+
+    09-15 16:01:43  入场 0.18304
+    09-15 20:00     反事实阴线出场 −2.07%   (+4.0h)
+    09-15 20:28:39  实盘止损出场   −5.20%   (+4.5h)
+    09-16 01:49     崩盘 −28.8%/分钟        (+9.8h)  ← 两条出场都已离场 5h+
+
+AIN 的 −87.93% 经原始 1m 归档核验为**真实**（2880/2880 根无缺口，崩后 36h 一直
+趴在 0.022~0.027）。但崩盘落在**两条出场规则的作用窗口之外** ⇒ `+85.85pp` 里
+没有一分钱来自「阴线出场做对了」或「止损做对了」，它全部来自「任何出场都躲过了
+一次与出场规则无关的特异性砸盘」。**n=1 且完全由尾部事件驱动。**
+
+腿 X 把止损固定住，`S − X` 才是阴线出场自己的贡献，`X − H` 才是止损自己的贡献。
 
 ### ⚠️ 一处已更正的推断（2026-09-19，PREREG §6.10 同步更正）
 
@@ -135,6 +155,7 @@ Z_SUM = 1.96 + 0.8416               # MDE = Z_SUM × sd_自举
 
 AGE_BUCKETS = [(0, 6), (6, 24), (24, 48), (48, math.inf)]
 GAIN_BUCKETS = [(0, 20), (20, 50), (50, 100), (100, math.inf)]
+SCORE_OVER_PEAK_BUCKETS = [(0, 0.5), (0.5, 0.8), (0.8, 1.0), (1.0, math.inf)]
 
 
 # ------------------------------------------------------------------ K 线
@@ -155,8 +176,11 @@ def _slice(bars: dict, T: datetime, hours: int):
 
 
 # ------------------------------------------------------------------ 出场规则
-def leg_strategy(bars: dict, T: datetime):
+def leg_strategy(bars: dict, T: datetime, use_bear_exit: bool = True):
     """腿 S：−5% 止损 / 首根收盘晚于入场的收阴 4h K / 48h 上限。
+
+    `use_bear_exit=False` → **腿 X**：只关掉阴线出场，止损与 48h 上限原样保留。
+    两者共用同一条价格路径与同一套判定顺序，故 `S − X` 就是阴线出场的纯贡献。
 
     返回 (净收益, 持有小时数, 出场标记)；数据不足返回 None。
     """
@@ -175,7 +199,8 @@ def leg_strategy(bars: dict, T: datetime):
             return STOPLOSS - FEE_ROUNDTRIP, (t - T).total_seconds() / 3600, "stop"
         if t >= bucket_start + timedelta(hours=TIMEFRAME_H):
             # 上一根 4h K 已收盘，且其收盘时刻严格晚于入场 → 可以发言
-            if cur_open is not None and cur_close is not None and cur_close < cur_open:
+            if (use_bear_exit and cur_open is not None and cur_close is not None
+                    and cur_close < cur_open):
                 return cur_close / entry - 1.0 - FEE_ROUNDTRIP, \
                     (bucket_start + timedelta(hours=TIMEFRAME_H) - T).total_seconds() / 3600, \
                     "bear4h"
@@ -376,6 +401,8 @@ def main():
         if s is None:
             continue
         s_ret, s_hold, s_tag = s
+        x = leg_strategy(bars, T, use_bear_exit=False)      # 腿 X：只关阴线出场
+        x_ret, x_tag = (x[0], x[2]) if x else (None, None)
         h_ret = leg_hold(bars, T)
 
         # 腿 B：BTC 在腿 S 完全相同的持有窗口内
@@ -409,7 +436,8 @@ def main():
         r_ret, r_n = band_mean(r_syms)
 
         rows_out.append(dict(T=T, sym=sym, score=score, s=s_ret, hold=s_hold, tag=s_tag,
-                             h=h_ret, b=b_ret, l_un=l_un, l_un_n=l_un_n,
+                             x=x_ret, x_tag=x_tag, h=h_ret, b=b_ret,
+                             l_un=l_un, l_un_n=l_un_n,
                              l_ga=l_ga, l_ga_n=l_ga_n, r=r_ret, r_n=r_n, **cov))
 
     if not rows_out:
@@ -419,6 +447,7 @@ def main():
     print(f"\n可测量 episode：{len(rows_out)}")
     print("\n=== 逐腿分布 ===")
     report_leg("腿 S 策略腿", [r["s"] for r in rows_out])
+    report_leg("腿 X 止损+48h无阴线", [r["x"] for r in rows_out if r["x"] is not None])
     report_leg("腿 H 裸持48h", [r["h"] for r in rows_out if r["h"] is not None])
     report_leg("腿 B BTC 同窗口", [r["b"] for r in rows_out if r["b"] is not None])
     report_leg("腿 L score60-80 不过门", [r["l_un"] for r in rows_out if r["l_un"] is not None])
@@ -430,15 +459,27 @@ def main():
     print(f"    (腿 R 有数据的 episode {len(r_rows)}/{len(rows_out)}，"
           f"覆盖标的 {sum(r['r_n'] for r in r_rows)} 个次；**样本薄，n 个位数时不得做方向性陈述**)")
 
-    print("\n=== 出场标记分布（腿 S）===")
-    for tag, c in collections.Counter(r["tag"] for r in rows_out).most_common():
-        print(f"  {tag:<10} {c:>4}  ({c/len(rows_out)*100:.0f}%)")
-    print("  ↑ bear4h 若仍为 0，说明 4h 阴线出场依然没有发言机会（止损先打掉），"
+    print("\n=== 出场标记分布 ===")
+    print("  腿 S：" + "  ".join(
+        f"{tag}={c}({c/len(rows_out)*100:.0f}%)"
+        for tag, c in collections.Counter(r["tag"] for r in rows_out).most_common()))
+    x_tags = [r["x_tag"] for r in rows_out if r["x_tag"]]
+    if x_tags:
+        print("  腿 X：" + "  ".join(
+            f"{tag}={c}({c/len(x_tags)*100:.0f}%)"
+            for tag, c in collections.Counter(x_tags).most_common()))
+    print("  ↑ 腿 S 的 bear4h 若为 0，说明阴线出场没有发言机会（止损先打掉），"
           "这是止损档与 timeframe 的结构性错配，另立预注册处理")
+    print("  ↑ 腿 X 里 stop 的占比 = 关掉阴线出场后有多少笔改由止损接管")
 
     print("\n=== 配对差（日区块自举 2000 次，先看 MDE 再看点估计）===")
-    report_diff("S − H（出场规则）", [(r["T"].date(), r["s"] - r["h"])
-                                      for r in rows_out if r["h"] is not None])
+    report_diff("S − X（阴线出场纯贡献）", [(r["T"].date(), r["s"] - r["x"])
+                                            for r in rows_out if r["x"] is not None])
+    report_diff("X − H（止损贡献）", [(r["T"].date(), r["x"] - r["h"])
+                                      for r in rows_out
+                                      if r["x"] is not None and r["h"] is not None])
+    report_diff("S − H（两者合计，勿单独解读）", [(r["T"].date(), r["s"] - r["h"])
+                                                for r in rows_out if r["h"] is not None])
     report_diff("S − B（剥 beta）", [(r["T"].date(), r["s"] - r["b"])
                                      for r in rows_out if r["b"] is not None])
     report_diff("S − L（80 这条线）", [(r["T"].date(), r["s"] - r["l_un"])
@@ -452,13 +493,15 @@ def main():
     print("\n=== 协变量分层 ===")
     report_buckets("signal_age", rows_out, "signal_age_h", AGE_BUCKETS, "h")
     report_buckets("prior_gain", rows_out, "prior_gain_pct", GAIN_BUCKETS, "%")
+    report_buckets("score_over_peak", rows_out, "score_over_peak",
+                   SCORE_OVER_PEAK_BUCKETS, "")
 
     print("\n=== 逐笔 ===")
     for r in sorted(rows_out, key=lambda x: x["T"]):
         f = lambda v: f"{v*100:+7.2f}%" if v is not None else "      -"
         g = lambda v, w=6, p=1: (f"{v:{w}.{p}f}" if v is not None else " " * w)
         print(f"  {r['T']:%m-%d %H:%M} {r['sym']:<7} score={r['score']:6.2f}  "
-              f"S={f(r['s'])} H={f(r['h'])} B={f(r['b'])} "
+              f"S={f(r['s'])} X={f(r['x'])} H={f(r['h'])} B={f(r['b'])} "
               f"L={f(r['l_un'])}(n={r['l_un_n']}) R={f(r['r'])}(n={r['r_n']})  "
               f"age={g(r['signal_age_h'])}h gain={g(r['prior_gain_pct'],7)}% "
               f"s/pk={g(r['score_over_peak'],5,3)}  "
