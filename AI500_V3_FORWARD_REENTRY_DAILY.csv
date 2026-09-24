@@ -1,0 +1,7 @@
+day_utc,segment,trades,reentry,pnl_pct,pnl_usdt,wins
+2026-09-09,S0_pre_gate3C,1,0,-5.4135,-14.443,0
+2026-09-15,S0_pre_gate3C,1,0,-5.1959,-13.6504,0
+2026-09-18,S1_gate3C_old_exit,1,0,-6.2752,-16.254,0
+2026-09-19,S2_restart_insample,2,2,12.8546,32.1326,1
+2026-09-20,S2_restart_insample,4,4,-22.3068,-57.407,0
+2026-09-21,S2_restart_insample,2,2,0.5305,1.126,1
