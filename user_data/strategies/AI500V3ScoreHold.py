@@ -125,6 +125,7 @@ import csv
 import json
 import logging
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -339,6 +340,38 @@ class AI500V3ScoreHold(IStrategy):
             return None
 
     @staticmethod
+    def _parse_signal_peak(v) -> float | None:
+        """把 AI500 接口的 `signal` 字段解析成**纯数值**再落盘。
+
+        为什么（2026-09-20 实测）：接口这个字段是**带标签的字符串**，实际写出来是
+        `"峰值 88"` 这种字面量。CSV 列 `signal_peak` 因此一直是字符串，而
+        `scripts/v3_baseline_legs.py` 里 `float("峰值 88")` → None，
+        派生协变量 `score_over_peak = score / signal_peak` **在全部 15,119 行上恒缺失** ——
+        一整个分析维度因为一个写入格式而从来没有过数据，且不报错（只显示「无样本」）。
+
+        处置：抽取其中第一个数字写纯数值；抽不到写 None（**不猜**：宁可缺，不编）。
+        兼容性：历史行的 `"峰值 88"` 保持原样，分析侧的容错解析同时吃两种格式；
+        **列名与列数不变** → 不触发 `_append_csv` 的表头轮转（旧行不会错位）。
+
+        影响面（第一层举证）：该值**只进 CSV 与 `self.ai500_scores`**，而
+        `self.ai500_scores` 全仓仅在这一处被赋值、无任何读取点；入场/出场判定读的是
+        `self._entry_state` 的 rank/score/tradable。故本改动**是纯观测落盘**，
+        不进任何决策路径 —— 由 `scripts/_signal_peak_unit.py` 的不变式 5 强制守住。
+        """
+        if v is None:
+            return None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return float(v)
+        if not isinstance(v, str):
+            return None          # 非数值/非字符串一律不猜（避免 str(list) 里抠出数字）
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            pass
+        m = re.search(r"[-+]?\d+(?:\.\d+)?", v)
+        return float(m.group()) if m else None
+
+    @staticmethod
     def _to_int(v) -> int | None:
         if v is None:
             return None
@@ -373,7 +406,7 @@ class AI500V3ScoreHold(IStrategy):
                     "symbol": sym,
                     "pair": f"{sym}/USDT:USDT",
                     "score": self._to_float(a.get("score")),
-                    "signal_peak": a.get("signal"),
+                    "signal_peak": self._parse_signal_peak(a.get("signal")),
                     "price": self._parse_price(a.get("price")),
                     "start_price": self._to_float(a.get("startPrice")),
                     "start_time": self._to_int(a.get("startTime")),
