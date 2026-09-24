@@ -920,3 +920,66 @@ v1 的「1:1 闭合」看起来很完美（18 完全合格 − 9 成交 = 9 = �
 - 僵尸判定：`user_data/ai500_zombie_check.csv`（09-11 起；`reason` 分布：ok 6,283 /
   `ref_price_mismatch` 2,139 / `prefilter_price_mismatch` 223 / `ticker_error:*` 90 /
   `ok:ohlcv_error:*` 12）
+
+---
+
+## 6.15 观测探针部署（2026-09-25，**A 类·纯观测**）：门② 缺口自证仪表
+
+**目的**：§6.14 发现 **6 处未解释缺口**（满足全部门②条件、无仓位、无 pairlock，却既无成交、
+也无被拦记录）。在定位前不得改任何判据/参数，故先上**纯观测探针**，让下一个缺口**自证**。
+
+**实现**（`user_data/strategies/AI500V3ScoreHold.py`）：新增 `GATE_PROBE_PATH` /
+`GATE_PROBE_FIELDS` 与 `_log_gate_probe()`，挂在本策略 `populate_entry_trend` 末尾。
+落盘 **analyzed dataframe 末行实际看到的值** + 评估时刻，字段：
+
+`logged_at_utc, pair, symbol, candle_open_utc, candle_age_s, state_age_s, df_rows,
+score, score_rank, tradable, is_zombie, gate_open, enter_long, enter_tag, in_trade`
+
+**归因三选一（下一个缺口出现时直接读表即可）**：
+- `candle_age_s` 远大于正常（正常 = 边界后数十秒）→ **循环迟到**（§6.14 已观察到 683 对 pool
+  刷新把主循环阻塞数分钟的迹象）
+- `state_age_s` 异常 / `score` 与快照不一致 → **数据没到**（抓取节流 300s + 时序）
+- `gate_open=1` 且 `enter_long=1` 却无成交 → **框架侧未评估/未成交**（与策略无关）
+
+**落盘范围**：只对当前在 `_entry_state`（top3）内的标的落盘（非 top3 在 I/O 之前返回），
+每次分析 ≤3 行；whitelist 有 ~683 个 pair，故必须前置过滤。
+
+**不变式与回归（部署前全绿）**：
+- 新夹具 `scripts/_gate_probe_unit.py`：**32 通过 / 0 失败**
+  - A 段（5 场景：开门 / score 差一点 / rank 超 / 不可交易 / 僵尸）证明
+    `enter_long` / `enter_tag` 与**独立复算逐行一致**（含标量广播到历史行的原设计）
+  - B 段：非 top3 不落盘；C 段：`candle_age_s` / `state_age_s` / `gate_open` / `in_trade` /
+    `df_rows` 取值正确，且 **gate 关闭时也落盘**（诊断缺口正需要）
+  - D 段：`_append_csv` 抛异常时**入场裁决不受影响**（观测失败不得改变行为）
+- 回归既有夹具：`_signal_peak_unit` 19/19、`_legs_reentry_unit` 41/41、
+  `_gate3_unit` / `_exit_signal_unit` 退出码 0
+
+**部署与首次落盘验证**：
+- 01:46 CST 首次重启（引入探针）→ 01:48:32 首批 3 行；01:49:23 CST 二次重启
+  （修正下述两个字段语义，PID 486239 → 486613）
+- 首轮观测与**日志同源一致**：PROM 79.62(rank1) / BR 69.70(rank2) / VVV 67.72(rank3)，
+  `gate_open=0`、`enter_long=0`、`tradable=1`、`zombie=0`、`in_trade=0`
+- **部署时发现并修正两个字段缺陷（如实留档）**：
+  1. `state_age_s` 首版出现 **−6.1s**：抓取发生在 `bot_loop_start` 之内（晚于 `_loop_now` 赋值），
+     用 wall-clock 记抓取时刻会恒为小幅负值、语义反向 → 改为记「本轮」（`_loop_now`）
+  2. `enter_long` 首版落盘 **`nan`**：框架对未命中行用 NaN → 规范化为 0/1，便于分析侧读取
+- 因字段语义变更，首批 3 行转入
+  `user_data/ai500_v3_gate_probe.csv.20260924T175058Z.bak`，探针自干净表头重新起算
+
+**判据影响：无**。本改动为纯观测：不改 `enter_long` / `enter_tag`、不改参数、不改门槛；
+§2 主判据（**8/30、−8.92%**）、§2.2 中止闸、§6.4 分段表、§6.6 集中度红线、
+P8 监控器 OOS 起点（09-24 05:33 UTC）**全部不变**。
+
+**使用与注意**：
+- 读表命令：`column -s, -t user_data/ai500_v3_gate_probe.csv | tail`
+- 该 CSV 是**诊断产物**，不参与决策；缺口定位完成后应写入 §6.16 并决定是否保留探针
+- 启动首轮会出现 `candle_age_s` 很大（用上一根已收盘 K 做启动分析）——**这是启动行为，
+  不是缺口**，分析时须剔除 `logged_at_utc` 附近 2 分钟内的启动行
+
+**同期告警记录（非本改动引起）**：01:41–01:43 CST 三 bot 同时出现网络类告警——
+V3 2 条 `ticker_error:NetworkError`（僵尸检查的 `fetch_ticker` 失败 ⇒ 该次判定
+`tradable=0`，即**门②对该标的 fail-closed**；当时对象 PROM score=79.62<80，本就过不了门，
+**实际影响为零**）；bstocks 16 条 429（**其自身请求权重**，与代理无关）；
+Donchian 1 条 OKX ticker 超时。三域探测本身正常，属偶发，无需切换节点。
+⚠️ 该 `ticker_error ⇒ tradable=0` 机制**是缺口的一类潜在来源**（若发生在 score≥80 标的上
+会静默少开一笔），已纳入探针可观测范围（`reason` 见 `ai500_zombie_check.csv`）。

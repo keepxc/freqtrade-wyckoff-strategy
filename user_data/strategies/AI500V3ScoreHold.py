@@ -237,6 +237,30 @@ GATE3_C_EFFECTIVE_UTC = "2026-09-18"
 # **GATE3 的 30 笔前向样本从此刻重新起算**，此刻之前的成交不得混入。
 GATE3_C_RESTART_UTC = "2026-09-19"
 
+# ── 门② 观测探针（2026-09-25，**A 类·纯观测**）────────────────────────────
+# 目的：PREREG §6.14 记录了 6 处「满足全部门②条件、无仓位、无 pairlock，却既无成交、
+# 也无任何被拦记录」的未解释缺口。本探针把 **analyzed dataframe 末行实际看到的值**
+# 与**评估时刻**落盘，用于在下一次缺口出现时区分三种可能：
+#   (a) 数据没到   → state_age_s 异常 / score 与快照不一致
+#   (b) 循环迟到   → candle_age_s 远大于正常（正常 ≈ 边界后数十秒）
+#   (c) 框架未评估 → gate_open=1 且 enter_long=1 却无成交（= 框架侧问题）
+# 落盘范围：**只对当前在 _entry_state（top3）内的标的**，每次分析 ≤3 行，
+# 非 top3 的 pair 在 I/O 之前就返回（whitelist 有 ~683 个 pair）。
+# 绝不修改 enter_long / enter_tag —— 纯观测，异常一律吞掉。
+GATE_PROBE_PATH = os.path.join(_AI500_UD, "ai500_v3_gate_probe.csv")
+GATE_PROBE_FIELDS = [
+    "logged_at_utc",      # 评估时刻（CST iso）
+    "pair", "symbol",
+    "candle_open_utc",    # 末行 K 线开盘时刻
+    "candle_age_s",       # 评估时刻 − 该 K 线收盘(=开盘+4h)；正常数十秒
+    "state_age_s",        # 评估时刻 − _entry_state 最近刷新（抓取节流 300s）
+    "df_rows",            # analyzed dataframe 行数
+    "score", "score_rank", "tradable", "is_zombie",   # 数据帧里实际广播的值
+    "gate_open",          # 四条件同时成立的复算结果（纯观测）
+    "enter_long", "enter_tag",   # 末行真实信号（= 框架裁决依据）
+    "in_trade",           # 该 pair 当时是否已有在途仓
+]
+
 
 class AI500V3ScoreHold(IStrategy):
     INTERFACE_VERSION = 3
@@ -270,6 +294,9 @@ class AI500V3ScoreHold(IStrategy):
         self._entry_state: dict[str, dict] = {}
         self._last_score_fetch: float = 0.0
         self._last_netflow_fetch: float = 0.0
+        # 门② 观测探针用（2026-09-25，A 类纯观测，见 GATE_PROBE_*）
+        self._entry_state_fetched_at: float = 0.0   # _entry_state 最近刷新时刻（epoch s）
+        self._loop_now: float = 0.0                 # 本轮的 current_time（epoch s）
         # 币安客户端（fetch_ticker/fetch_ohlcv 用于僵尸行过滤 + 合约存在性判断）
         # 懒加载：启动时可能因代理繁忙失败，运行中 _ensure_binance 会重试
         self.binance = None
@@ -631,6 +658,8 @@ class AI500V3ScoreHold(IStrategy):
                 "tradable": st["tradable"], "reason": st["reason"],
             })
         self._append_csv(ZOMBIE_PATH, ZOMBIE_FIELDS, z_rows)
+        self._entry_state_fetched_at = (self._loop_now  # 观测探针用：记「本轮」，避免负值
+                                      or datetime.now(timezone.utc).timestamp())
         for sym, st in self._entry_state.items():
             logger.info(
                 f"[AI500V3] top{st['rank']} {sym} score={st['score']} "
@@ -667,6 +696,7 @@ class AI500V3ScoreHold(IStrategy):
     def bot_loop_start(self, current_time: datetime, **kwargs) -> None:
         now_ts = current_time.timestamp()
         fetched_at = current_time.astimezone(CST).isoformat()
+        self._loop_now = now_ts   # 门② 观测探针用（A 类纯观测）
 
         # score 榜采集（5 分钟节流）→ 刷新 top3 入场状态
         if now_ts - self._last_score_fetch >= SCORE_FETCH_INTERVAL_S:
@@ -722,7 +752,61 @@ class AI500V3ScoreHold(IStrategy):
         )
         dataframe.loc[entry_mask, 'enter_long'] = 1
         dataframe.loc[entry_mask, 'enter_tag'] = 'ai500_score_top3'
+        self._log_gate_probe(dataframe, metadata.get('pair'), entry_mask)
         return dataframe
+
+    def _log_gate_probe(self, dataframe: DataFrame, pair: str, entry_mask) -> None:
+        """门② 观测探针（2026-09-25，**A 类·纯观测**）。
+
+        背景：PREREG §6.14 记录 6 处「满足全部门②条件、无仓位、无 pairlock，却既无成交、
+        也无被拦记录」的未解释缺口。本探针落盘 **analyzed dataframe 末行实际看到的值** +
+        评估时刻，用于在下一个缺口出现时区分：数据没到 / 循环迟到 / 框架未评估。
+
+        注意：本方法**只读**，不修改 enter_long / enter_tag；任何异常一律吞掉，
+        绝不影响入场裁决（观测失败不得改变行为）。
+        """
+        try:
+            if pair is None or not len(dataframe):
+                return
+            sym = self._pair_to_base(pair)
+            # 非 top3 标的在 I/O 之前返回（whitelist 有 ~683 个 pair）
+            if sym not in self._entry_state:
+                return
+            last = dataframe.iloc[-1]
+            ts = pd.Timestamp(last['date'])
+            if ts.tzinfo is None:
+                ts = ts.tz_localize('UTC')
+            close_s = ts.timestamp() + timeframe_to_minutes(self.timeframe) * 60
+            now_s = self._loop_now or datetime.now(timezone.utc).timestamp()
+            self._append_csv(GATE_PROBE_PATH, GATE_PROBE_FIELDS, [{
+                "logged_at_utc": datetime.fromtimestamp(now_s, CST).isoformat(),
+                "pair": pair,
+                "symbol": sym,
+                "candle_open_utc": ts.isoformat(),
+                "candle_age_s": round(now_s - close_s, 1),
+                "state_age_s": (round(now_s - self._entry_state_fetched_at, 1)
+                                if self._entry_state_fetched_at else ""),
+                "df_rows": len(dataframe),
+                "score": last.get('score'),
+                "score_rank": last.get('score_rank'),
+                "tradable": last.get('tradable'),
+                "is_zombie": last.get('is_zombie'),
+                "gate_open": int(bool(entry_mask.iloc[-1])),
+                "enter_long": int(pd.notna(last.get('enter_long'))
+                                  and last.get('enter_long') == 1),
+                "enter_tag": last.get('enter_tag', '') or '',
+                "in_trade": int(self._has_open_trade(pair)),
+            }])
+        except Exception:
+            return
+
+    @staticmethod
+    def _has_open_trade(pair: str) -> bool:
+        """该 pair 当时是否已有在途仓（观测用，失败按 False）。"""
+        try:
+            return bool(Trade.get_trades_proxy(pair=pair, is_open=True))
+        except Exception:
+            return False
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """**恒为 0。** 4h 阴线出场已移入 `custom_exit`（2026-09-19，见文件头）。
