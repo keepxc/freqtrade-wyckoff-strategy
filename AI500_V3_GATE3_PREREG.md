@@ -1072,19 +1072,31 @@ pool = { 历史曾达 score ≥ 70 } ∪ { 近 7 天榜单出现过的 } ∪ { �
    同理 `user_data/pairlists/BStockPairList.py` 也是**从未启用的死代码**（bstocks 实际用
    `StaticPairList`）→ 本方案因此**刻意走内建 `RemotePairList`，不做 venv 改动**。
 
-### 6.16.5 部署与回滚（**待用户指令**）
+### 6.16.5 部署记录（**已于 2026-09-25 02:42 CST 上线**）
 
-- **部署**：把 `config_ai500_v3_dryrun.json` 的 `pairlists` 换成上面那段 + 重启服务（约 5 秒）。
-  当前**线上 config 仍是** `VolumePairList(number_assets=1000)`，**未改**。
-- **回滚**：一行 config 还原 + 重启。
+- **改动**：`config_ai500_v3_dryrun.json` 的 `pairlists` 换成上述 `RemotePairList` 段
+  （带 `_comment` 说明；备份 `/tmp/config_ai500_v3_dryrun.json.bak_before_pool_change`）
+- **上线前验证**：`test-pairlist --config <线上 config>` → `Whitelist with 46 pairs`、EXIT=0、
+  无 ERROR（`_comment` 额外键未被 schema 拒绝）
+- **上线后验收（三条全过）**：
+  1. `active`，PID 494150，since 02:42:00 CST；启动日志 `Using resolved pairlist RemotePairList`
+     + `Whitelist with 46 pairs`；**ERROR 计数 = 0**
+  2. 探针启动轮落盘 top3 = BR 69.85(rank1) / USELESS 63.30(2) / ZEC 62.69(3)，
+     `state_age_s=0.0`、`gate_open=0`、`enter_long=0`（与 API 同源一致）
+  3. `ai500_v3_coverage_warn.csv` **未出现**（top3 全部在池内）
+- **⚠️ 实测修正**：`RemotePairList` 会取 JSON 里的 `refresh_period` 与 config 值的**较大者**
+  （日志 `Refresh Period has been increased from 300 to minimum allowed: 900 from Remote.`）
+  → **实际池子刷新周期 = 900s = 15 分钟**（与定时器一致），config 里写 300 无效。
 - **判据影响**：入场判据/门槛/止损/出场规则**一行未动**；但**边界处理时点会变** →
-  按 §6.13 同类处理记「执行层变更」：**GATE3 30 笔样本不重置**，但本时点必须留档，
-  且样本分析时以「池子 685 对 / 46 对」为分段变量之一。
-- **部署后验收（三条，缺一不可）**：
-  1. `systemctl --user is-active` = active，启动日志无 ERROR，whitelist 日志显示 ~46 对
-  2. 探针（§6.15）在下一边界给出 `candle_age_s`：**改前基线 = 启动轮 6,512s / 边界数百秒，
-     改后期望 = 数十秒**；`state_age_s` 无异常
-  3. `ai500_v3_coverage_warn.csv` **不出现**（出现即说明有 top3 被漏，必须立刻查）
+  按 §6.13 同类记「执行层变更」：**GATE3 30 笔样本不重置**，此后样本分析须以
+  「池子 685 对 / 46 对」为分段变量之一。
+- **回滚**：`cp /tmp/config_ai500_v3_dryrun.json.bak_before_pool_change user_data/config_ai500_v3_dryrun.json`
+  + `systemctl --user restart freqtrade-ai500-v3-dryrun`（约 5 秒）。
+- **部署后待观测（04:00 CST 边界起）**：
+  1. 探针 `candle_age_s`：改前基线 = 启动轮数千秒、边界轮数百秒；**改后期望 = 数十秒**
+  2. 该小时 K 线刷新失败数：改前平均 **438 次/边界** → 期望降至 ~30 次量级
+  3. 若仍出现缺口：`candle_age_s` 小 + `gate_open=1/enter_long=1` 无成交 ⇒ **框架侧**问题
+     （与池子无关）；`candle_age_s` 仍大 ⇒ 风暴机制未除，需继续查
 - **WS 方案结论（同期评估，暂不采用）**：实测 WS 走 7890 可用（`wsProxy` 必须显式设置，
   只给 `aiohttp_proxy` 会 `Connection timeout`），但 ① WS 层**只订阅 OHLCV**，对 bstocks 那些
   占 55% 的 `fetch_l2_order_book` 权重**毫无作用**；② 685 对挂不上（并发 210 对实测仅 178 成功）；
