@@ -224,6 +224,13 @@ ZOMBIE_FIELDS = [
     "prefilter_hit", "is_zombie", "tradable", "reason",
 ]
 
+# 覆盖告警（2026-09-25）：AI500 top3 不在 whitelist 内 = 唯一漏单风险，必须可检测
+COVERAGE_WARN_PATH = os.path.join(_AI500_UD, "ai500_v3_coverage_warn.csv")
+COVERAGE_WARN_FIELDS = [
+    "logged_at_utc", "symbol", "pair", "rank", "score",
+    "tradable", "reason", "whitelist_size",
+]
+
 # 僵尸行过滤阈值
 ZOMBIE_PREFILTER_PP = 1.0    # 【唯一在岗的判据】币安最新价 vs 接口 price 差 >1pp 判僵尸（2026-09-05 用户拍板）
 ZOMBIE_REF_PP = 3.0          # 【2026-09-18 降级为纯观测】接口 start_price vs start_time 那根 1m K 开盘
@@ -660,11 +667,46 @@ class AI500V3ScoreHold(IStrategy):
         self._append_csv(ZOMBIE_PATH, ZOMBIE_FIELDS, z_rows)
         self._entry_state_fetched_at = (self._loop_now  # 观测探针用：记「本轮」，避免负值
                                       or datetime.now(timezone.utc).timestamp())
+        self._log_coverage()
         for sym, st in self._entry_state.items():
             logger.info(
                 f"[AI500V3] top{st['rank']} {sym} score={st['score']} "
                 f"tradable={st['tradable']} zombie={st['is_zombie']} reason={st['reason']}"
             )
+
+    # ------------------------------------------------------------------ #
+    # 覆盖告警（2026-09-25，A 类纯观测）
+    # ------------------------------------------------------------------ #
+    def _log_coverage(self) -> None:
+        """AI500 top3 不在 whitelist 内 = **唯一的漏单风险**，命中即告警 + 落盘。
+
+        池子从 685 对换成「AI500 宇宙」（见 §6.16 / AI500PairList）后，若某个 top3 标的
+        不在池内，它**永远不会被评估入场**，且不留任何被拦记录（正是 §6.14 那类「缺口」的
+        形态）。这里是那条风险的检测器 —— **绝不静默**。
+        """
+        try:
+            dp = getattr(self, "dp", None)
+            if dp is None:
+                return
+            wl = set(dp.current_whitelist())
+            if not wl:
+                return
+        except Exception:
+            return
+        miss = [(sym, st) for sym, st in self._entry_state.items()
+                if st.get("pair") not in wl]
+        if not miss:
+            return
+        rows = [{
+            "logged_at_utc": datetime.now(timezone.utc).isoformat(),
+            "symbol": sym, "pair": st.get("pair"), "rank": st.get("rank"),
+            "score": st.get("score"), "tradable": st.get("tradable"),
+            "reason": st.get("reason"), "whitelist_size": len(wl),
+        } for sym, st in miss]
+        logger.warning(
+            f"[AI500V3] ⚠️ 覆盖告警：{len(miss)} 个 top3 标的不在 whitelist 内 → "
+            f"{[r['symbol'] for r in rows]}（池子 {len(wl)} 对）—— 这些标的本轮**不可能成交**")
+        self._append_csv(COVERAGE_WARN_PATH, COVERAGE_WARN_FIELDS, rows)
 
     # ------------------------------------------------------------------ #
     # CSV 落盘（通用，带字段轮转）

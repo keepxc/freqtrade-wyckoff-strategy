@@ -1,0 +1,16 @@
+{
+ "history": "ai500_score_history_v3.csv",
+ "rows": 20925,
+ "peak": 21,
+ "window": 38,
+ "universe": 47,
+ "err": "",
+ "newest": "2026-09-25T02:26:47.980336+08:00",
+ "open_positions": "ok(0)",
+ "open_positions_added": 0,
+ "written_at_utc": "2026-09-24T18:28:27.235631+00:00",
+ "pairs": 47,
+ "out": "ai500_universe.json",
+ "buffer_score": 70.0,
+ "window_days": 7.0
+}

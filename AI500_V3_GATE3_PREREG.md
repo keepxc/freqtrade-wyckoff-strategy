@@ -983,3 +983,110 @@ V3 2 条 `ticker_error:NetworkError`（僵尸检查的 `fetch_ticker` 失败 ⇒
 Donchian 1 条 OKX ticker 超时。三域探测本身正常，属偶发，无需切换节点。
 ⚠️ 该 `ticker_error ⇒ tradable=0` 机制**是缺口的一类潜在来源**（若发生在 score≥80 标的上
 会静默少开一笔），已纳入探针可观测范围（`reason` 见 `ai500_zombie_check.csv`）。
+
+---
+
+## 6.16 池子缩减工程（2026-09-25，**B 类·执行层**；**尚未部署**）
+
+### 6.16.1 量化：685 对池子在每个 4h 边界制造风暴
+
+- **原池实测**：`VolumePairList(number_assets=1000)` → API 权威读数 **685 对**（全部
+  `USDT:USDT` 合约）。而策略门② 只可能交易 AI500 **top3**，**池子比可交易集大两个数量级**。
+- **边界风暴**：`Unable to get latest candle` / `Could not fetch historical candle`
+  **28,017 次**，**全部落在 64 个小时内 = 16 天 × 4 个 4h 边界**（无一边界外记录）。
+  平均 **438 次/边界**；峰值：
+
+  | 边界(CST) | 失败数 | 持续 | 备注 |
+  |---|---|---|---|
+  | 09-17 12:00 | 4,162 | 19.4 min | 同日 bstocks 429 风暴 305 次 |
+  | 09-12 00:00 | 3,584 | 52.1 min | |
+  | 09-20 00:00 | 2,253 | 17.7 min | |
+  | 09-20 16:00 | 1,626 | 18.1 min | ← 缺口边界 |
+  | 09-18 16:00 | 1,048 | 9.5 min | ← 缺口边界 |
+
+  机制：边界时 685 对一起刷新 → 大批 pair 撞上「新 K 线尚未发布」竞态 → 重试；
+  实测该机制可让主循环数分钟不心跳（09-18 15:59:49 → 16:05:15 中断 5.5 分钟）。
+
+- **共用出口 IP 的权重互挤**：09-17 V3 的 12:00 风暴（4,162 次白跑+重试）与 bstocks 当日
+  09:00–19:00 的 429 风暴（52/79/34/32/65/43）同处一个时段 —— 两台 bot 共用一个 IP 额度，
+  当日是一起被打爆。**这修正了 09-22 把 429 单独归因于「bstocks 自伤」的判断。**
+
+- **⚠️ 风暴 ≠ 缺口的充分解释（避免过度归因）**：6 个缺口边界里 **3 个该小时 0 失败**、
+  2 个在最高 6%（1,048 / 1,626）→ **不是一对一关系**。本节的池子缩减因此是**独立成立**的
+  工程改动（消 28k 白跑 + 缓解共享权重），**不宣称它必然修复缺口**；缺口定位仍由 §6.15 探针负责。
+
+### 6.16.2 方案：内建 `RemotePairList` + 本地文件（**零 venv 改动**）
+
+```
+pairlists: [{"method": "RemotePairList",
+             "pairlist_url": "file:////home/gyan/freqtrade/user_data/ai500_universe.json",
+             "number_assets": 100, "refresh_period": 300,
+             "mode": "whitelist", "processing_mode": "filter",
+             "keep_pairlist_on_failure": true}]
+```
+
+**池子规则**（`scripts/ai500_universe_export.py`）：
+
+```
+pool = { 历史曾达 score ≥ 70 } ∪ { 近 7 天榜单出现过的 } ∪ { 在途仓 }
+```
+
+- **覆盖率论证（核心安全余量）**：入场门槛是 **score ≥ 80**，缓冲门槛 **70 更低** ——
+  任何想升到 80 的标的必须先经过 70，届时已进池（15 分钟刷新），等它真到 80 时已在池内。
+  实测 16 天：曾达 ≥80 **仅 5 个** symbol（BR/ZEC/BULLA/AIN/IOST），曾达 ≥70 **21 个**。
+- **在途仓必须并集**：出场路径用 `self.dp.get_analyzed_dataframe(pair, tf)`（框架数据只覆盖
+  whitelist）→ 持仓 pair 若轮出池子，**出场逻辑会拿不到数据**。导出器读
+  `tradesv3.ai500_v3_dryrun.sqlite` 的 `is_open=1` 并集（只读、失败不阻塞）。
+- **僵尸检查不受池子影响**：`_check_tradable` 走**直连 ccxt**（`self.binance.fetch_ticker`），
+  与 whitelist 无关（已逐行核对）。
+- **安全条款**：JSON **原子写**（tmp + `os.replace`）；池子为空（历史缺失/损坏/空）时
+  **不覆盖原文件**且退出码 2（空池 = 完全停止交易，绝不允许静默发生）。
+- **覆盖告警（策略侧 `_log_coverage()`）**：AI500 top3 若不在 whitelist 内 → WARNING +
+  落盘 `ai500_v3_coverage_warn.csv`。**这是唯一漏单风险，必须可检测。**
+
+**实测规模**：宇宙 **47 对**（peak 21 ∪ window 38；在途 0）→ 端到端 `test-pairlist`
+解析为 **Whitelist with 46 pairs**（1 个非 active swap 被框架剔除）。
+**685 → 46 = 14.9 倍减负**。
+
+### 6.16.3 实现与验证
+
+| 产物 | 说明 |
+|---|---|
+| `scripts/ai500_universe_export.py` | 导出器（纯函数 `build_universe()` + 在途仓并集 + 原子写） |
+| `scripts/_ai500_universe_unit.py` | 夹具 **26/26**（真跑 subprocess：池子规则/窗口边界/门槛边界/空池不覆盖/原子写/在途仓并集/DB 缺失不报错） |
+| `~/.config/systemd/user/ai500-universe-export.{service,timer}` | 每 15 分钟刷新（`OnBootSec=2min` + `OnUnitActiveSec=15min`，已 enable --now，2026-09-25 02:28 CST） |
+| `user_data/ai500_universe.json` + `.manifest.json` | 产物（含 peak/window/universe/open_positions 对账字段） |
+| `AI500V3ScoreHold.py::_log_coverage()` | 覆盖告警（A 类纯观测，仅告警+落盘，不改裁决） |
+
+**端到端验证（不是 mock）**：`freqtrade test-pairlist --config <临时 config> --print-json`
+→ `Whitelist with 46 pairs` ✓（临时 config 在 `/tmp`，**线上 config 未动**）。
+
+### 6.16.4 两个坑（本次踩到，务必记住）
+
+1. **`RemotePairList` 的本地文件路径会被吃掉前导斜杠**：源码是
+   `url.split("file:///", 1)[1]` → `file:///home/x` 得到 `home/x`（**相对路径**，依赖
+   `WorkingDirectory`）。**必须写 4 个斜杠** `file:////home/x` → `/home/x`（绝对）。
+2. **`pairlists.method` 被 config schema 的 enum 校验** → 自定义 pairlist 无法通过
+   `user_data/pairlists/` 直接启用，**必须先改 venv 内 `freqtrade/constants.py` 的 enum**
+   （本机已有先例：`OIPairList` 装在 site-packages、名字进了 enum，但**从未在任何 config 里启用**）。
+   同理 `user_data/pairlists/BStockPairList.py` 也是**从未启用的死代码**（bstocks 实际用
+   `StaticPairList`）→ 本方案因此**刻意走内建 `RemotePairList`，不做 venv 改动**。
+
+### 6.16.5 部署与回滚（**待用户指令**）
+
+- **部署**：把 `config_ai500_v3_dryrun.json` 的 `pairlists` 换成上面那段 + 重启服务（约 5 秒）。
+  当前**线上 config 仍是** `VolumePairList(number_assets=1000)`，**未改**。
+- **回滚**：一行 config 还原 + 重启。
+- **判据影响**：入场判据/门槛/止损/出场规则**一行未动**；但**边界处理时点会变** →
+  按 §6.13 同类处理记「执行层变更」：**GATE3 30 笔样本不重置**，但本时点必须留档，
+  且样本分析时以「池子 685 对 / 46 对」为分段变量之一。
+- **部署后验收（三条，缺一不可）**：
+  1. `systemctl --user is-active` = active，启动日志无 ERROR，whitelist 日志显示 ~46 对
+  2. 探针（§6.15）在下一边界给出 `candle_age_s`：**改前基线 = 启动轮 6,512s / 边界数百秒，
+     改后期望 = 数十秒**；`state_age_s` 无异常
+  3. `ai500_v3_coverage_warn.csv` **不出现**（出现即说明有 top3 被漏，必须立刻查）
+- **WS 方案结论（同期评估，暂不采用）**：实测 WS 走 7890 可用（`wsProxy` 必须显式设置，
+  只给 `aiohttp_proxy` 会 `Connection timeout`），但 ① WS 层**只订阅 OHLCV**，对 bstocks 那些
+  占 55% 的 `fetch_l2_order_book` 权重**毫无作用**；② 685 对挂不上（并发 210 对实测仅 178 成功）；
+  ③ 缩池后 46 对 × 6 次/天 = 276 次调用/天，**WS 收益趋零**、却要付 `wsProxy` + 容量 +
+  「约 9 天重置连接」的脆弱性成本。→ **缩池优先，WS 挂起。**
