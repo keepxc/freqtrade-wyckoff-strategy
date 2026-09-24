@@ -64,17 +64,15 @@ class DonchianV1AtrSizing(IStrategy):
         return tr.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['don_upper'].notna() & (dataframe['close'] > dataframe['don_upper']),
-            ['enter_long', 'enter_tag']
-        ] = (1, 'don_break')
+        entry_mask = dataframe['don_upper'].notna() & (dataframe['close'] > dataframe['don_upper'])
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'don_break'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['don_exit'].notna() & (dataframe['close'] < dataframe['don_exit']),
-            ['exit_long', 'exit_tag']
-        ] = (1, 'don_exit')
+        exit_mask = dataframe['don_exit'].notna() & (dataframe['close'] < dataframe['don_exit'])
+        dataframe.loc[exit_mask, 'exit_long'] = 1
+        dataframe.loc[exit_mask, 'exit_tag'] = 'don_exit'
         return dataframe
 
     def custom_stake_amount(

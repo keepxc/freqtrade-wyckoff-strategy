@@ -858,12 +858,13 @@ class AI500V2FlowHold(IStrategy):
         OI 闸门已移除：条件于 rank 之后中位数不升反降，MDE 从 1.3% 膨胀到 14.3%，
         无法自证有益（⭕ 非 ❌ —— 功效不足，不入证伪表）。
         """
-        dataframe.loc[
+        entry_mask = (
             (dataframe['entry_rank'] <= self.ENTRY_RANK)
             & (dataframe['median_rank'] <= self.ENTRY_MEDIAN)
-            & (dataframe['btc_ok'] == 1),
-            ['enter_long', 'enter_tag']
-        ] = (1, 'netflow_rank_entry')
+            & (dataframe['btc_ok'] == 1)
+        )
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'netflow_rank_entry'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:

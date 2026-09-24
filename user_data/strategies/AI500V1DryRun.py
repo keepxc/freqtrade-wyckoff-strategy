@@ -713,11 +713,12 @@ class AI500V1DryRun(IStrategy):
         return tr.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
+        entry_mask = (
             (dataframe['median_rank'] <= self.ENTRY_MEDIAN) & (dataframe['oi_ok'] == 1)
-            & (dataframe['btc_ok'] == 1),
-            ['enter_long', 'enter_tag']
-        ] = (1, 'netflow_oi_entry')
+            & (dataframe['btc_ok'] == 1)
+        )
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'netflow_oi_entry'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -730,10 +731,10 @@ class AI500V1DryRun(IStrategy):
         if hist and len(hist) >= self.RANK_EXIT_CONFIRM:
             recent = [r for _, r in hist][-self.RANK_EXIT_CONFIRM:]
             confirmed = all(r > self.EXIT_RANK for r in recent)
-        dataframe.loc[
-            confirmed,
-            ['exit_long', 'exit_tag']
-        ] = (1, 'netflow_oi_exit')
+        if confirmed:
+            # confirmed 是标量 bool，不能用 dataframe.loc[confirmed]（pandas 拒绝单 bool 行索引）
+            dataframe.loc[dataframe.index[-1], 'exit_long'] = 1
+            dataframe.loc[dataframe.index[-1], 'exit_tag'] = 'netflow_oi_exit'
         return dataframe
 
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,

@@ -1123,11 +1123,12 @@ class AI500V1MacdExitDryRun(IStrategy):
         return None
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
+        entry_mask = (
             (dataframe['median_rank'] <= self.ENTRY_MEDIAN) & (dataframe['oi_ok'] == 1)
-            & (dataframe['btc_ok'] == 1),
-            ['enter_long', 'enter_tag']
-        ] = (1, 'netflow_oi_entry')
+            & (dataframe['btc_ok'] == 1)
+        )
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'netflow_oi_entry'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -1144,7 +1145,8 @@ class AI500V1MacdExitDryRun(IStrategy):
         if confirmed:
             # 只在最后一根（当前）bar 标记退出。confirmed 是标量 bool，
             # 不能直接 dataframe.loc[confirmed]（pandas 拒绝单 bool 行索引）
-            dataframe.loc[dataframe.index[-1], ['exit_long', 'exit_tag']] = (1, 'rank_disaster_exit')
+            dataframe.loc[dataframe.index[-1], 'exit_long'] = 1
+            dataframe.loc[dataframe.index[-1], 'exit_tag'] = 'rank_disaster_exit'
         return dataframe
 
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,

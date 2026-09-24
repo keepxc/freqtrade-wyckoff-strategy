@@ -714,13 +714,14 @@ class AI500V3ScoreHold(IStrategy):
         - score >= 80 才开新仓；60~80 只观察（score 榜快照 + 僵尸行落盘已记录，不进场）。
         - 无 BTC 方向闸门（2026-09-05 用户拍板：ai500.txt 原文没有，不加自由参数）。
         """
-        dataframe.loc[
+        entry_mask = (
             (dataframe['score_rank'] <= self.TOP_N)
             & (dataframe['score'] >= self.MIN_SCORE)
             & (dataframe['tradable'] == 1)
-            & (dataframe['is_zombie'] == 0),
-            ['enter_long', 'enter_tag'],
-        ] = (1, 'ai500_score_top3')
+            & (dataframe['is_zombie'] == 0)
+        )
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'ai500_score_top3'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:

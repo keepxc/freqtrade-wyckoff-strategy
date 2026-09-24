@@ -990,7 +990,8 @@ class WyckoffV8(IStrategy):
             (dataframe['wave_efficiency'] > 0.001) &
             (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
         )
-        dataframe.loc[is_down_wave, ['exit_long', 'exit_tag']] = [1, 'v8_down_wave']
+        dataframe.loc[is_down_wave, 'exit_long'] = 1
+        dataframe.loc[is_down_wave, 'exit_tag'] = 'v8_down_wave'
 
         # ── TASK S-5: exit_short — 上升 wave_start 出现 → 空头平仓 ──
         # 物理含义：up_wave ChoCh = 供应消耗完毕，空头逻辑失效，必须平仓
@@ -1000,7 +1001,8 @@ class WyckoffV8(IStrategy):
             (dataframe['wave_efficiency'] > 0.001) &
             (dataframe['wave_displacement'] > dataframe['close'] * 0.008)
         )
-        dataframe.loc[is_up_wave, ['exit_short', 'exit_tag']] = [1, 'v8_up_wave_reverse']
+        dataframe.loc[is_up_wave, 'exit_short'] = 1
+        dataframe.loc[is_up_wave, 'exit_tag'] = 'v8_up_wave_reverse'
 
         return dataframe
 

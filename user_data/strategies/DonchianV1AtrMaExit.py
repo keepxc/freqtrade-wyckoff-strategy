@@ -77,22 +77,22 @@ class DonchianV1AtrMaExit(IStrategy):
         return tr.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['don_upper'].notna() & (dataframe['close'] > dataframe['don_upper']),
-            ['enter_long', 'enter_tag']
-        ] = (1, 'don_break')
+        entry_mask = dataframe['don_upper'].notna() & (dataframe['close'] > dataframe['don_upper'])
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'don_break'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['don_exit'].notna() & (dataframe['close'] < dataframe['don_exit']),
-            ['exit_long', 'exit_tag']
-        ] = (1, 'don_exit')
-        dataframe.loc[
-            dataframe['sma_exit'].notna() & (dataframe['close'] < dataframe['sma_exit']) &
-            (dataframe['exit_long'] != 1),
-            ['exit_long', 'exit_tag']
-        ] = (1, 'ma20_exit')
+        exit_mask = dataframe['don_exit'].notna() & (dataframe['close'] < dataframe['don_exit'])
+        dataframe.loc[exit_mask, 'exit_long'] = 1
+        dataframe.loc[exit_mask, 'exit_tag'] = 'don_exit'
+        ma_exit_mask = (
+            dataframe['sma_exit'].notna()
+            & (dataframe['close'] < dataframe['sma_exit'])
+            & (dataframe['exit_long'] != 1)
+        )
+        dataframe.loc[ma_exit_mask, 'exit_long'] = 1
+        dataframe.loc[ma_exit_mask, 'exit_tag'] = 'ma20_exit'
         return dataframe
 
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,

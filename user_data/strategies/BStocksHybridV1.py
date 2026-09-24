@@ -75,10 +75,9 @@ class BStocksHybridV1(IStrategy):
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['don_upper'].notna() & (dataframe['close'] > dataframe['don_upper']),
-            ['enter_long', 'enter_tag']
-        ] = (1, 'don_break')
+        entry_mask = dataframe['don_upper'].notna() & (dataframe['close'] > dataframe['don_upper'])
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'don_break'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:

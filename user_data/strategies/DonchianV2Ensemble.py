@@ -77,17 +77,15 @@ class DonchianV2Ensemble(IStrategy):
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['ens_enter'],
-            ['enter_long', 'enter_tag']
-        ] = (1, 'ens_break')
+        entry_mask = dataframe['ens_enter']
+        dataframe.loc[entry_mask, 'enter_long'] = 1
+        dataframe.loc[entry_mask, 'enter_tag'] = 'ens_break'
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[
-            dataframe['ens_exit'],
-            ['exit_long', 'exit_tag']
-        ] = (1, 'ens_exit')
+        exit_mask = dataframe['ens_exit']
+        dataframe.loc[exit_mask, 'exit_long'] = 1
+        dataframe.loc[exit_mask, 'exit_tag'] = 'ens_exit'
         return dataframe
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
