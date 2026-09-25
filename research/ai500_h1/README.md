@@ -75,3 +75,7 @@ python3 research/ai500_h1/scripts/analyze_netflow_vs_score.py  # 资金流榜 vs
 - ⇒ **一律用容错解析**：去掉 `$` 与千分位后取第一个数字（`re.search(r"-?\d+(?:\.\d+)?", s)`）。
   直接 `float()` 会抛错；直接字符串比较（`"$1,612.93" > 80`）会静默给出错误结果。
 - 2026-09-25 19:20 起采集器已归一化为裸数字，但**历史行不变**。
+- 🚨 **列名骗人**：两份 score 文件的时间列一个叫 `fetched_at_utc`、一个叫 `fetched_at_cst`，
+  但**取值都是 +08:00**。解析一律用
+  `datetime.fromisoformat(s).astimezone(ZoneInfo("Asia/Shanghai"))`；
+  若误当 UTC 处理，做 K 线/价格对照时会**整体偏 8 小时**（2026-09-25 已踩过一次，表现为"K 线与榜上价差 14~38%"的假象）。
