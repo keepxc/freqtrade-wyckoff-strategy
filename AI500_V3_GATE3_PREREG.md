@@ -1174,3 +1174,40 @@ pool = { 历史曾达 score ≥ 70 } ∪ { 近 7 天榜单出现过的 } ∪ { �
 - 夹具 `scripts/_ai500_universe_unit.py` → **39/39**（新增 G1–G13：无 key 零影响、不联网、
   多形态解析、门槛剔除、异常/空载荷/非 JSON 不抛、无 key 真跑与启发式逐字节一致）
 - 判据影响：**无**（无 key 路径=原行为；池子仍 47 对、JSON 结构不变，bot 无需重启）
+
+---
+
+## 6.18 平台 key 核查 + 复权后首笔开仓（2026-09-25 11:2x CST）
+
+### 6.18.1 用户提供的 key（前缀 `vgx_`）**不被 VergeX 平台 API 接受**（穷举槽位后结论）
+- 存放：`~/.config/ai500/api_key`（chmod 600，**仓库外，绝不进 git**；进程按需读取）
+- 已试槽位（`Authorization: Bearer|raw|ApiKey|Basic`、`X-API-Key`、`api-key`、`apikey`、
+  `X-Vergex-Key`、`X-Key`、`X-Access-Token`、`X-Auth-Token`、query `api_key/key/auth/token`）
+  → 结果只有两类：`AUTHORIZATION_HEADER_MISSING`（槽位不对）或 **`AUTH_TOKEN_INVALID`
+  「登录令牌无效或已过期」**（`Authorization` 槽被识别为**登录令牌**，值被拒）
+- 同一 key 对 NOFX：**401 `invalid api key`**（`/api/ai500/list`、`/ai500/stats`）⇒ **不是 NOFX key**
+- `api.vergex.trade` 亦存在同构路由（含 `/api/v1/agents`），但对同一 key 同样拒绝
+- **结论**：该 key 要么已过期、要么属于尚未找到的产品面（如 Studio 的 agent API）。
+  ⚠️ **它已出现在聊天记录里 —— 若为真实 key，建议后续轮换。**
+- **对本管线无影响**：AI500 数据端点**本就不需要 key**（A/B 实测：带 key 与不带 key 返回逐字节一致）
+
+### 6.18.2 AI500 端点本次返回 **4 条**（不限于 3 条）
+- 实测：`PROM 80.37 / BR 71.20 / USELESS 65.05 / ZEC 62.41`
+- ⇒ "只取 3 条"是**本策略自己的 `TOP_N=3`**，不是接口的限制。
+  策略行为不变（仍取 rank≤3），但记录该事实以免日后误判为接口缺数据。
+
+### 6.18.3 **复权+缩池后首笔开仓：Trade #12 PROM**（79.1 小时来第一次信号）
+- 探针证据（bot 自身视角，10:31:26）：
+  `PROM score=80.4066 rank=1 tradable=1 is_zombie=0 gate_open=1 enter_long=1 in_trade=0`
+- 成交：**2026-09-25 10:31:57 CST**，`Trade(id=12, PROM/USDT:USDT, amount=45, open_rate=5.509,
+  enter_tag=ai500_score_top3)`（dry-run）；此后 10:36~11:22 连续 8 次抓取均 `PROM 80.37 tradable=1`
+- **这是新池子（46~47 对）下的第一笔** ⇒ **覆盖链路端到端验证通过**：top3 在池内、无覆盖告警、正常成交
+- ⚠️ **入场时点是"重启后的启动分析"而非 4h 边界**：08:00 边界时 PROM = **79.93（差 0.07 未过）**，
+  10:2x 才越过 80；10:30:09 因 JUP 黑名单修复重启 → 启动分析用最后一根已收盘 K 评估 → 命中入场。
+  - 机制澄清：本策略判据是**状态式**（读 `_entry_state`，不限于边界），故**重启会触发一次入场评估**
+    且**符合规则**（PROM 当时 rank1/score≥80/tradable ✓）；但这是一个**必须知道的行为**：
+    重启时点会影响入场时点 → 已并入"执行层变更"口径，与 §6.13 同类。
+- **OOS 定位**：按 §2 口径（OOS 起点 09-24 05:33 UTC），本笔为 **OOS 第 1 笔**；主判据仍 8/30、−8.92%，
+  本笔未平仓、不计入累计净收益。
+- **观察点**：出场按既有规则（4h 阴线 / MAX_HOLD 48h / 止损），预计 09-26 前有结论；
+  注意本笔入场时 score 仅高出门槛 **0.41 分**（edge-case 样本，与 §6.14 的 79.62 近似未果成对照）
