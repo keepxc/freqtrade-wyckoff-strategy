@@ -4,6 +4,7 @@
 输出 data/klines_1h.parquet：symbol, open_time(UTC), open, close
 """
 import json
+import os
 import re
 import sys
 import time
@@ -13,7 +14,7 @@ import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8")
 D = "research/ai500_h1/data"
-PROXY = "http://127.0.0.1:10809"
+PROXY = os.environ.get("AI500_PROXY", "http://127.0.0.1:7890")   # 服务器默认 7890
 START_MS = int(pd.Timestamp("2026-09-04", tz="UTC").timestamp() * 1000)
 # V3 配置黑名单（config_ai500_v3_dryrun pair_blacklist，按 base 匹配）
 BLACK = re.compile(
