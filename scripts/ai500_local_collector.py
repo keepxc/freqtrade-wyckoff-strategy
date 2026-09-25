@@ -45,7 +45,8 @@ import os
 import sys
 import time
 
-import requests
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from vergex_client import VergeX  # noqa: E402
 
 # ---- 路径：从脚本位置推导，不写死绝对路径（本机/容器都能跑）----
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,8 +55,6 @@ DATA_DIR = os.path.join(_REPO_ROOT, "user_data", "ai500_local")
 
 TRENDING_URL = "https://vergex.trade/trending-crypto"
 CATEGORY_URL = "https://vergex.trade/trending-category"
-PROXY = {"http": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809"), "https": os.environ.get("LOCAL_PROXY", "http://127.0.0.1:10809")}
-HEADERS = {"User-Agent": "Mozilla/5.0"}
 TIMEOUT = 15
 
 # 采集窗口：只取可作为交易信号的短窗口。4h/8h/12h/24h 已实测会整个换掉币种池
@@ -66,7 +65,6 @@ LIST_LIMIT = 20          # top20 + low20 × 4 窗口 = 160 行/轮 ≈ 20MB/天
 POLL_SEC = 60            # net_flow 轮询间隔（bot 是 30s，观察用 60s 足够且体积减半）
 SCORE_POLL_SEC = 300     # score 节流（与远程 bot 同口径）
 KEEP_DAYS = 60
-RETRY = 2
 
 CST = datetime.timezone(datetime.timedelta(hours=8))
 
@@ -102,20 +100,21 @@ def append_rows(path: str, fields: list, rows: list) -> None:
         print(f"[warn] write failed {path}: {e}", flush=True)
 
 
+# 2026-09-25：传输层改走 vergex_client（urllib + 完整浏览器头）。
+# 旧实现 requests + "Mozilla/5.0" 自 09-13 vergex 上 Cloudflare 后 100% 403，
+# 本采集器实际从 09-04 起就没写出过 score 行（collector.log: score_rows=0）。
+# 代理：LOCAL_PROXY 显式设置时使用，否则直连（本机直连 vergex 实测 200）。
+_VX = VergeX(proxy=os.environ.get("LOCAL_PROXY"), timeout=TIMEOUT, retries=3)
+
+
 def _get(url: str, params: dict):
-    """带重试的 GET。全部失败返回 None（本轮该项跳过，不写陈旧值）。"""
-    for attempt in range(RETRY):
-        try:
-            r = requests.get(url, params=params, proxies=PROXY,
-                             headers=HEADERS, timeout=TIMEOUT)
-            r.raise_for_status()
-            return r.json()
-        except Exception as e:
-            if attempt == RETRY - 1:
-                print(f"[warn] fetch failed {params}: {e}", flush=True)
-            else:
-                time.sleep(2)
-    return None
+    """GET JSON。全部失败返回 None（本轮该项跳过，不写陈旧值）。"""
+    path = "/" + url.rstrip("/").rsplit("/", 1)[-1]
+    try:
+        return _VX.get_json(path, params)
+    except Exception as e:
+        print(f"[warn] fetch failed {params}: {type(e).__name__}: {e}", flush=True)
+        return None
 
 
 def collect_netflow(ts: datetime.datetime) -> int:
@@ -178,6 +177,8 @@ def cleanup_old() -> None:
         for name in os.listdir(DATA_DIR):
             if not name.endswith(".csv"):
                 continue
+            if name.startswith("score_"):
+                continue   # score 榜无历史接口、体积小（~1MB/天），永不清理（H1/H2 唯一数据源）
             stem = name.rsplit("_", 1)[-1][:-4]  # YYYYMMDD
             try:
                 d = datetime.datetime.strptime(stem, "%Y%m%d").replace(tzinfo=CST)
