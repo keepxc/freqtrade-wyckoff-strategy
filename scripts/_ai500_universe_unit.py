@@ -125,6 +125,46 @@ check("D2d DB 缺失 → 不报错（跳过并集）", r.returncode == 0, f"rc={
 
 print()
 print("=" * 78)
+print("G. 权威 AI500 名单（NOFX /api/ai500/list，score>70）—— 无 key 时必须零影响")
+print("=" * 78)
+check("G1 无 key → ([], 'no_key')", uni.fetch_ai500_membership("") == ([], "no_key"))
+check("G2 无 key 不联网（注入的 fetch 不会被调用）",
+      uni.fetch_ai500_membership("", _fetch=lambda u: (_ for _ in ()).throw(AssertionError()))[0] == [])
+
+def mk_payload():
+    return json.dumps({"success": True, "data": {"coins": [
+        {"symbol": "BRUSDT", "score": 92.5},
+        {"symbol": "ZEC/USDT", "score": 71},
+        {"symbol": "WEAKUSDT", "score": 69.9},
+        {"symbol": "NOSCORE", "score": None},
+    ]}}).encode()
+
+ms, note = uni.fetch_ai500_membership("k", _fetch=lambda u: mk_payload())
+check("G3 解析出 score>70 的 symbol（多种形态）",
+      "BR" in ms and "ZEC" in ms, f"{ms} / {note}")
+check("G4 score<=70 被剔除", "WEAK" not in ms)
+check("G5 无 score 字段的保守保留", "NOSCORE" in ms)
+check("G6 去重且排序", ms == sorted(set(ms)))
+check("G7 note 带形态诊断", note.startswith("ok("), note)
+
+ms2, note2 = uni.fetch_ai500_membership("k", _fetch=lambda u: (_ for _ in ()).throw(TimeoutError()))
+check("G8 网络异常 → 空表 + fetch_error（不抛）", ms2 == [] and note2.startswith("fetch_error"), note2)
+ms3, note3 = uni.fetch_ai500_membership("k", _fetch=lambda u: b'{"success":true,"data":[]}')
+check("G9 空载荷 → empty_payload", ms3 == [] and note3 == "empty_payload", note3)
+ms4, note4 = uni.fetch_ai500_membership("k", _fetch=lambda u: b"not-json")
+check("G10 非 JSON → fetch_error（不抛）", ms4 == [] and note4.startswith("fetch_error"), note4)
+
+# 真跑：无 key 时产物必须与启发式一致（多出的键只进 manifest）
+rc, log = run(h, d)
+pl = set(json.load(open(out))["pairs"])
+mf = json.load(open(os.path.join(d, "ai500_universe_manifest.json")))
+base = set(uni.build_universe(h, 70, 7)[0])
+check("G11 无 key 真跑：池子 == 启发式结果", pl == base, f"diff={pl ^ base}")
+check("G12 manifest 记录来源标记", mf.get("ai500_membership_source") == "no_key", str(mf.get("ai500_membership_source")))
+check("G13 退出码 0", rc == 0, f"rc={rc}")
+
+print()
+print("=" * 78)
 print("E/F. 安全条款②：正常写入（真跑 subprocess）")
 print("=" * 78)
 rc, log = run(h, d)

@@ -1102,3 +1102,75 @@ pool = { 历史曾达 score ≥ 70 } ∪ { 近 7 天榜单出现过的 } ∪ { �
   占 55% 的 `fetch_l2_order_book` 权重**毫无作用**；② 685 对挂不上（并发 210 对实测仅 178 成功）；
   ③ 缩池后 46 对 × 6 次/天 = 276 次调用/天，**WS 收益趋零**、却要付 `wsProxy` + 容量 +
   「约 9 天重置连接」的脆弱性成本。→ **缩池优先，WS 挂起。**
+
+---
+
+## 6.16.6 部署后实测验收（2026-09-25 10:30 CST，**池子改动的结论成立**）
+
+| 指标 | 改前基线 | 改后实测 |
+|---|---|---|
+| 边界 `candle_age_s`（探针） | 启动轮 6,656s / 9,736s；边界轮数百~数千秒 | **6.8s（04:00）/ 53.1s（08:00）** |
+| 边界小时 K 线刷新失败数 | **438 次/边界**（16 天共 28,017 次，全落在 64 个边界小时） | **0 次**（04/08/12 点均为 0） |
+| 覆盖告警 | — | **未出现**（top3 全在池内） |
+| ERROR | — | 仅网络/Telegram 类（`Exception happened while polling`/`polling stopped`），**无策略/数据类错误** |
+
+**机制侧证据（独立复核）**：日志窗口内 K 线刷新失败按池内外拆分 —— **池外标的 91.8%**
+（另一独立口径 3,714/3,968 = 93.6%，MOONSHOT 478 / OURA 465 / USDBRL 180 …），池内仅 8.2%。
+⇒ **失败请求的来源几乎全是池外标的，缩池正是对症下药。**
+
+**⚠️ 保留意见（不许过度宣称）**：04:00 边界改前基线本来就低（09-24 04:00 = 1 次、
+09-23 04:00 = 0 次），**单点区分度低**；真正的风暴边界是 **16 / 20 / 00 点**
+（09-22 16=473、09-22 20=833、09-25 00=766）→ 需这些边界的样本到齐才能断言"风暴全消"。
+当前结论限于：**边界处理时点已从数千秒降到秒级（机制类，可定论）+ 失败量已归零（边际类，待更多样本）**。
+
+**同期发现并修复的覆盖漏洞（真问题，非假设）**：宇宙 47 对中 `JUP/USDT` 被 config 黑名单
+`.*UP/.*` **误伤剔除**（黑名单用 `re.match` 展开、锚定开头 → `JUP/USDT:USDT` 命中"UP 结尾"规则；
+该规则原意是挡 `BTCUP` 这类杠杆代币）。日志每小时都有 `Pair JUP/USDT:USDT in your blacklist`。
+- 修法：`".*UP/.*"` → **`"(?!JUP/).*UP/.*"`**（负向前瞻，保留原意）
+- 验证：`test-pairlist` → **Whitelist with 47 pairs（含 JUP）**，且 `(?!JUP/).*UP/` 仍能挡其它 UP 对
+- 上线：2026-09-25 10:30:09 CST 重启（PID 513108），启动后黑名单剔除记录 **0**、ERROR 仅 Telegram
+- 注：JUP 至今 **0 次进 top3** ⇒ 尚未造成实际漏单，但**这是覆盖告警能抓、也确实该修的一类漏洞**
+
+## 6.17 AI500 数据源真身 + 平台可靠性核查（2026-09-25，外部事实）
+
+**起因**：用户问"用这个接口返回，到底有多少策略是盈利的、靠谱不"。以下全部来自实抓页面/接口。
+
+### 6.17.1 平台侧（vergex.trade）：**可核实的盈利策略 = 0 个**
+- `/explore`（AI Trader 栏）页面原话：**"No verified AI Traders are available yet"**
+- Code Strategies：**"No published code strategies yet"**；Prompt Strategies：**"No strategies found"**
+- 业绩接口全部需授权：`/api/v1/agents`、`/api/v1/strategies`、`/api/v1/strategies/ranking`、
+  `/api/v1/agents/public` → **401 `AUTHORIZATION_HEADER_MISSING`（scope=agent/strategy）**
+- 表头说明它**本可**给什么：AI Trader = `30D Return / 30D PnL / Win Rate / Running Agents`；
+  Code Strategies = `PnL / Total AUM / Running Agents`；Prompt Strategies = `1M Yield / Total AUM`
+- **平台自己承认不保证盈利**：FAQ「Can VergeX be profitable?」→
+  *"AI trading is experimental and profits are not guaranteed."*
+- **设计上不可核实**：`/about` 明说用 **"Black Box" 技术**保护创作者策略逻辑；商业模式为创作者订阅分成
+- 唯一公开业绩数据 = Trading Feed（近期平仓流水）：**实抓 8 笔全为盈利**（+$128~+$942，带 🚀GAIN 徽章）
+  → **选择性展示**（无亏损样本、无仓位规模、无权益曲线）⇒ **不能反推"多数策略赚钱"**
+- 搜索引擎索引到的旧快照确含收益榜（`AI500 高频动能追踪策略 +351.87%`、
+  `Trend Following（AI500 Data Provider）+22.14%`、`lookover +21.91%`），但属**自报数字**，
+  无回撤/无样本长度/无第三方审计 ⇒ **不作为证据引用**
+
+### 6.17.2 数据源真身：AI500 = 第三方专有指数（**NOFX / nofxos.ai**）
+- vergex 仅是整合方，且**只暴露 top3**（`/trending-category?key=ai500`，label `Crypto AI500`，
+  UI 列：Name / Price / Total Gain / Score / Favorites；其它 key 一律 400）
+- NOFX 公开 API 文档（`nofxos.ai/api-docs`，限速 30 req/s，需 key）：
+  - **`GET /api/ai500/list` = "Retrieve a list of high-potential coins with an AI Score > 70"**
+    ⇒ **AI500 成分股定义 = score > 70** —— 本脚本 `BUFFER_SCORE=70` 因此**不是自定义参数，
+    而是外部定义**（这也是「预热余量」论证（入场 80 > 成分股 70）的真正来源）
+  - 另有 `GET /api/ai500/{symbol}`（单币 AI 分析）、`GET /api/ai500/stats`（指数统计）
+  - 因子族：**动量 + 成交量 + 技术指标**；**权重不公开**（proprietary scoring）
+- 实测：无 key 一律 **401 `invalid api key`**（`/api/ai500/list`、`/stats`、`/{symbol}`、`/ai300/list`）
+- **判定**：是正经数据产品（有文档/版本/限速/指数统计），但**没有任何公开历史业绩披露**
+  ⇒ "该信号是否可靠"**不能由平台或供应商回答，只能由我们自己的前向样本回答**
+  （§2 主判据当前 8/30、−8.92%）
+
+### 6.17.3 本次落地的代码升级（无 key 时**零行为变化**）
+- `scripts/ai500_universe_export.py` 新增 `fetch_ai500_membership()`：
+  - 设 `NOFX_API_KEY` → 拉权威成分股并集进池（**只增不减**，覆盖只扩大）；`AI500_PROXY`/`NOFX_URL` 可覆盖
+  - 未设 → 返回 `([], "no_key")` **不联网**，池子与之前完全一致（manifest 记 `ai500_membership_source`）
+  - 解析为**宽容版**（递归找 symbol/coin/pair 键；有 score 则要求 > 70；去 USDT/USDC/BUSD 后缀）
+  - ⚠️ **未对真实 API 验证**（无 key）：拿到 key 后**先看 `shapes=` 日志**再启用
+- 夹具 `scripts/_ai500_universe_unit.py` → **39/39**（新增 G1–G13：无 key 零影响、不联网、
+  多形态解析、门槛剔除、异常/空载荷/非 JSON 不抛、无 key 真跑与启发式逐字节一致）
+- 判据影响：**无**（无 key 路径=原行为；池子仍 47 对、JSON 结构不变，bot 无需重启）

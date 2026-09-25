@@ -37,6 +37,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -47,6 +48,17 @@ OUT = os.path.join(UD, "ai500_universe.json")
 # 在途仓并集：持仓中的 pair 若轮出池子，出场逻辑（dp.get_analyzed_dataframe）会拿不到数据
 TRADES_DB = os.environ.get("AI500_TRADES_DB",
                            os.path.join(UD, "tradesv3.ai500_v3_dryrun.sqlite"))
+
+# ---- 权威成分股来源（可选，2026-09-25 新增）----------------------------------
+# 2026-09-25 查明：AI500 是**第三方专有指数**（NOFX / nofxos.ai），其公开文档写明
+#   GET /api/ai500/list  =  "coins with an AI Score > 70"
+# 即 **AI500 成分股定义 = score > 70** —— 本脚本的 BUFFER_SCORE=70 因此不是自定义参数，
+# 而是外部定义（这也是「预热余量」论证的来源：入场门槛 80 > 成分股门槛 70）。
+# vergex 只暴露 top3，故默认只能用「历史并集」启发式；一旦提供 NOFX key（环境变量
+# NOFX_API_KEY），即可拉**权威成员表**替换启发式。无 key → 行为与之前完全一致。
+NOFX_KEY = os.environ.get("NOFX_API_KEY", "").strip()
+NOFX_URL = os.environ.get("NOFX_AI500_URL", "https://nofxos.ai/api/ai500/list")
+NOFX_TIMEOUT = int(os.environ.get("NOFX_TIMEOUT", "15"))
 MANIFEST = os.path.join(UD, "ai500_universe_manifest.json")
 
 BUFFER_SCORE = float(os.environ.get("AI500_BUFFER_SCORE", 70))
@@ -120,6 +132,77 @@ def open_position_pairs(db_path: str = TRADES_DB) -> tuple[list[str], str]:
         return [], f"{type(e).__name__}"
 
 
+def fetch_ai500_membership(key: str = NOFX_KEY, url: str = NOFX_URL,
+                           _fetch=None) -> tuple[list[str], str]:
+    """拉权威 AI500 成分股（score > 70）。无 key 时返回 ([], "no_key")，不联网。
+
+    ⚠️ **未对真实 API 验证过**（手上没有 key）：响应结构按 deepwiki 记载推断
+    （`{"success": true, ...}`），故解析写**宽容版**：递归找出所有带 symbol/coin/pair 字样
+    键的 dict，取 symbol；若同时能读到 score 字段，则要求 > BUFFER_SCORE。
+    拿到 key 后应先跑一次看 `_shape` 日志再启用。
+
+    `_fetch` 可注入（夹具用），签名 `_fetch(url) -> bytes`。
+    """
+    if not key:
+        return [], "no_key"
+    try:
+        if _fetch is not None:
+            raw = _fetch(url)
+        else:
+            import urllib.request
+            req = urllib.request.Request(url, headers={
+                "accept": "application/json",
+                "authorization": f"Bearer {key}",
+            })
+            proxy = os.environ.get("AI500_PROXY", "http://127.0.0.1:7890")
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+            with opener.open(req, timeout=NOFX_TIMEOUT) as r:
+                raw = r.read()
+        data = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
+    except Exception as e:
+        return [], f"fetch_error:{type(e).__name__}"
+
+    syms: list[str] = []
+    shapes: set = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            sym = None
+            for k, v in node.items():
+                if isinstance(v, str) and re.search(r"symbol|coin|pair|name", k, re.I):
+                    sym = sym or v
+            if sym:
+                score = None
+                for k, v in node.items():
+                    if re.search(r"score|rating", k, re.I):
+                        try:
+                            score = float(str(v).replace("%", ""))
+                        except (TypeError, ValueError):
+                            score = None
+                        break
+                base = re.split(r"[/:_-]", sym.strip())[0].upper()
+                # NOFX 可能返回 "BRUSDT"/"BR/USDT" 形态 → 去掉计价后缀（剩余 ≥2 字符才去，避免误伤）
+                for suf in ("USDT", "USDC", "BUSD"):
+                    if base.endswith(suf) and len(base) - len(suf) >= 2:
+                        base = base[: -len(suf)]
+                        break
+                if base and (score is None or score > BUFFER_SCORE):
+                    syms.append(base)
+                shapes.add(tuple(sorted(node.keys()))[:6])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(data)
+    uniq = sorted(set(syms))
+    if not uniq:
+        return [], "empty_payload"
+    return uniq, f"ok({len(uniq)}) shapes={list(shapes)[:2]}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
@@ -128,6 +211,13 @@ def main() -> int:
     a = ap.parse_args()
 
     pairs, stats = build_universe(buffer_score=a.buffer_score, window_days=a.window_days)
+    members, mnote = fetch_ai500_membership()
+    stats["ai500_membership_source"] = mnote
+    m_pairs = [m + PAIR_SUFFIX for m in members]
+    added_m = [p for p in m_pairs if p not in pairs]
+    stats["ai500_membership"] = len(members)
+    stats["ai500_membership_added"] = len(added_m)
+    pairs = pairs + added_m                    # 权威名单只增不减（覆盖只扩大，不会漏）
     held, note = open_position_pairs()
     stats["open_positions"] = note
     held = [p if p.endswith(PAIR_SUFFIX) or ":" in p else p + PAIR_SUFFIX for p in held]
