@@ -186,3 +186,7 @@ user_data/config_donchian_dryrun.json.bak*
 user_data/archive/
 user_data/oi_hist
 user_data/oi_hist_coverage.csv
+
+# AI500 宇宙产物（每 15 分钟由 ai500-universe-export.timer 重写，属生成物）
+user_data/ai500_universe.json
+user_data/ai500_universe_manifest.json
