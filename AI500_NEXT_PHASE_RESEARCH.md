@@ -292,3 +292,38 @@
 - V3 bot 停掉之后，`ai500_score_history_v3.csv` / `ai500_zombie_check.csv` 不再增长。
 - score 榜改由 `scripts/ai500_local_collector.py` 采集。该采集器 09-04 → 09-25 之间因为 Cloudflare 403 **实际断采**，09-25 修复传输层后已恢复，写入 `user_data/ai500_local/score_YYYYMMDD.csv`（不再被 60 天清理删除）。
 - **本机 09-04 → 09-25 的采集缺口由服务器上的 V3 CSV 覆盖**，两份数据需要合并使用（字段相同，时间列名不同：`fetched_at_utc` 与 `fetched_at_cst`，值都是 +08:00）。
+
+### 13.1 执行记录（2026-09-25 本机执行；含两处与 §13 原文的事实纠正）
+
+**1. #12 PROM 是策略自身平掉的，不是手动平仓** ⇒ §13"直接平仓"这条已自然满足
+- `open 09-25 02:31:57 UTC @5.509 → close 04:01:12 UTC @5.454`
+- `exit_reason=4h_bearish_candle`（4h 阴线规则，12:00 CST 边界触发）
+- `close_profit=−1.1023%`（−2.73 USDT），持仓 1h29m；停止服务前已确认 **0 在途仓**
+
+**2. ⚠️ 纠正：独立采集器在此之前从未被调度、也没有任何产物**
+- 实测（09-25 12:48 前）：`user_data/ai500_local/` **只有** `binance_perp_symbols.txt`（mtime **09-04 00:24**），
+  **没有任何 `score_*.csv` / `netflow_*.csv`**；`collector.log` 不存在
+- 调度侧：无对应 systemd timer；用户 crontab 只有两条 `b300_collector`，**没有** `ai500_local_collector`
+- ⇒ §13 所述"本机采集器 09-25 修复传输层后**已恢复**、写入 `ai500_local/score_YYYYMMDD.csv`"
+  **只完成了传输层修复（vergex_client），调度与产物均不存在**。按实际纠正。
+  （该条前置"关闭 V3 前先确认独立采集器已在运行"因此**在本次执行前不成立**，故先补采集器、再停 V3。）
+
+**3. 采集器已按本机惯例常驻并验证（新增单元，非修改既有 unit）**
+- 新增 `~/.config/systemd/user/ai500-local-collector.service`：
+  `Environment=LOCAL_PROXY=http://127.0.0.1:7890`、`Restart=always`、`RestartSec=30`、
+  日志 append 到 `user_data/ai500_local/collector.log`；已 `enable --now`（开机自启）
+- smoke：`--once` → `netflow_rows=160 score_rows=6` ✓
+- **两个采样点验证（排除"跑一次就静默死"）**：
+  `score_20260925.csv` 行数 7 → 13 → **18**（12:48:53 / 12:49 / 12:54:15 三次抓取）；
+  `netflow_multiwin_20260925.csv` 321 → **1281** 行（60s 轮询持续增长）
+
+**4. V3 终止执行**
+- `freqtrade-ai500-v3-dryrun.service` → **stop + disable**（DB/CSV 一律保留不删）
+- `ai500-universe-export.timer` → 一并 **stop + disable**（它只为 V3 的 pairlist 产出 JSON）
+- 恢复方式（将来若重新预注册）：`systemctl --user enable --now ai500-universe-export.timer freqtrade-ai500-v3-dryrun.service`
+
+**5. 定格数字（从 sqlite 独立复算，非引用）**
+- **§2 主判据窗口（平仓 ≥ 2026-09-19 00:00 UTC）：n=9，累计 −10.02%，绝对值 −26.88 USDT，距 −20% 中止闸 9.98pp**
+- OOS 段（开仓 ≥ 2026-09-24 05:33 UTC）：**1 笔**（#12 PROM −1.10%）
+- 12 笔构成：`stop_loss` 7 笔、`4h_bearish_candle` 5 笔（含最大单笔 #4 BR **+18.03%**）
+- 与 §13 引用值（8/30、−8.92%）的差异来源：#12 平仓（04:01:12 UTC）**落在主判据窗口内** → 8→9 笔、−8.92%→−10.02%
