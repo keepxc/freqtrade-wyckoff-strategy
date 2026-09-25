@@ -54,9 +54,11 @@ REALERT_H = 12
 # ---------------------------------------------------------------------------
 TARGETS = [
     # key                路径(glob)                                    节奏      阈值h
-    ("score_v3",         "user_data/ai500_score_history_v3.csv",      "策略循环 5min",  2),
-    ("zombie",           "user_data/ai500_zombie_check.csv",          "策略循环 5min",  2),
-    ("netflow_multiwin", "user_data/ai500_netflow_multiwin.csv",      "策略循环 60s",   2),
+    # 2026-09-25：V3 主动终止 ⇒ score/zombie/netflow 由 V3 策略循环写出改为本机常驻采集器
+    # （ai500-local-collector.service）写出，路径随之改到 user_data/ai500_local/。
+    # zombie 检查是 V3 专有产物（僵尸行过滤），随 V3 一起退役，不再监控（列了就是永久告警）。
+    ("score_ai500",      "user_data/ai500_local/score_*.csv",           "常驻 每5min",   2),
+    ("netflow_ai500",    "user_data/ai500_local/netflow_multiwin_*.csv","常驻 每60s",    2),
     ("b300_snapshots",   "user_data/collect/b300_snapshots.jsonl",    "cron 每4h",      7),
     ("b300_signals",     "user_data/collect/b300_signals.jsonl",      "cron 每4h",      7),
     ("b300_breakout",    "user_data/collect/b300_breakout.jsonl",     "cron 每日00:20", 30),
