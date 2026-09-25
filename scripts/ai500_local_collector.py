@@ -56,6 +56,8 @@ DATA_DIR = os.path.join(_REPO_ROOT, "user_data", "ai500_local")
 TRENDING_URL = "https://vergex.trade/trending-crypto"
 CATEGORY_URL = "https://vergex.trade/trending-category"
 TIMEOUT = 15
+# 汇总打印间隔（轮）。可用 COLLECTOR_SUMMARY_EVERY 降低，便于验证日志格式。
+SUMMARY_EVERY = int(os.environ.get("COLLECTOR_SUMMARY_EVERY", "30"))
 
 # 采集窗口：只取可作为交易信号的短窗口。4h/8h/12h/24h 已实测会整个换掉币种池
 # （24h 榜首是 HFT/UAI/USELESS 这类小币，BTC/ETH 反而在流出榜前二），
@@ -201,6 +203,8 @@ def main() -> int:
     last_score = 0.0
     last_cleanup = 0.0
     cycles = 0
+    sum_nf = 0
+    sum_sc = 0
     while True:
         t0 = time.time()
         ts = now_cst()
@@ -215,10 +219,19 @@ def main() -> int:
             last_cleanup = t0
 
         cycles += 1
-        if once or cycles % 30 == 0:
+        sum_nf += n_nf
+        sum_sc += n_sc
+        # 2026-09-25：改为**区间累计**。原实现打印的是「最后一轮」的 n_sc，
+        # 而 score 每 SCORE_POLL_SEC(=5 轮) 才拉一次 → 该字段实际几乎恒为 0，
+        # 读数者会误判「score 采集坏了」。
+        # ⚠️ 这正是当初 09-04→09-25 真实断采被掩盖的同一类陷阱（当时也是 score_rows=0）。
+        # 判活请以**产物文件**为准：user_data/ai500_local/score_YYYYMMDD.csv 行数/末轮时间。
+        if once or cycles % SUMMARY_EVERY == 0:
             print(f"[info] {ts.strftime('%m-%d %H:%M:%S')} "
-                  f"netflow_rows={n_nf} score_rows={n_sc} cycles={cycles}",
+                  f"report({SUMMARY_EVERY}轮累计): netflow_rows={sum_nf} score_rows={sum_sc}"
+                  f" | 本轮 nf={n_nf} sc={n_sc} | cycles={cycles}",
                   flush=True)
+            sum_nf = sum_sc = 0
         if once:
             return 0
         time.sleep(max(1.0, POLL_SEC - (time.time() - t0)))

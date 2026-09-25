@@ -13,21 +13,32 @@ cd /home/gyan/freqtrade && git pull origin main
 V3 bot 停掉后，`user_data/ai500_score_history_v3.csv` 不再增长，score 榜改由独立采集器写入：
 
 ```bash
-# 前台试跑一轮，确认有 score_rows > 0
+# ⚠️ 2026-09-25 起本机已改为 **systemd 常驻**（不要再用 nohup 起第二份）：
+systemctl --user status ai500-local-collector.service
+systemctl --user restart ai500-local-collector.service
+# 前台试跑一轮用（验证传输层/凭据，不写调度）
 LOCAL_PROXY=http://127.0.0.1:7890 python3 scripts/ai500_local_collector.py --once
-
-# 后台常驻
-LOCAL_PROXY=http://127.0.0.1:7890 nohup python3 scripts/ai500_local_collector.py \
-  >> user_data/ai500_local/collector.log 2>&1 &
-
-# 检查
-tail -f user_data/ai500_local/collector.log          # 每 30 轮打印一次，score_rows 应 > 0
-ls -la user_data/ai500_local/score_$(date +%Y%m%d).csv
 ```
 
-- 输出：`user_data/ai500_local/score_YYYYMMDD.csv`（每天一个文件，永不自动清理），另有 `netflow_multiwin_*.csv`（保留 60 天）。
-- 直连 vergex 能通的话，可以不设 `LOCAL_PROXY`。
-- 停止：`pkill -f ai500_local_collector.py`
+**检查（判活只看产物，不要看日志的 score_rows）**：
+
+```bash
+# ✅ 正确：看产物文件的行数与末轮时间（score 应每 5 分钟一行组、netflow 每 1 分钟一组）
+ls -la user_data/ai500_local/score_$(date +%Y%m%d).csv
+tail -1 user_data/ai500_local/score_$(date +%Y%m%d).csv
+tail -3 user_data/ai500_local/collector.log     # 日志只看异常/崩溃重启
+```
+
+- ⚠️ **日志里的 `score_rows` 是「本轮」计数，不是区间累计**：score 每 5 轮才拉一次，
+  故该字段绝大多数轮次为 0 —— **它恒为 0 不代表采集坏了**。
+  2026-09-25 已把汇总行改成 `report(N轮累计): netflow_rows=.. score_rows=.. | 本轮 nf=.. sc=..`
+  （区间累计 + 本轮两个口径并列）。**判活一律以产物文件为准。**
+  这条纪律的来由：09-04→09-25 的真实断采正是**只看 `score_rows=0` 而没查产物**才被漏了 5 周。
+- 输出：`user_data/ai500_local/score_YYYYMMDD.csv`（每天一个文件，永不自动清理），
+  另有 `netflow_multiwin_*.csv`（保留 60 天）。
+- 直连 vergex 能通的话可以不设 `LOCAL_PROXY`；systemd 单元里已显式设为本机 7890。
+- 停止：`systemctl --user stop ai500-local-collector.service`（旧的 `pkill -f ai500_local_collector.py` 仅适用于手工 nohup 起的进程）。
+
 
 ## 2. 复跑 H1/H2（已冻结的检验）
 
