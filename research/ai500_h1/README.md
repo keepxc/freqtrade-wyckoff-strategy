@@ -57,3 +57,21 @@ python3 research/ai500_h1/analyze_h1_h2.py | tee research/ai500_h1/output.txt
 - 判据见 `PREREG_H1_H2.md`，结果见 `RESULTS_H1_H2.md`（4d 中位超额 −1.15%，CI [−6.19, +2.40] → 无 alpha 证据，⭕）。
 - **在同一批数据上重跑只是复现，不是新证据。** 事件窗口截止在 09-24，重新拉 K 线只会让 7d 窗口的删失变少，**不得**据此改写结论。
 - 要用新采集的数据（第 1 节）重测 H1，必须**先写一份新的预注册**再跑，并且只用预注册之后采集的数据。那时要把 `analyze_h1_h2.py` 的输入换成 `user_data/ai500_local/score_*.csv`：时间列名是 `fetched_at_cst`（值同样带 +08:00），另外 `price` 列带 `$` 和千分位逗号。
+
+## 4. 榜结构 / score 动力学分析（2026-09-25 新增，入 `scripts/`）
+
+三支只读分析脚本（合并 V3 历史 `ai500_score_history_v3.csv` 与采集器 `ai500_local/score_*.csv`）：
+
+```bash
+python3 research/ai500_h1/scripts/analyze_board_structure.py   # 数据体检 + 逐日榜结构（中位/离散度/≥80 占比）
+python3 research/ai500_h1/scripts/analyze_score_dynamics.py    # score 更新粒度、Δscore 与价格的前后关系、首破 80 前向收益
+python3 research/ai500_h1/scripts/analyze_netflow_vs_score.py  # 资金流榜 vs score 交叉验证（top/low 侧别，符号带 USDT 后缀）
+```
+
+**已知取值格式（读入方必读）**：
+- `score` / `price` / `signal_peak` / `start_price` / `change_pct_value` 在**同一文件内可能混有
+  展示字符串与裸数字**（V3 文件 09-21 前 `signal_peak="峰值 90"`；采集器 09-25 19:20 前
+  `price="$1,612.93"`）。
+- ⇒ **一律用容错解析**：去掉 `$` 与千分位后取第一个数字（`re.search(r"-?\d+(?:\.\d+)?", s)`）。
+  直接 `float()` 会抛错；直接字符串比较（`"$1,612.93" > 80`）会静默给出错误结果。
+- 2026-09-25 19:20 起采集器已归一化为裸数字，但**历史行不变**。

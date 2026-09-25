@@ -42,6 +42,7 @@ score_YYYYMMDD.csv:
 import csv
 import datetime
 import os
+import re
 import sys
 import time
 
@@ -147,6 +148,22 @@ def collect_netflow(ts: datetime.datetime) -> int:
     return len(rows)
 
 
+
+def _num(v):
+    """归一化为裸数字，与 V3 策略写出的 ai500_score_history_v3.csv 语义一致。
+
+    API 返回的是展示字符串（price='$1,612.93'、signal='峰值 90'），而 V3 文件里是
+    1612.93 / 90.0。2026-09-25 修：此前本采集器直接写原始字符串，造成「同 schema、
+    同 9 列，但取值格式不同」——合并两源或下游做数值比较时会静默出错
+    （`"$1,612.93" > 80` 是字符串比较、`float()` 直接抛错）。
+    容错解析规则：去掉 $ 与千分位后取第一个数字；失败写空。
+    """
+    if v is None:
+        return ""
+    m = re.search(r"-?\d+(?:\.\d+)?", str(v).replace(",", "").replace("$", ""))
+    return float(m.group()) if m else ""
+
+
 def collect_score(ts: datetime.datetime) -> int:
     stamp = ts.isoformat()
     data = _get(CATEGORY_URL, {"lang": "zh", "key": "ai500"})
@@ -162,12 +179,12 @@ def collect_score(ts: datetime.datetime) -> int:
             "fetched_at_cst": stamp,
             "symbol": sym,
             "pair": f"{sym}/USDT:USDT",
-            "score": a.get("score"),
-            "signal_peak": a.get("signal"),
-            "price": a.get("price"),
-            "start_price": a.get("startPrice"),
+            "score": _num(a.get("score")),
+            "signal_peak": _num(a.get("signal")),
+            "price": _num(a.get("price")),
+            "start_price": _num(a.get("startPrice")),
             "start_time": a.get("startTime"),
-            "change_pct_value": a.get("changePctValue"),
+            "change_pct_value": _num(a.get("changePctValue")),
         })
     append_rows(day_path("score", ts), SCORE_FIELDS, rows)
     return len(rows)
