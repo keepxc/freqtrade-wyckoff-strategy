@@ -1,0 +1,2 @@
+# shell 脚本在 Linux 上执行，必须 LF（Windows 端 autocrlf 会把它们变成 CRLF）
+*.sh text eol=lf

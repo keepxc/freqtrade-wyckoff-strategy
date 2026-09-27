@@ -1,0 +1,11 @@
+# 凭据——绝不提交
+.env
+.token
+ai_token.txt
+
+# 运行环境与产物（bot 机器本地生成，提交会导致 git pull 冲突）
+.venv/
+__pycache__/
+out/
+logs/
+data/*.csv

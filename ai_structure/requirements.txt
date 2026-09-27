@@ -1,0 +1,14 @@
+# 依赖很少，全部是纯 Python 或有 wheel 的包，不需要编译。
+#
+#   swing_watch.py  -> numpy, pandas
+#   session_vol.py  -> numpy, pandas
+#   make_chart.py   -> Pillow（绘图只用 Pillow + 标准库 csv，不用 matplotlib）
+#   ask_ai.py       -> 仅标准库（urllib / json / base64）
+#   ai_login.py     -> 仅标准库
+#   download_data.py-> 仅标准库
+#
+# 版本下限按 2020 年后的 Python 3.9+ 兼容写；上限不锁，
+# 这几个包的 API 在本项目用到的部分非常稳定。
+numpy>=1.21
+pandas>=1.3
+Pillow>=9.0
