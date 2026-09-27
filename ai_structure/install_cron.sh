@@ -13,8 +13,9 @@
 # 为什么默认用 CRON_TZ=UTC：
 #   服务器时区可能不是 UTC，而且有些时区有夏令时。写死本地时间会在换季时
 #   悄悄漂移一小时。CRON_TZ 让 cron 条目直接按 UTC 解释，逻辑最稳。
-#   若你的 crond 是 busybox（Docker alpine 等），不支持 CRON_TZ，本脚本会自动
-#   退回 --local 模式并在输出里说明。
+#   不支持 CRON_TZ 的 crond 会自动退回 --local 模式并在输出里说明：
+#   busybox（Docker alpine 等）和 Debian/Ubuntu 的 cron 3.0pl1（vixie）都不支持，
+#   后者是最常见的一种，且它是 `cron` 而不是 `crond`，光按进程名认不出来。
 # ============================================================================
 set -uo pipefail
 
@@ -65,12 +66,40 @@ TZ_NAME="$(cat /etc/timezone 2>/dev/null || true)"
 [ -z "$TZ_NAME" ] && TZ_NAME="$(date +%Z 2>/dev/null || true)"
 [ -z "$TZ_NAME" ] && TZ_NAME="未知时区"
 
-# busybox crond 不支持 CRON_TZ，必须退回本地时间换算
+# CRON_TZ 支持性检测。不支持就必须退回本地时间换算 —— 否则条目会按本地时区
+# **静默**执行：时段整体偏移，且没有任何东西会报错（额度还在同一 UTC 日内，
+# 所以连额度耗尽这种可观测症状都不会出现）。
+#   · busybox crond（Docker alpine 等）           → 不支持
+#   · Debian/Ubuntu 的 cron 3.0pl1（vixie）        → 不支持，且进程名是 `cron`
+#                                                    不是 `crond`，光看名字认不出
+#   · cronie（RHEL / CentOS 系）                   → 支持
+# 检测不出来时一律退回本地时间（保守方向：对没有夏令时的时区，本地换算永远正确）。
 USE_TZ_UTC=1
-[ "$FORCE_LOCAL" -eq 1 ] && USE_TZ_UTC=0
+TZ_REASON=""
+[ "$FORCE_LOCAL" -eq 1 ] && { USE_TZ_UTC=0; TZ_REASON="用户指定 --local"; }
 if [ "$USE_TZ_UTC" -eq 1 ]; then
   if readlink -f "$(command -v crond 2>/dev/null || echo /nonexistent)" 2>/dev/null | grep -q busybox; then
     USE_TZ_UTC=0
+    TZ_REASON="busybox crond 不支持 CRON_TZ"
+  fi
+fi
+if [ "$USE_TZ_UTC" -eq 1 ]; then
+  # 找 crond 二进制（它常在 /usr/sbin，普通用户 PATH 里可能没有）
+  CRONBIN="$(command -v cron 2>/dev/null || command -v crond 2>/dev/null || true)"
+  if [ -z "$CRONBIN" ]; then
+    for p in /usr/sbin/cron /usr/sbin/crond /sbin/cron /sbin/crond; do
+      [ -x "$p" ] && { CRONBIN="$p"; break; }
+    done
+  fi
+  SUPPORTS=0
+  if [ -n "$CRONBIN" ] && grep -qa CRON_TZ "$CRONBIN" 2>/dev/null; then
+    SUPPORTS=1
+  elif man 5 crontab 2>/dev/null | grep -qi CRON_TZ; then
+    SUPPORTS=1
+  fi
+  if [ "$SUPPORTS" -eq 0 ]; then
+    USE_TZ_UTC=0
+    TZ_REASON="未在本机 crond（${CRONBIN:-未找到}）与 crontab(5) 里找到 CRON_TZ 支持"
   fi
 fi
 
@@ -90,7 +119,14 @@ else
   CRON_ASIA="$(to_local "$SLOT_ASIA")"
   CRON_EUUS="$(to_local "$SLOT_EUUS")"
   say "时区：本机 $TZ_NAME (UTC${Z})  → 不支持 CRON_TZ，换算成本地时间"
+  [ -n "$TZ_REASON" ] && warn "原因：$TZ_REASON"
   warn "注意：若本机时区有夏令时，换季时需重新执行本脚本"
+fi
+# 给验收用：crontab 里的时刻到底按谁的时区解释
+if [ "$USE_TZ_UTC" -eq 1 ]; then
+  TZMODE="cron 按 UTC 解释"
+else
+  TZMODE="本机 $TZ_NAME (UTC${Z})"
 fi
 
 A_H="${CRON_ASIA%%:*}"; A_M="${CRON_ASIA##*:}"
@@ -172,6 +208,13 @@ if [ "$REMOVE" -eq 1 ]; then
   ok "已移除本包的定时任务"
 else
   ok "已注册定时任务"
+  echo
+  echo "排班对照（验收时照抄，不要凭记忆换算）："
+  printf '  asia  crontab 写 %s   ← 按 %s ← 目标 %s UTC\n' \
+         "$CRON_ASIA" "$TZMODE" "$SLOT_ASIA"
+  printf '  euus  crontab 写 %s   ← 按 %s ← 目标 %s UTC\n' \
+         "$CRON_EUUS" "$TZMODE" "$SLOT_EUUS"
+  echo "  （实例：本机 Asia/Shanghai 且不支持 CRON_TZ → 写 30 08 / 0 22）"
   echo
   say "当前 crontab："
   crontab -l | sed 's/^/  /'
