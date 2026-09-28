@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
-"""把当前双栏图 + 中性提问发给外部图表分析 AI，并归档结果。
+"""提示词定义（PROMPT_* / PROMPT_VERSION / build_prompt）+ 站点源调用（已停用）。
 
-接口形态（本项目踩过的坑，务必保留这段注释）
-------------------------------------------
-· 2026-08 抓取的前端快照里用 res.json() 取 data.reply；
-· 2026-09 实测该接口已改为 **SSE 流式**（`data: {"type":"delta","text":"…"}`）。
-  直接 json.load 会抛 JSONDecodeError —— **而这一次调用已经扣了额度**。
-  因此本脚本同时解析 JSON 与 SSE，并把原始字节落盘，避免结果和额度一起丢。
+现役 AI 源是 OpenRouter（ask_vision.py），它从本文件 import build_prompt()，
+所以提示词只在这里维护一份。本文件的 main()（ai.yss-signal.com 站点源）
+只在 .env 设 AI_SOURCE=site 时才会被 run_session.sh 调用，默认不跑。
 
-额度：免费额度按账号每日限额（实测 2 次/日），北京时间 08:00（= 00:00 UTC）重置。
-本脚本在调用前先查额度，额度为 0 时直接退出，不浪费请求。
+站点源接口备忘（仅 AI_SOURCE=site 时相关）：该接口 2026-09 起为 SSE 流式，
+本脚本同时解析 JSON 与 SSE 并把原始字节落盘；每日额度 2 次，调用前先查额度。
 """
 import argparse
 import base64

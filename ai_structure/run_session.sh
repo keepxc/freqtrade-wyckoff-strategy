@@ -43,7 +43,7 @@ if [ -z "$PY" ]; then
 fi
 
 # AI 源（可用 .env 里的 AI_SOURCE 覆盖）：
-#   openrouter —— 默认。走 ask_vision.py + OpenRouter 免费视觉候选，无每日额度限制
+#   openrouter —— 默认。走 ask_vision.py + OpenRouter 免费视觉候选（50 或 1000 次/天，本管线每天约 8~16 次）
 #   site       —— 走 ask_ai.py + ai.yss-signal.com 图表 agent（2 次/天，上游会拥塞）
 AI_SOURCE="${AI_SOURCE:-openrouter}"
 
