@@ -49,6 +49,7 @@ COLS = ["run_key", "slot", "run_at", "as_of", "as_of_ts", "close",
         f"prog_codes_{C.FWD_PRIMARY_H}", f"prog_codes_{C.FWD_SECONDARY_H}",
         f"ai_dir_{C.FWD_PRIMARY_H}", f"ai_dir_{C.FWD_SECONDARY_H}",
         "ai_p_up_7d", "ai_p_consistent", "prompt_version",
+        "ai_first_parse_ok", "ai_attempts",
         "pipeline_ok"]
 
 
@@ -186,6 +187,10 @@ def main():
             else:
                 parsed = parse_ai_dirs((a.get("response") or {}).get("reply"))
                 row["prompt_version"] = a.get("prompt_version", "")
+                # 首轮是否合规 + 试了几次：重试后交付的结果进 ai_parse_ok（冻结判据），
+                # 首轮合规率单独留痕，供报告区分「一次就对」和「靠重试才对」
+                row["ai_first_parse_ok"] = a.get("first_parse_ok", "")
+                row["ai_attempts"] = a.get("attempt_count", "")
         except (json.JSONDecodeError, OSError):
             status = "bad_file"
     elif status == "ok":

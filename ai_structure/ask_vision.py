@@ -33,6 +33,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import ask_ai                      # 复用同一份提示词构造（noqa: E402）
+import forward_log as FL           # 复用 parse_ai_dirs 做「末行是否合规」校验（noqa: E402）
 
 RESULT = os.path.join(C.OUT_DIR, "watch_latest.json")
 INDEX = os.path.join(C.OUT_DIR, "ai_index.json")
@@ -95,6 +96,74 @@ def call(model, prompt, img_b64, key, op, max_tokens):
         return None, f"{type(e).__name__}: {e}".encode(), round(time.time() - t0, 1)
 
 
+def try_once(model, prompt, img_b64, key, op, max_tokens, call_fn=None):
+    """调用一次，并跑完所有「这次回复能不能用」的检查。
+
+    返回 (kind, payload)：
+      ("ok",  (model, d, reply, dt, status, finish))
+      ("bad", (note, dt, status))，note ∈ http / struct / empty / trunc / format
+
+    format 是新增的一条：HTTP 200、非空、未截断，但末行没有合规的 DIRECTION_JSON。
+    2026-09-28 dense_12 就是这种情况——以前会直接落进 forward_log 记成「AI 没按格式
+    输出」（算解析失败），现在改为「再识别一次」。
+    """
+    call_fn = call_fn or call
+    status, raw, dt = call_fn(model, prompt, img_b64, key, op, max_tokens)
+    text = raw.decode("utf-8", "replace")
+    open(RAW, "w", encoding="utf-8").write(text)
+    if status != 200:
+        print(f"  [!] HTTP {status}  {dt}s  {text[:200]}", file=sys.stderr)
+        return "bad", ("http", dt, status)
+    try:
+        d = json.loads(text)
+        reply = (d["choices"][0]["message"].get("content") or "").strip()
+        finish = d["choices"][0].get("finish_reason")
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
+        print(f"  [!] 响应结构异常：{e}", file=sys.stderr)
+        return "bad", ("struct", dt, status)
+    used = d.get("usage") or {}
+    print(f"  HTTP 200  {dt}s  model={d.get('model')}  provider={d.get('provider')}"
+          f"  cost={used.get('cost')}  tokens={used.get('prompt_tokens')}"
+          f"+{used.get('completion_tokens')}  finish={finish}")
+    if not reply:
+        print("  [!] 回复为空（推理 token 吃光预算？）", file=sys.stderr)
+        return "bad", ("empty", dt, status)
+    if finish == "length":
+        print("  [!] 回复被截断（finish_reason=length）", file=sys.stderr)
+        return "bad", ("trunc", dt, status)
+    if FL.parse_ai_dirs(reply) is None:
+        print("  [!] 末行没有合规的 DIRECTION_JSON（模型没守格式）", file=sys.stderr)
+        return "bad", ("format", dt, status)
+    return "ok", (model, d, reply, dt, status, finish)
+
+
+def run_rounds(models, tries, prompt, img_b64, key, op, max_tokens, call_fn=None):
+    """候选轮询 + 失败再识别一轮。返回 (winner, attempts)。
+
+    winner 为 None 表示所有尝试都不合规（照旧记失败，不会无限试）。
+    attempts 逐次落盘：检查点的解析成功率判据用「交付结果」，但首轮合规率必须
+    单独可查——否则重试就把「AI 不守格式」洗白了。
+    """
+    attempts = []
+    for rnd in range(1, max(1, tries) + 1):
+        if rnd > 1:
+            print(f"[重试] 第 {rnd} 轮识别（上一轮没有合规回复）", file=sys.stderr)
+        for model in models:
+            print(f"[发送] r{rnd} {model}  图 {os.path.getsize(IMG):,} 字节  "
+                  f"max_tokens={max_tokens}")
+            kind, payload = try_once(model, prompt, img_b64, key, op, max_tokens, call_fn)
+            if kind == "ok":
+                m, d, reply, dt, status, finish = payload
+                attempts.append({"round": rnd, "model": m, "parse_ok": 1,
+                                 "provider": d.get("provider"), "finish_reason": finish,
+                                 "elapsed_s": round(dt, 1)})
+                return payload, attempts
+            note, dt, status = payload
+            attempts.append({"round": rnd, "model": model, "parse_ok": 0, "note": note,
+                             "http_status": status, "elapsed_s": round(dt, 1)})
+    return None, attempts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slot", default="manual")
@@ -143,40 +212,12 @@ def main():
     img_b64 = base64.b64encode(open(IMG, "rb").read()).decode()
     op = opener()
     max_tokens = int(os.environ.get("VISION_MAX_TOKENS", "4000"))
-    winner = None
-    for model in _models():
-        print(f"[发送] {model}  图 {os.path.getsize(IMG):,} 字节  max_tokens={max_tokens}")
-        status, raw, dt = call(model, prompt, img_b64, key, op, max_tokens)
-        text = raw.decode("utf-8", "replace")
-        open(RAW, "w", encoding="utf-8").write(text)
-        if status != 200:
-            print(f"  [!] HTTP {status}  {dt}s  {text[:200]}", file=sys.stderr)
-            continue
-        try:
-            d = json.loads(text)
-            reply = (d["choices"][0]["message"].get("content") or "").strip()
-            finish = d["choices"][0].get("finish_reason")
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            print(f"  [!] 响应结构异常：{e}", file=sys.stderr)
-            continue
-        used = d.get("usage") or {}
-        print(f"  HTTP 200  {dt}s  model={d.get('model')}  provider={d.get('provider')}"
-              f"  cost={used.get('cost')}  tokens={used.get('prompt_tokens')}"
-              f"+{used.get('completion_tokens')}  finish={finish}")
-        if not reply:
-            # 推理模型把预算烧在 reasoning 上会走到这里：算失败，换候选
-            print("  [!] 回复为空（推理 token 吃光预算？）→ 换下一个候选", file=sys.stderr)
-            continue
-        if finish == "length":
-            # 被 max_tokens 截断：末行 DIRECTION_JSON 大概率丢了。这是调用失败，
-            # 不能落到 forward_log 里记成「AI 没按格式输出」（失败率会算错维度）
-            print("  [!] 回复被截断（finish_reason=length）→ 换下一个候选", file=sys.stderr)
-            continue
-        winner = (model, d, reply, dt, status, finish)
-        break
-
+    # VISION_TRIES=2：首轮 + 至多 1 次重试（用户 2026-09-28 指令「失败就再识别一次」）
+    tries = max(1, int(os.environ.get("VISION_TRIES", "2")))
+    winner, attempts = run_rounds(_models(), tries, prompt, img_b64, key, op, max_tokens)
     if not winner:
-        print("[失败] 所有候选都没拿到有效回复。", file=sys.stderr)
+        print(f"[失败] {len(attempts)} 次尝试都没有合规回复（上限 {tries} 轮）。",
+              file=sys.stderr)
         return 1
 
     model, d, reply, dt, status, finish = winner
@@ -191,6 +232,9 @@ def main():
                    "model": d.get("model"), "provider": d.get("provider"),
                    "usage": d.get("usage"), "finish_reason": finish,
                    "temperature": 0,
+                   "attempt_count": len(attempts),
+                   "first_parse_ok": attempts[0]["parse_ok"] if attempts else 0,
+                   "attempts": attempts,
                    "response": {"reply": reply, "model": d.get("model"),
                                 "provider": d.get("provider"), "success": True}},
                   fh, ensure_ascii=False, indent=2)

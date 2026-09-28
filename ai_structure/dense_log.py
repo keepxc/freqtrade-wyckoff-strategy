@@ -33,6 +33,7 @@ COLS = ["run_key", "slot", "run_at", "as_of", "as_of_ts", "close", "phase", "bre
         "data_age_h", "data_fresh", "sw_rc", "chart_rc", "ai_rc", "ai_status",
         "ai_parse_ok", "prog_dir_7", "prog_codes_7", "ai_dir_7", "ai_dir_30",
         "ai_p_up_7d", "ai_p_consistent", "prompt_version", "finish_reason",
+        "ai_first_parse_ok", "ai_attempts",
         "model", "provider", "cost", "elapsed_s", "dense_ok"]
 
 
@@ -87,6 +88,8 @@ def main():
                 row["elapsed_s"] = a.get("elapsed_s", "")
                 row["prompt_version"] = a.get("prompt_version", "")
                 row["finish_reason"] = a.get("finish_reason", "")
+                row["ai_first_parse_ok"] = a.get("first_parse_ok", "")
+                row["ai_attempts"] = a.get("attempt_count", "")
         except (json.JSONDecodeError, OSError):
             status = "bad_file"
     elif status == "ok":
