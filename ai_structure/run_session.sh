@@ -42,6 +42,11 @@ if [ -z "$PY" ]; then
   exit 2
 fi
 
+# AI 源（可用 .env 里的 AI_SOURCE 覆盖）：
+#   openrouter —— 默认。走 ask_vision.py + OpenRouter 免费视觉候选，无每日额度限制
+#   site       —— 走 ask_ai.py + ai.yss-signal.com 图表 agent（2 次/天，上游会拥塞）
+AI_SOURCE="${AI_SOURCE:-openrouter}"
+
 mkdir -p "$HERE/logs" "$HERE/out"
 STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 LOG="$HERE/logs/run_$(date -u +%Y%m%d).log"
@@ -73,20 +78,23 @@ if [ $SKIP -eq 0 ]; then
   [ $CHART_RC -ne 0 ] && log "警告：出图失败（$CHART_RC）"
 fi
 
-# 3) 刷新 token（幂等：未过期则直接跳过，不消耗额度）
-if [ $SKIP -eq 0 ] && [ "$NO_AI" -eq 0 ]; then
+# 3) 刷新 token（仅站点源需要；幂等：未过期则直接跳过，不消耗额度）
+if [ $SKIP -eq 0 ] && [ "$NO_AI" -eq 0 ] && [ "$AI_SOURCE" = "site" ]; then
   log "--- 3/6 检查 AI token"
   "$PY" ai_login.py >>"$LOG" 2>&1
   rc=$?
   [ $rc -ne 0 ] && log "警告：token 刷新失败（$rc），继续尝试调用"
 else
-  log "--- 3/6 跳过 token"
+  log "--- 3/6 跳过 token（源=$AI_SOURCE）"
 fi
 
 # 4) 调外部 AI
 if [ $SKIP -eq 0 ] && [ "$NO_AI" -eq 0 ]; then
-  log "--- 4/6 调用外部 AI（槽位 $SLOT）"
-  "$PY" ask_ai.py --slot "$SLOT" >>"$LOG" 2>&1
+  log "--- 4/6 调用 AI（源=$AI_SOURCE，槽位 $SLOT）"
+  case "$AI_SOURCE" in
+    site) "$PY" ask_ai.py --slot "$SLOT" >>"$LOG" 2>&1 ;;
+    *)    "$PY" ask_vision.py --slot "$SLOT" >>"$LOG" 2>&1 ;;
+  esac
   AI_RC=$?
   case $AI_RC in
     0) log "AI 调用成功" ;;
