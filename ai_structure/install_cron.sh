@@ -139,10 +139,14 @@ E_MIN="$E_M"; [ "$E_MIN" = "00" ] && E_MIN="0"
 
 LINE_ASIA="$A_MIN $A_H * * * cd $HERE && ./run_session.sh asia >> logs/cron.log 2>&1"
 LINE_EUUS="$E_MIN $E_H * * * cd $HERE && ./run_session.sh euus >> logs/cron.log 2>&1"
+# 密集观测：每 4 小时一次（本地时刻，无需时区换算）。只写 out/dense_log.csv，
+# 不进前向样本、不影响判据；避开 */30 那类整点任务，故落在第 5 分钟。
+LINE_DENSE="5 */4 * * * cd $HERE && ./run_dense.sh >> logs/dense.log 2>&1"
 
 BLOCK="$MARK_BEGIN
-# BTC 波段结构 + 外部 AI 对比  每天两次
-# 排班依据见 README.md（session_vol.py 对 3315 个配对日的实测结论）"
+# BTC 波段结构 + 外部 AI 对比  每天两次（前向样本）
+# 排班依据见 README.md（session_vol.py 对 3315 个配对日的实测结论）
+# 外加每 4h 的密集观测（out/dense_log.csv，不进样本）"
 if [ "$USE_TZ_UTC" -eq 1 ]; then
   BLOCK="$BLOCK
 CRON_TZ=UTC"
@@ -150,6 +154,7 @@ fi
 BLOCK="$BLOCK
 $LINE_ASIA
 $LINE_EUUS
+$LINE_DENSE
 $MARK_END"
 
 # ---------------------------------------------------------------- 读旧表并摘掉本包的段
