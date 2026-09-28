@@ -30,8 +30,13 @@ RESULT = os.path.join(C.OUT_DIR, "watch_latest.json")
 RAW = os.path.join(C.OUT_DIR, "ai_raw_response.txt")
 INDEX = os.path.join(C.OUT_DIR, "ai_index.json")
 
+# 提示词版本。改动 PROMPT_* 任何一个字 = 换了前提条件，必须升版本号并补协议修订；
+# score.py 只统计 prompt_version == 当前版本的样本（前后不混池）。
+PROMPT_VERSION = "v2-20260928"
+
 PROMPT_HEAD = """这是 BTCUSDT 的图：上栏为日线（最近约 14 个月），下栏为 4H（最近约 2 个月）。
-数据截至 {as_of} UTC，最新收盘 {close}。
+数据截至 {as_of} UTC（最后一根已收盘 1h K 线），最新收盘 {close}。
+注意：两栏最右侧那根 K 线（当天日线、当前 4H）尚未走完，不要当作完整 K 线解读。
 """
 
 # 仅当 AI_PROMPT_STATE=1 时拼入。默认不拼：前向观察要测「程序与 AI 是否一致」，
@@ -42,18 +47,23 @@ PROMPT_STATE = """
 · 是否已突破上一枢轴：{breakout}
 """
 
+# 方向定义与打分口径逐字对齐：score.py 以「as_of + h 天那根收盘 > 当前收盘」计为涨。
 PROMPT_BODY = """
-请解读这两张图的关键结构：
-1. 当前处于什么趋势阶段（上升 / 下降 / 区间 / 转换）？依据是什么？
-2. 关键支撑位与阻力位在哪里？
-3. 当前价格所处的位置质量如何（对多头、对空头分别评价）？
-4. 你对未来 7 天、1 个月、3 个月的方向判断是什么？请给出成立条件与作废条件。
-5. 你会给出的操作建议框架。
+请只基于图上的价格结构回答，正文不超过 300 字：
+1. 当前趋势阶段（上升 / 下降 / 区间 / 转换）及依据。
+2. 关键支撑位与阻力位。
+3. 未来 7 天的判断：**以下栏 4H 为主**，上栏日线只用于确认大背景。给出成立条件与作废价位。
+4. 未来 30 天的判断：**以上栏日线为主**。给出成立条件与作废价位。
 
-只基于图上的价格结构回答。
+方向的定义（请严格按此口径，不要用「当前趋势是什么」代替）：
+· 多  = 你认为 N 天后的收盘价高于当前收盘 {close} 的概率 > 55%
+· 空  = 该概率 < 45%
+· 中性 = 该概率在 45%～55% 之间
 
-最后，请在回答的**最后一行**严格按下面格式输出，把 <方向> 替换为 多、空、中性 三者之一（不要加其他文字）：
-DIRECTION_JSON: {{"dir_7d": "<方向>", "dir_30d": "<方向>"}}"""
+最后，请在回答的**最后一行**严格按下面格式输出（不要加其他文字）：
+<方向> 替换为 多、空、中性 三者之一；<概率> 替换为 0～100 的整数，
+表示你认为 7 天后收盘高于 {close} 的概率，且须与 dir_7d 的定义一致。
+DIRECTION_JSON: {{"dir_7d": "<方向>", "dir_30d": "<方向>", "p_up_7d": <概率>}}"""
 
 PROMPT_TMPL = PROMPT_HEAD + PROMPT_STATE + PROMPT_BODY
 
@@ -146,7 +156,8 @@ def read_token():
 def build_prompt():
     """从结构分析结果动态生成提示词。缺结果时退化为通用问法。"""
     if not os.path.exists(RESULT):
-        return ("这是 BTCUSDT 的日线与 4H 图。" + PROMPT_BODY.format())
+        return ("这是 BTCUSDT 的日线与 4H 图。"
+                + PROMPT_BODY.format(close="图上最新收盘价"))
     r = json.load(open(RESULT, encoding="utf-8"))
     p = r.get("position", {})
     tmpl = PROMPT_TMPL if C.AI_PROMPT_STATE else PROMPT_HEAD + PROMPT_BODY
@@ -236,7 +247,7 @@ def main():
     with open(outfile, "w", encoding="utf-8") as fh:
         json.dump({"as_of": datetime.datetime.now(datetime.UTC).isoformat(),
                    "slot": args.slot, "request_id": rid,
-                   "prompt": prompt, "image": os.path.basename(IMG),
+                   "prompt": prompt, "prompt_version": PROMPT_VERSION, "image": os.path.basename(IMG),
                    "elapsed_s": dt, "http_status": status,
                    "parse_mode": how, "response": d},
                   fh, ensure_ascii=False, indent=2)

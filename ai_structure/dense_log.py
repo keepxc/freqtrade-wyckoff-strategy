@@ -32,6 +32,7 @@ LOG = os.path.join(C.OUT_DIR, "dense_log.csv")
 COLS = ["run_key", "slot", "run_at", "as_of", "as_of_ts", "close", "phase", "breakout",
         "data_age_h", "data_fresh", "sw_rc", "chart_rc", "ai_rc", "ai_status",
         "ai_parse_ok", "prog_dir_7", "prog_codes_7", "ai_dir_7", "ai_dir_30",
+        "ai_p_up_7d", "ai_p_consistent", "prompt_version", "finish_reason",
         "model", "provider", "cost", "elapsed_s", "dense_ok"]
 
 
@@ -84,6 +85,8 @@ def main():
                 row["provider"] = a.get("provider", "")
                 row["cost"] = (a.get("usage") or {}).get("cost", "")
                 row["elapsed_s"] = a.get("elapsed_s", "")
+                row["prompt_version"] = a.get("prompt_version", "")
+                row["finish_reason"] = a.get("finish_reason", "")
         except (json.JSONDecodeError, OSError):
             status = "bad_file"
     elif status == "ok":
@@ -94,6 +97,9 @@ def main():
     if parsed:
         row["ai_dir_7"] = parsed.get(C.FWD_PRIMARY_H, "")
         row["ai_dir_30"] = parsed.get(C.FWD_SECONDARY_H, "")
+        p = parsed.get("p_up_7d")
+        row["ai_p_up_7d"] = "" if p is None else p
+        row["ai_p_consistent"] = FL.p_consistent(parsed[C.FWD_PRIMARY_H], p)
     row["dense_ok"] = int(bool(w) and row["data_fresh"] == 1 and status == "ok"
                           and parsed is not None)
 

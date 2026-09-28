@@ -73,7 +73,8 @@ def opener():
 
 
 def call(model, prompt, img_b64, key, op, max_tokens):
-    body = {"model": model, "max_tokens": max_tokens,
+    # temperature=0：密集层要测的是「图变了 AI 才翻」，默认温度下的翻转大半是抽样噪声
+    body = {"model": model, "max_tokens": max_tokens, "temperature": 0,
             "messages": [{"role": "user", "content": [
                 {"type": "text", "text": prompt},
                 {"type": "image_url",
@@ -154,35 +155,42 @@ def main():
         try:
             d = json.loads(text)
             reply = (d["choices"][0]["message"].get("content") or "").strip()
+            finish = d["choices"][0].get("finish_reason")
         except (json.JSONDecodeError, KeyError, IndexError) as e:
             print(f"  [!] 响应结构异常：{e}", file=sys.stderr)
             continue
         used = d.get("usage") or {}
         print(f"  HTTP 200  {dt}s  model={d.get('model')}  provider={d.get('provider')}"
               f"  cost={used.get('cost')}  tokens={used.get('prompt_tokens')}"
-              f"+{used.get('completion_tokens')}")
+              f"+{used.get('completion_tokens')}  finish={finish}")
         if not reply:
             # 推理模型把预算烧在 reasoning 上会走到这里：算失败，换候选
             print("  [!] 回复为空（推理 token 吃光预算？）→ 换下一个候选", file=sys.stderr)
             continue
-        winner = (model, d, reply, dt, status)
+        if finish == "length":
+            # 被 max_tokens 截断：末行 DIRECTION_JSON 大概率丢了。这是调用失败，
+            # 不能落到 forward_log 里记成「AI 没按格式输出」（失败率会算错维度）
+            print("  [!] 回复被截断（finish_reason=length）→ 换下一个候选", file=sys.stderr)
+            continue
+        winner = (model, d, reply, dt, status, finish)
         break
 
     if not winner:
         print("[失败] 所有候选都没拿到有效回复。", file=sys.stderr)
         return 1
 
-    model, d, reply, dt, status = winner
+    model, d, reply, dt, status, finish = winner
     outfile = os.path.join(C.OUT_DIR, f"ai_{today}_{args.slot}.json")
     with open(outfile, "w", encoding="utf-8") as fh:
         json.dump({"as_of": datetime.datetime.now(datetime.UTC).isoformat(),
                    "slot": args.slot, "source": "openrouter",
                    "request_id": f"or_{args.slot}_{today}",
-                   "prompt": prompt, "image": os.path.basename(IMG),
+                   "prompt": prompt, "prompt_version": ask_ai.PROMPT_VERSION, "image": os.path.basename(IMG),
                    "elapsed_s": dt, "http_status": status,
                    "parse_mode": "openrouter",
                    "model": d.get("model"), "provider": d.get("provider"),
-                   "usage": d.get("usage"),
+                   "usage": d.get("usage"), "finish_reason": finish,
+                   "temperature": 0,
                    "response": {"reply": reply, "model": d.get("model"),
                                 "provider": d.get("provider"), "success": True}},
                   fh, ensure_ascii=False, indent=2)

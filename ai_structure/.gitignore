@@ -9,3 +9,4 @@ __pycache__/
 out/
 logs/
 data/*.csv
+.run.lock

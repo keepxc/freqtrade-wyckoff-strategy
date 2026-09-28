@@ -46,13 +46,24 @@ def t_closed():
 def t_parse():
     print("\nAI 方向解析")
     ok = '分析……\nDIRECTION_JSON: {"dir_7d": "多", "dir_30d": "中性"}'
-    check("标准格式", F.parse_ai_dirs(ok) == {7: "多", 30: "中性"})
+    r = F.parse_ai_dirs(ok)
+    check("标准格式（无概率，v1 兼容）", r[7] == "多" and r[30] == "中性"
+          and r["p_up_7d"] is None)
+    v2 = 'DIRECTION_JSON: {"dir_7d": "多", "dir_30d": "空", "p_up_7d": 62}'
+    r = F.parse_ai_dirs(v2)
+    check("v2 格式带概率", r[7] == "多" and r[30] == "空" and r["p_up_7d"] == 62)
+    r = F.parse_ai_dirs('DIRECTION_JSON: {"dir_7d": "多", "dir_30d": "空", "p_up_7d": 150}')
+    check("概率越界 → 置空，方向仍有效", r is not None and r["p_up_7d"] is None)
+    check("概率与方向自洽判定",
+          (F.p_consistent("多", 62), F.p_consistent("多", 50),
+           F.p_consistent("中性", 55), F.p_consistent("空", 44),
+           F.p_consistent("多", None)) == (1, 0, 1, 1, ""))
     check("全角冒号 + 中文引号",
           F.parse_ai_dirs('DIRECTION_JSON：{“dir_7d”: “空”, “dir_30d”: “空”}')
-          == {7: "空", 30: "空"})
+          == {7: "空", 30: "空", "p_up_7d": None})
     two = ('示例 DIRECTION_JSON: {"dir_7d": "多", "dir_30d": "多"}\n'
            '最终 DIRECTION_JSON: {"dir_7d": "空", "dir_30d": "中性"}')
-    check("多处出现取最后一个", F.parse_ai_dirs(two) == {7: "空", 30: "中性"})
+    check("多处出现取最后一个", F.parse_ai_dirs(two) == {7: "空", 30: "中性", "p_up_7d": None})
     check("缺失 → None", F.parse_ai_dirs("我认为偏多") is None)
     check("非法值（看多）→ None",
           F.parse_ai_dirs('DIRECTION_JSON: {"dir_7d": "看多", "dir_30d": "多"}') is None)
@@ -178,7 +189,28 @@ def t_score():
           f"{e1},{e2},{e3}")
 
 
+def t_prompt():
+    print("\n提示词 v2")
+    import ask_ai
+    import json, os, tempfile
+    d = tempfile.mkdtemp()
+    json.dump({"as_of": "2026-09-28 05:00", "last_close": 84398.86,
+               "position": {"phase": "up"}}, open(os.path.join(d, "w.json"), "w"))
+    ask_ai.RESULT = os.path.join(d, "w.json")
+    p = ask_ai.build_prompt()
+    check("不含程序状态", "当前客观状态" not in p)
+    check("含 as_of（forward_log 靠它判 stale）", "2026-09-28 05:00" in p)
+    check("方向定义带当前收盘价", "高于当前收盘 84,399 的概率 > 55%" in p)
+    check("7 天看 4H、30 天看日线", "以下栏 4H 为主" in p and "以上栏日线为主" in p)
+    check("末行为 v2 JSON 格式", p.strip().splitlines()[-1].startswith(
+        'DIRECTION_JSON: {"dir_7d": "<方向>", "dir_30d": "<方向>", "p_up_7d": <概率>}'))
+    check("已删除操作建议与 3 个月", "操作建议" not in p and "3 个月" not in p)
+    ask_ai.RESULT = os.path.join(d, "none.json")
+    check("缺结果时回退提示词不报错", "DIRECTION_JSON" in ask_ai.build_prompt())
+
+
 def main():
+    t_prompt()
     t_closed()
     t_parse()
     t_prog()

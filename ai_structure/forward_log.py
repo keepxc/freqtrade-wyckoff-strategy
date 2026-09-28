@@ -48,6 +48,7 @@ COLS = ["run_key", "slot", "run_at", "as_of", "as_of_ts", "close",
         f"prog_dir_{C.FWD_PRIMARY_H}", f"prog_dir_{C.FWD_SECONDARY_H}",
         f"prog_codes_{C.FWD_PRIMARY_H}", f"prog_codes_{C.FWD_SECONDARY_H}",
         f"ai_dir_{C.FWD_PRIMARY_H}", f"ai_dir_{C.FWD_SECONDARY_H}",
+        "ai_p_up_7d", "ai_p_consistent", "prompt_version",
         "pipeline_ok"]
 
 
@@ -108,7 +109,22 @@ def parse_ai_dirs(reply):
         if v not in DIRS:
             return None
         out[h] = v
+    # p_up_7d 是辅助字段（v2 起）：缺失/非法只置空，不影响方向解析——
+    # 解析成功率是冻结的检查点判据，只按方向字段算
+    p = d.get("p_up_7d")
+    if isinstance(p, str) and p.strip().isdigit():
+        p = int(p.strip())
+    out["p_up_7d"] = (int(p) if isinstance(p, (int, float)) and not isinstance(p, bool)
+                      and 0 <= p <= 100 else None)
     return out
+
+
+def p_consistent(d7, p):
+    """p_up_7d 与 dir_7d 是否符合提示词里的定义（>55 多 / <45 空 / 45~55 中性）。"""
+    if p is None:
+        return ""
+    want = "多" if p > 55 else ("空" if p < 45 else "中性")
+    return int(want == d7)
 
 
 def main():
@@ -169,14 +185,23 @@ def main():
                 status = "stale_ai"
             else:
                 parsed = parse_ai_dirs((a.get("response") or {}).get("reply"))
+                row["prompt_version"] = a.get("prompt_version", "")
         except (json.JSONDecodeError, OSError):
             status = "bad_file"
     elif status == "ok":
         status = "no_file"
+    if not row["prompt_version"]:
+        # AI 没产出文件的轮次也要带版本号，否则管线失败会从 v2 的分母里消失
+        import ask_ai
+        row["prompt_version"] = ask_ai.PROMPT_VERSION
     row["ai_status"] = status
     row["ai_parse_ok"] = int(parsed is not None)
     for h in (C.FWD_PRIMARY_H, C.FWD_SECONDARY_H):
         row[f"ai_dir_{h}"] = parsed[h] if parsed else ""
+    if parsed:
+        p = parsed.get("p_up_7d")
+        row["ai_p_up_7d"] = "" if p is None else p
+        row["ai_p_consistent"] = p_consistent(parsed[C.FWD_PRIMARY_H], p)
 
     row["pipeline_ok"] = int(bool(w) and row["data_fresh"] == 1
                              and args.sw_rc == 0 and args.chart_rc == 0

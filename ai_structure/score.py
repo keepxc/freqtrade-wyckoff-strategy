@@ -23,6 +23,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import swing_watch as S     # noqa: E402  复用 wilson，保证与主报告同一口径
+import ask_ai               # noqa: E402  PROMPT_VERSION
 
 LOG = os.path.join(C.OUT_DIR, "forward_log.csv")
 OUT = os.path.join(C.OUT_DIR, "forward_score.md")
@@ -137,7 +138,11 @@ def main():
            else datetime.datetime.now(datetime.UTC))
     now_ms = int(now.timestamp() * 1000)
 
-    rows = load_log()
+    all_rows = load_log()
+    # 只统计当前提示词版本的样本：提示词变更 = 前提条件变化，前后不混池
+    # （PROTOCOL_AMENDMENT_20260928_v2.md）。检查点窗口也从首条当前版本记录起算。
+    rows = [r for r in all_rows if r.get("prompt_version") == ask_ai.PROMPT_VERSION]
+    excluded = len(all_rows) - len(rows)
     df = pd.read_csv(C.CSV)
     ts = df["ts"].to_numpy(np.int64)
     close = df["close"].to_numpy(float)
@@ -150,7 +155,8 @@ def main():
          "> 判据见 FORWARD_PROTOCOL.md（2026-09-27 冻结）。本报告只陈述数字，"
          "不构成交易建议。",
          "",
-         f"记录行数 {len(rows)}（仅 asia / euus 槽位）", ""]
+         f"提示词版本 {ask_ai.PROMPT_VERSION}：记录 {len(rows)} 行（仅 asia / euus 槽位）；"
+         f"旧版本样本 {excluded} 行已排除、不计入 n", ""]
 
     # ---- ① 管线检查点
     cp = checkpoint(rows, now)
@@ -219,6 +225,25 @@ def main():
                      f"基准 {C.FWD_BASE_RATE:.0%}，命中率与「永远做多」不可区分。")
             L += ["", v]
         L.append("")
+
+    # ---- ④ AI 概率校准（辅助，不是判据）
+    L += ["## ④ AI 概率 p_up_7d 校准（辅助记录，不参与任何判据）", ""]
+    pr = [r for r in rows if r.get("ai_p_up_7d") not in (None, "")
+          and r.get(f"actual_{H1}") and r.get("pipeline_ok") == "1"]
+    pr = nonoverlap(pr, H1)
+    if pr:
+        y = np.array([1.0 if r[f"actual_{H1}"] == "多" else 0.0 for r in pr])
+        p = np.array([float(r["ai_p_up_7d"]) / 100 for r in pr])
+        bs = float(np.mean((p - y) ** 2))
+        bs0 = float(np.mean((C.FWD_BASE_RATE - y) ** 2))
+        cons = [r for r in rows if r.get("ai_p_consistent") in ("0", "1")]
+        L += [f"- 已兑现的独立窗口 {len(pr)} 个；AI Brier {bs:.3f} vs 恒报 "
+              f"{C.FWD_BASE_RATE:.0%} 的 Brier {bs0:.3f}（越低越好）",
+              f"- 概率与方向自洽率 {sum(r['ai_p_consistent'] == '1' for r in cons)}"
+              f"/{len(cons)}"]
+    else:
+        L += ["- 尚无已兑现的带概率窗口"]
+    L.append("")
 
     L += ["---",
           f"判据常量（config.py，冻结）：主期限 {H1}d / 副期限 {H2}d / 基准 "

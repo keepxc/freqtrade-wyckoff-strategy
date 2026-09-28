@@ -147,7 +147,11 @@ def panel(d, bars, top, bot, label, sub, xlab_font, t_font):
     last_key, last_right = None, -1e9
     for i, b in enumerate(bars):
         dt = datetime.datetime.fromtimestamp(b[0] / 1000, datetime.UTC)
-        if n > 200:
+        if label == "4H":
+            # 4H 栏按周打点（ISO 周），AI 读 7 天方向以本栏为主，需要能数清最近几天
+            iso = dt.isocalendar()
+            key, lab = f"{iso[0]}-W{iso[1]}", dt.strftime("%m/%d")
+        elif n > 200:
             key, lab = dt.strftime("%Y-%m"), dt.strftime("%y/%m")
         else:
             key, lab = dt.strftime("%Y-%m-%d"), dt.strftime("%m/%d")

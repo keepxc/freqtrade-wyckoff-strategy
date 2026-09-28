@@ -137,11 +137,14 @@ E_H="${CRON_EUUS%%:*}"; E_M="${CRON_EUUS##*:}"
 A_MIN="$A_M"; [ "$A_MIN" = "00" ] && A_MIN="0"
 E_MIN="$E_M"; [ "$E_MIN" = "00" ] && E_MIN="0"
 
-LINE_ASIA="$A_MIN $A_H * * * cd $HERE && ./run_session.sh asia >> logs/cron.log 2>&1"
-LINE_EUUS="$E_MIN $E_H * * * cd $HERE && ./run_session.sh euus >> logs/cron.log 2>&1"
+# flock：样本层与密集层共用 data/ 与 out/chart_dual.png、watch_latest.json，
+# 同时跑会互相覆盖。-w 900 = 最多排队 15 分钟再跑，不丢轮次（单轮约 2~3 分钟）。
+LOCK="flock -w 900 $HERE/.run.lock"
+LINE_ASIA="$A_MIN $A_H * * * cd $HERE && $LOCK ./run_session.sh asia >> logs/cron.log 2>&1"
+LINE_EUUS="$E_MIN $E_H * * * cd $HERE && $LOCK ./run_session.sh euus >> logs/cron.log 2>&1"
 # 密集观测：每 4 小时一次（本地时刻，无需时区换算）。只写 out/dense_log.csv，
 # 不进前向样本、不影响判据；避开 */30 那类整点任务，故落在第 5 分钟。
-LINE_DENSE="5 */4 * * * cd $HERE && ./run_dense.sh >> logs/dense.log 2>&1"
+LINE_DENSE="5 */4 * * * cd $HERE && $LOCK ./run_dense.sh >> logs/dense.log 2>&1"
 
 BLOCK="$MARK_BEGIN
 # BTC 波段结构 + 外部 AI 对比  每天两次（前向样本）

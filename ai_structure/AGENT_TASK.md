@@ -139,3 +139,18 @@ sed -n '/① 管线检查点/,/② /p' out/forward_score.md
 
 把 `out/forward_score.md` 全文交给用户。**只报告数字，不给「可以上实盘」之类的结论**——
 按协议，两周检查点只决定是否继续观察；实盘门槛是 n≥30 个独立 7 天窗口，最快约 30 周。
+
+## 10. 2026-09-28 提示词 v2 更新后的部署动作
+
+详见 `PROTOCOL_AMENDMENT_20260928_v2.md`。
+
+```bash
+git pull origin main
+./install_cron.sh --dry-run     # 确认三行都带 flock -w 900 …/.run.lock
+./install_cron.sh
+.venv/bin/python selftest_forward.py   # 期望「全部通过」（含提示词 v2 检查）
+.venv/bin/python ask_ai.py --slot manual --dry-run | tail -5   # 末行应含 "p_up_7d"
+```
+
+下一个排班槽位跑完后验收：`out/forward_log.csv` 新行 `prompt_version=v2-20260928`；
+`out/forward_score.md` 首部显示「旧版本样本 1 行已排除」。**不要手动删除 v1 旧行。**
