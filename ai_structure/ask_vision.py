@@ -42,8 +42,16 @@ IMG = os.path.join(C.OUT_DIR, "chart_dual.png")
 API = "https://openrouter.ai/api/v1/chat/completions"
 
 # 已实测：这两个免费候选真能读图（随机图逐字读对），且 cost=0
-DEFAULT_MODELS = ("nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-                  "dots-studio/dots-3-note-preview:free")
+#
+# 顺序依据 2026-09-28 全天实测（v2 提示词 + temperature=0）：
+#   nemotron 从 14:00Z 起变成「间歇性故障」——连续 5 次响应结构异常
+#   （其中一次是响应体在 ~1100 字节处被切断：Expecting value: line 201 char 1100），
+#   但 14:31Z 又成功过一次 160s，所以是退化而非死亡 → 降级为备胎；
+#   dots-3 同期 4 次调用 3 次合规（52~62s，另 1 次撞 max_tokens 截断），
+#   且同一张图两次交付结果完全一致（多/多 p=60）→ 提到首位。
+# 每次调用的 model/provider 都逐行落盘，候选顺序变化可追溯，不是黑箱。
+DEFAULT_MODELS = ("dots-studio/dots-3-note-preview:free",
+                  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
 
 
 def _models():
@@ -211,7 +219,10 @@ def main():
 
     img_b64 = base64.b64encode(open(IMG, "rb").read()).decode()
     op = opener()
-    max_tokens = int(os.environ.get("VISION_MAX_TOKENS", "4000"))
+    # 4000 会把 dots-3 的推理 token 卡死（实测 3 次里 1 次 completion 正好撞 4000
+    # → finish_reason=length → 判失败）。它的成功调用 completion 是 3516/3624/3507，
+    # 紧贴上限，所以给 6000 留余量；免费档 cost=0，加大不花钱。
+    max_tokens = int(os.environ.get("VISION_MAX_TOKENS", "6000"))
     # VISION_TRIES=2：首轮 + 至多 1 次重试（用户 2026-09-28 指令「失败就再识别一次」）
     tries = max(1, int(os.environ.get("VISION_TRIES", "2")))
     winner, attempts = run_rounds(_models(), tries, prompt, img_b64, key, op, max_tokens)
