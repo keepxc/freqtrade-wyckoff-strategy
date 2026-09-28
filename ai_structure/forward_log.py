@@ -49,7 +49,7 @@ COLS = ["run_key", "slot", "run_at", "as_of", "as_of_ts", "close",
         f"prog_codes_{C.FWD_PRIMARY_H}", f"prog_codes_{C.FWD_SECONDARY_H}",
         f"ai_dir_{C.FWD_PRIMARY_H}", f"ai_dir_{C.FWD_SECONDARY_H}",
         "ai_p_up_7d", "ai_p_consistent", "prompt_version",
-        "ai_first_parse_ok", "ai_attempts",
+        "ai_first_parse_ok", "ai_attempts", "ai_first_fail", "ai_first_resp_ok",
         "pipeline_ok"]
 
 
@@ -191,6 +191,10 @@ def main():
                 # 首轮合规率单独留痕，供报告区分「一次就对」和「靠重试才对」
                 row["ai_first_parse_ok"] = a.get("first_parse_ok", "")
                 row["ai_attempts"] = a.get("attempt_count", "")
+                # 首轮失败要分清是上游故障（http/struct）还是模型不守格式；
+                # 首轮合规率判「模型选型」时用 ai_first_resp_ok，不用 ai_first_parse_ok
+                row["ai_first_fail"] = a.get("first_fail", "")
+                row["ai_first_resp_ok"] = a.get("first_resp_ok", "")
         except (json.JSONDecodeError, OSError):
             status = "bad_file"
     elif status == "ok":

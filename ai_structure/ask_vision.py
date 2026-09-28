@@ -39,6 +39,11 @@ RESULT = os.path.join(C.OUT_DIR, "watch_latest.json")
 INDEX = os.path.join(C.OUT_DIR, "ai_index.json")
 RAW = os.path.join(C.OUT_DIR, "ai_raw_response.txt")
 IMG = os.path.join(C.OUT_DIR, "chart_dual.png")
+# 逐次调用明细（成功/失败都记，追加）。全部失败时 ai_*.json 不会生成，这里是唯一留痕；
+# 也是「每个候选累计 30 次调用后回看候选顺序」的数据源
+ATTEMPT_LOG = os.path.join(C.OUT_DIR, "ai_attempts.jsonl")
+# 模型根本没给出回答（基础设施侧）——不能算进「模型守不守格式」
+INFRA_NOTES = ("http", "struct")
 API = "https://openrouter.ai/api/v1/chat/completions"
 
 # 已实测：这两个免费候选真能读图（随机图逐字读对），且 cost=0
@@ -162,7 +167,8 @@ def run_rounds(models, tries, prompt, img_b64, key, op, max_tokens, call_fn=None
             kind, payload = try_once(model, prompt, img_b64, key, op, max_tokens, call_fn)
             if kind == "ok":
                 m, d, reply, dt, status, finish = payload
-                attempts.append({"round": rnd, "model": m, "parse_ok": 1,
+                attempts.append({"round": rnd, "model": m, "parse_ok": 1, "note": "ok",
+                                 "http_status": status,
                                  "provider": d.get("provider"), "finish_reason": finish,
                                  "elapsed_s": round(dt, 1)})
                 return payload, attempts
@@ -170,6 +176,29 @@ def run_rounds(models, tries, prompt, img_b64, key, op, max_tokens, call_fn=None
             attempts.append({"round": rnd, "model": model, "parse_ok": 0, "note": note,
                              "http_status": status, "elapsed_s": round(dt, 1)})
     return None, attempts
+
+
+def summarize(attempts):
+    """把 attempts 拆成两个口径，避免把上游故障记成「模型不守格式」。
+
+    first_fail     ：首次尝试的失败类型（http/struct/empty/trunc/format），首次成功为 ""
+    first_resp_ok  ：首个「模型真的回答了」（非 http/struct）的尝试是否合规；
+                     全程没拿到过模型回答时为 ""（不可判定，不计入格式合规率分母）
+    """
+    first_fail = "" if not attempts or attempts[0]["parse_ok"] else attempts[0].get("note", "")
+    first_resp_ok = next((a["parse_ok"] for a in attempts
+                          if a["parse_ok"] or a.get("note") not in INFRA_NOTES), "")
+    return first_fail, first_resp_ok
+
+
+def log_attempts(run_key, slot, attempts, path=None):
+    path = path or ATTEMPT_LOG
+    at = datetime.datetime.now(datetime.UTC).isoformat()
+    with open(path, "a", encoding="utf-8") as fh:
+        for a in attempts:
+            fh.write(json.dumps({"run_key": run_key, "slot": slot, "at": at,
+                                 "prompt_version": ask_ai.PROMPT_VERSION, **a},
+                                ensure_ascii=False) + "\n")
 
 
 def main():
@@ -226,6 +255,8 @@ def main():
     # VISION_TRIES=2：首轮 + 至多 1 次重试（用户 2026-09-28 指令「失败就再识别一次」）
     tries = max(1, int(os.environ.get("VISION_TRIES", "2")))
     winner, attempts = run_rounds(_models(), tries, prompt, img_b64, key, op, max_tokens)
+    log_attempts(key_id, args.slot, attempts)
+    first_fail, first_resp_ok = summarize(attempts)
     if not winner:
         print(f"[失败] {len(attempts)} 次尝试都没有合规回复（上限 {tries} 轮）。",
               file=sys.stderr)
@@ -245,6 +276,8 @@ def main():
                    "temperature": 0,
                    "attempt_count": len(attempts),
                    "first_parse_ok": attempts[0]["parse_ok"] if attempts else 0,
+                   "first_fail": first_fail,
+                   "first_resp_ok": first_resp_ok,
                    "attempts": attempts,
                    "response": {"reply": reply, "model": d.get("model"),
                                 "provider": d.get("provider"), "success": True}},

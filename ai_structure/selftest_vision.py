@@ -57,6 +57,9 @@ def run(script, tries=2, models=("A", "B")):
 def main():
     # 隔离副作用：别覆盖真实 ai_raw_response.txt
     V.RAW = os.path.join(tempfile.mkdtemp(), "raw.txt")
+    # run_rounds 会打印图大小：给个假图，不依赖 out/ 下有真实产物
+    V.IMG = os.path.join(tempfile.mkdtemp(), "chart.png")
+    open(V.IMG, "wb").write(b"x")
 
     print("失败再识别一次（run_rounds）")
 
@@ -104,6 +107,44 @@ def main():
     import forward_log as FL
     check("合规 v2 末行可解析", FL.parse_ai_dirs(GOOD) is not None)
     check("无 JSON 的回复判为不合规", FL.parse_ai_dirs(BAD_FMT) is None)
+
+    print("\n首轮口径拆分（summarize）")
+
+    # 8) 上游故障不算模型不守格式：struct → 候选2 合规
+    win, att, log = run([(200, BAD_STRUCT), ok200(GOOD)])
+    ff, fr = V.summarize(att)
+    check("首轮失败类型记为 struct", ff == "struct", ff)
+    check("上游故障后模型首答合规 → first_resp_ok=1", fr == 1, repr(fr))
+
+    # 9) http 之后模型首答就违规 → first_resp_ok=0
+    win, att, log = run([(429, "rl"), ok200(BAD_FMT), ok200(GOOD)])
+    ff, fr = V.summarize(att)
+    check("http 后首个真实回答违规 → first_resp_ok=0", ff == "http" and fr == 0,
+          f"{ff} {fr!r}")
+
+    # 10) 首次成功 → first_fail 为空
+    win, att, log = run([ok200(GOOD)])
+    check("首次成功 → first_fail 空、first_resp_ok=1", V.summarize(att) == ("", 1))
+
+    # 11) 全程只有上游故障 → 不可判定，不进格式合规率分母
+    win, att, log = run([(503, "x")])
+    check("全程上游故障 → first_resp_ok 不可判定", V.summarize(att) == ("http", ""))
+
+    print("\n逐次明细落盘（log_attempts）")
+
+    # 12) 全部失败时明细也要落盘（ai_*.json 不会生成，这是唯一留痕）
+    p = os.path.join(tempfile.mkdtemp(), "att.jsonl")
+    win, att, log = run([ok200(BAD_FMT)], tries=2)
+    V.log_attempts("20260928_x", "x", att, path=p)
+    rows = [json.loads(line) for line in open(p, encoding="utf-8")]
+    check("全部失败也写满 4 行明细", win is None and len(rows) == 4, f"实际 {len(rows)}")
+    check("明细含模型/失败类型/run_key",
+          all(r["model"] in ("A", "B") and r["note"] == "format"
+              and r["run_key"] == "20260928_x" for r in rows))
+    win, att, log = run([ok200(GOOD)])
+    V.log_attempts("20260928_y", "y", att, path=p)
+    rows = [json.loads(line) for line in open(p, encoding="utf-8")]
+    check("追加写不覆盖", len(rows) == 5 and rows[-1]["note"] == "ok")
 
     print()
     if FAIL:
