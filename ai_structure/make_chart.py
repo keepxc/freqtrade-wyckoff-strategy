@@ -113,7 +113,8 @@ def window(bars, days):
 
 
 # ---------------------------------------------------------------- 绘制
-def panel(d, bars, top, bot, label, sub, xlab_font, t_font):
+def panel(d, bars, top, bot, label, sub, xlab_font, t_font, mask=False):
+    """mask=True（回溯遮蔽版）：不画时间轴标签；价格由调用方预先归一为指数。"""
     n = len(bars)
     if n < 2:
         return
@@ -139,7 +140,9 @@ def panel(d, bars, top, bot, label, sub, xlab_font, t_font):
         if p >= lo:
             y = Y(p)
             d.line([(PL, y), (PR, y)], fill=GRID, width=1)
-            d.text((PR + 10, y - 8), f"{p:,.0f}", font=lat(19), fill=SUB)
+            # 指数化后步长可能 < 1，需要小数；BTC 原价步长恒 ≥ 1，生产图不受影响
+            d.text((PR + 10, y - 8), f"{p:,.0f}" if step >= 1 else f"{p:.1f}",
+                   font=lat(19), fill=SUB)
         p += step
 
     # 时间轴：长窗口按月打点，短窗口按日打点。
@@ -159,7 +162,7 @@ def panel(d, bars, top, bot, label, sub, xlab_font, t_font):
             last_key = key
             x = X(i)
             d.line([(x, top), (x, bot)], fill=(246, 248, 250), width=1)
-            if x > last_right + 14:
+            if not mask and x > last_right + 14:
                 d.text((x + 3, bot + 8), lab, font=lat(16), fill=SUB)
                 last_right = x + 3 + d.textlength(lab, font=lat(16))
 
@@ -193,11 +196,15 @@ def panel(d, bars, top, bot, label, sub, xlab_font, t_font):
     d.rectangle([PL, top, PR, bot], outline=FRAME, width=1)
 
 
-def main():
-    rows = read_bars()
-    if not rows:
-        print(f"[!] 数据为空：{C.CSV}", file=sys.stderr)
-        return 1
+def render(rows, out, mask=False):
+    """rows：已收盘 1h K 线 (ts,o,h,l,c)，按时间升序。
+
+    mask=True 为回溯遮蔽版（RETRO_AI_LEG_PREREG_20261001.md §2）：
+    不画日期表头、时间轴标签与 K 线根数；价格归一为指数（最后收盘 = 100）。
+    """
+    if mask:
+        ref = rows[-1][4] / 100.0
+        rows = [(ts, o / ref, h / ref, l / ref, c / ref) for ts, o, h, l, c in rows]
     daily = window(agg(rows, 24), C.DAILY_DAYS)
     h4 = window(agg(rows, 4), C.H4_DAYS)
 
@@ -207,29 +214,41 @@ def main():
 
     f = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, datetime.UTC)
     d.text((ML, 14), f"{C.SYMBOL}", font=cjk(28), fill=INK)
-    d.text((ML + 190, 20),
-           f"{f(rows[-1][0]):%Y-%m-%d %H:%M} UTC    "
-           f"last {rows[-1][4]:,.0f}    "
-           f"1h bars {len(rows):,}", font=lat(19), fill=SUB)
+    if mask:
+        d.text((ML + 190, 20), "price index (last close = 100)", font=lat(19), fill=SUB)
+    else:
+        d.text((ML + 190, 20),
+               f"{f(rows[-1][0]):%Y-%m-%d %H:%M} UTC    "
+               f"last {rows[-1][4]:,.0f}    "
+               f"1h bars {len(rows):,}", font=lat(19), fill=SUB)
     lx = ML + 700
     d.rectangle([lx, 22, lx + 13, 34], outline=UP, width=2)
     d.text((lx + 20, 19), "Up", font=lat(19), fill=SUB)
     d.rectangle([lx + 74, 22, lx + 87, 34], fill=DN)
     d.text((lx + 94, 19), "Down", font=lat(19), fill=SUB)
 
-    panel(d, daily, P1T, P1B, "1D", f"{len(daily)} bars", lat(16), t_font)
-    panel(d, h4, P2T, P2B, "4H", f"{len(h4)} bars", lat(16), t_font)
+    panel(d, daily, P1T, P1B, "1D", f"{len(daily)} bars", lat(16), t_font, mask)
+    panel(d, h4, P2T, P2B, "4H", f"{len(h4)} bars", lat(16), t_font, mask)
 
     d.text((ML, H - 34),
            "Upper: daily candles. Lower: 4-hour candles. "
            "No annotations - read the price structure directly.",
            font=lat(18), fill=SUB)
 
-    os.makedirs(C.OUT_DIR, exist_ok=True)
-    img.save(OUT, optimize=True)
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    img.save(out, optimize=True)
+    return len(daily), len(h4)
+
+
+def main():
+    rows = read_bars()
+    if not rows:
+        print(f"[!] 数据为空：{C.CSV}", file=sys.stderr)
+        return 1
+    nd, nh = render(rows, OUT)
     sz = os.path.getsize(OUT)
     print(f"已写 {OUT}  {W}x{H}  {sz:,} 字节")
-    print(f"  日线 {len(daily)} 根 / 4H {len(h4)} 根 / 1h {len(rows):,} 根")
+    print(f"  日线 {nd} 根 / 4H {nh} 根 / 1h {len(rows):,} 根")
     return 0
 
 
