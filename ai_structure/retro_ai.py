@@ -161,6 +161,7 @@ def main():
     max_tokens = int(os.environ.get("VISION_MAX_TOKENS", "6000"))
     tries = max(1, int(os.environ.get("VISION_TRIES", "2")))
     V.RAW = os.path.join(RETRO_DIR, "raw_response.txt")
+    net_streak = 0
 
     for n, (T, k) in enumerate(todo, 1):
         tstr = _tstr(T)
@@ -210,6 +211,14 @@ def main():
             print("[停止] 整点全是 HTTP 429，免费额度大概率已用完。明天再跑，会从断点继续。",
                   file=sys.stderr)
             return 3
+        # 整点全是网络层失败（没拿到任何 HTTP 状态：代理断/SSL EOF/超时）——与模型无关。
+        # 连续 3 点即停，避免把剩余点一路刷成 fail（2026-10-02 代理节点抖动时出现过）
+        net_down = bool(not winner and attempts
+                        and all(a.get("http_status") is None for a in attempts))
+        net_streak = net_streak + 1 if net_down else 0
+        if net_streak >= 3:
+            print("[停止] 连续 3 个点全是网络层失败，检查代理后重跑，会从断点继续。", file=sys.stderr)
+            return 4
         time.sleep(args.sleep)
 
     if not args.dry_run:
