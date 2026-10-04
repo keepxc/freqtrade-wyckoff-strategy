@@ -59,9 +59,11 @@ TARGETS = [
     # zombie 检查是 V3 专有产物（僵尸行过滤），随 V3 一起退役，不再监控（列了就是永久告警）。
     ("score_ai500",      "user_data/ai500_local/score_*.csv",           "常驻 每5min",   2),
     ("netflow_ai500",    "user_data/ai500_local/netflow_multiwin_*.csv","常驻 每60s",    2),
-    ("b300_snapshots",   "user_data/collect/b300_snapshots.jsonl",    "cron 每4h",      7),
-    ("b300_signals",     "user_data/collect/b300_signals.jsonl",      "cron 每4h",      7),
-    ("b300_breakout",    "user_data/collect/b300_breakout.jsonl",     "cron 每日00:20", 30),
+    # 2026-10-04：B3.0 观察期结束 ⇒ b300 采集停止（crontab 两条已注释）。
+    # 按本文件约定，停采数据不列入监控（列了就是永久告警）。恢复采集时再加回：
+    # ("b300_snapshots", "user_data/collect/b300_snapshots.jsonl", "cron 每4h", 7),
+    # ("b300_signals",   "user_data/collect/b300_signals.jsonl",   "cron 每4h", 7),
+    # ("b300_breakout",  "user_data/collect/b300_breakout.jsonl",  "cron 每日00:20", 30),
     ("oi_hist",          "user_data/ai500_oi_hist/oi_*.csv.gz",       "cron 每6h",      10),
 ]
 
