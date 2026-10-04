@@ -1,5 +1,11 @@
 # 黄金规则 (Golden Rules)
 
+> ⚠️ **归档（2026-10-04）**：本文件属**威科夫时代**，不再作为现行规则。
+> - G001（`WY_DW_EFF_THRESHOLD`）、G005（V7.1 baseline）只对**已终止的 WyckoffV7** 有意义
+> - G002（P5 只用 dry_run 数据）、G003（禁硬编码 `/freqtrade/` 路径）、G004（AI 不改生产逻辑）仍通用
+>
+> 现行方法论见 `CLAUDE.md`；当前在跑的系统见 `~/.hermes/scripts/README.md`。
+
 > 不可违反的机械规则。每条关联一个 lint 脚本强制检查。
 
 ## G001: down_wave 参数不可变

@@ -1,5 +1,11 @@
 # Freqtrade / P5 架构
 
+> ⚠️ **归档（2026-10-04）**：本文描述的 `WyckoffV7 → P5 → AI` 架构**已不反映现状**——
+> 全部 freqtrade bot 已停，本仓库不再承载在跑系统。保留供追溯。
+>
+> **当前在跑的系统**（币安跟单 / ETF 定投 / 币安美股手动）见 `~/.hermes/scripts/README.md`。
+> 判断"策略是否在跑"须查 trades DB 的 `MAX(open_date)`，不能凭文件存在下结论。
+
 > 一句话：Wyckoff 策略信号层作为 Freqtrade 执行引擎的上游，P5 作为数据底座做诊断和复盘。
 
 ```

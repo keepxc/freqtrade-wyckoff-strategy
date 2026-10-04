@@ -190,3 +190,10 @@ user_data/oi_hist_coverage.csv
 # AI500 宇宙产物（每 15 分钟由 ai500-universe-export.timer 重写，属生成物）
 user_data/ai500_universe.json
 user_data/ai500_universe_manifest.json
+
+# 导出包 / 交付快照（二进制，体积大，不入库）
+ai500_v3_export_*.tar.gz
+ai500_v3_export_*.manifest.txt
+
+# 分析产物（可重建）
+shadow_profile_out/
