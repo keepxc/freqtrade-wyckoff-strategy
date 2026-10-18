@@ -48,6 +48,9 @@ pgrep -af 'market_state_engine|ai500_local_collector|freqtrade/scripts'         
   「源停了、守卫还在响」的永久噪声（本文件开头那批 service 停掉了，这一层是同类遗漏）。
 - 数据本身没动：`user_data/ai500_local/`（score 到 10-17 完整 + 10-18 半天，netflow_multiwin ≈ 511MB）
   与 `user_data/ai500_oi_hist/` 全部保留 —— 只剩**离线**消费（`research/ai500_h1/scripts/*` 用历史数据）。
+- **2026-10-18 用户决定：不续采**（采集端保持 stop+disable）。理由：无活体消费者；数据作为**研究资产**留存，
+  后续要复盘 AI500 方向（V3 是终止、非证伪）用这份已冻结样本即可，需要的是「当时那段」，不是持续录像。
+  用法见 skill `ai500-shadow-analysis` 的「冻结数据集」一节。
 
 ## 如何解除归档
 
