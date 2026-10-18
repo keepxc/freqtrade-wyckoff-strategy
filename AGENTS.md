@@ -4,6 +4,12 @@
 > DonchianV1 09-22、AI500 dryrun 08-23、AI500 live 09-01、V3 09-25、BStocks 09-08、V8 07-09
 > 之后均无新开仓。
 >
+> **2026-10-18 深层归档**（用户决定）：最后两个还在跑的服务也停了
+> （`freqtrade-mse.service` / `ai500-local-collector.service` → stop + disable），
+> 系统 crontab 最后 4 条活接线（数据下载 / fake_breakdown / oi_data_trigger / ai500_oi_archiver
+> + oi_hist_guard）按本机惯例注释归档。**现在没有任何 freqtrade 进程或调度在跑。**
+> 细节与「如何解除归档」见 `ARCHIVED.md`。
+>
 > **当前在跑的系统不在这里** → 见 `~/.hermes/scripts/README.md`
 > （币安跟单 / ETF 定投 / 币安美股手动）。
 
