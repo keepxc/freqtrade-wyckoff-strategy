@@ -51,20 +51,18 @@ REALERT_H = 12
 # ⚠️ 只列**应当在采**的。已停采的（agg_trades / netflow_oi / btc_mtf /
 #    macd_m8 / netflow_compact）**故意不列**——列了就会永久告警，
 #    而"永远在响的告警"等于没有告警。将来恢复采集时再加回来。
+#
+# 2026-10-18：freqtrade 全链归档（见 ~/freqtrade/ARCHIVED.md）。最后三条也停了：
+#   · score_ai500 / netflow_ai500 —— 由常驻 ai500-local-collector.service 写出，该服务已
+#     stop+disable（V3 策略 9/25 终止后采集器只是"继续攒数据"，消费端已全部停：V3 策略、
+#     shadow 复盘；剩下的只有离线 research 脚本，用历史数据即可）。
+#     ⇒ 停服后本守护每小时报「断采」，是预期噪声，按本文件规矩把两条移出监控。
+#   · oi_hist —— ai500_oi_archiver 的 crontab 行同日归档，10h 阈值到点必然报警，同样移出。
+#   恢复任一条：把对应行加回 TARGETS，并按 ARCHIVED.md 恢复采集端（服务/crontab）。
+#   目前 TARGETS 为空 = 守护无监控对象，配套的 hourly cron（Hermes job watchdog-cron）已 pause；
+#   恢复采集时先加回目标、再 resume 那个 job。
 # ---------------------------------------------------------------------------
 TARGETS = [
-    # key                路径(glob)                                    节奏      阈值h
-    # 2026-09-25：V3 主动终止 ⇒ score/zombie/netflow 由 V3 策略循环写出改为本机常驻采集器
-    # （ai500-local-collector.service）写出，路径随之改到 user_data/ai500_local/。
-    # zombie 检查是 V3 专有产物（僵尸行过滤），随 V3 一起退役，不再监控（列了就是永久告警）。
-    ("score_ai500",      "user_data/ai500_local/score_*.csv",           "常驻 每5min",   2),
-    ("netflow_ai500",    "user_data/ai500_local/netflow_multiwin_*.csv","常驻 每60s",    2),
-    # 2026-10-04：B3.0 观察期结束 ⇒ b300 采集停止（crontab 两条已注释）。
-    # 按本文件约定，停采数据不列入监控（列了就是永久告警）。恢复采集时再加回：
-    # ("b300_snapshots", "user_data/collect/b300_snapshots.jsonl", "cron 每4h", 7),
-    # ("b300_signals",   "user_data/collect/b300_signals.jsonl",   "cron 每4h", 7),
-    # ("b300_breakout",  "user_data/collect/b300_breakout.jsonl",  "cron 每日00:20", 30),
-    ("oi_hist",          "user_data/ai500_oi_hist/oi_*.csv.gz",       "cron 每6h",      10),
 ]
 
 COLLECT_DIR = os.path.join(REPO, "user_data", "collect")
